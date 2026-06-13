@@ -63,10 +63,6 @@ internal sealed class SettingsService
                 foreach (string path in paths)
                 {
                     string fullPath = Path.Combine(path, command);
-                    if (File.Exists(fullPath))
-                    {
-                        return Path.GetFullPath(fullPath);
-                    }
 
                     foreach (string ext in extensions)
                     {
@@ -75,6 +71,11 @@ internal sealed class SettingsService
                         {
                             return Path.GetFullPath(extPath);
                         }
+                    }
+
+                    if (File.Exists(fullPath))
+                    {
+                        return Path.GetFullPath(fullPath);
                     }
                 }
             }

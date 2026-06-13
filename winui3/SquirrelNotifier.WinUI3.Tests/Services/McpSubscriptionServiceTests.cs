@@ -605,6 +605,9 @@ public class McpSubscriptionServiceTests : IDisposable
         var scriptContent = $"@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\necho {resultJson}\r\nping 127.0.0.1 -n 10 > nul\r\nexit /b 0\r\n";
         await File.WriteAllTextAsync(cmdPath, scriptContent, Encoding.ASCII);
 
+        var shimPath = Path.Combine(testDir, "mcp-resource-subscriber");
+        await File.WriteAllTextAsync(shimPath, "@echo off\r\necho ERROR: Extensionless shim executed!\r\nexit /b 1\r\n", Encoding.ASCII);
+
         var oldPath = Environment.GetEnvironmentVariable("PATH");
         Environment.SetEnvironmentVariable("PATH", $"{testDir};{oldPath}");
 
@@ -657,6 +660,9 @@ public class McpSubscriptionServiceTests : IDisposable
     [InlineData("\"C:\\\\Program Files\\\\app.js\" --arg", new[] { "C:\\\\Program Files\\\\app.js", "--arg" })]
     [InlineData("--profile \"my queue\"", new[] { "--profile", "my queue" })]
     [InlineData("", new string[0])]
+    [InlineData("\"\" --flag", new[] { "", "--flag" })]
+    [InlineData("arg1\targ2", new[] { "arg1", "arg2" })]
+    [InlineData("--label \"review \\\"queue\\\"\"", new[] { "--label", "review \"queue\"" })]
     public void ParseArguments_ShouldParseComplexArgumentsCorrectly(string input, string[] expected)
     {
         // Act

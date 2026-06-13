@@ -109,39 +109,74 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     public static List<string> ParseArguments(string arguments)
     {
         List<string> result = new List<string>();
-        if (string.IsNullOrWhiteSpace(arguments))
+        if (string.IsNullOrEmpty(arguments))
         {
             return result;
         }
 
-        System.Text.StringBuilder currentArg = new System.Text.StringBuilder();
+        var current = new System.Text.StringBuilder();
         bool inQuotes = false;
+        bool hasArg = false;
 
         for (int i = 0; i < arguments.Length; i++)
         {
             char c = arguments[i];
 
-            if (c == '\"')
+            if (c == '\\')
+            {
+                int backslashCount = 0;
+                while (i < arguments.Length && arguments[i] == '\\')
+                {
+                    backslashCount++;
+                    i++;
+                }
+
+                if (i < arguments.Length && arguments[i] == '\"')
+                {
+                    int n = backslashCount / 2;
+                    current.Append('\\', n);
+                    hasArg = true;
+
+                    if (backslashCount % 2 != 0)
+                    {
+                        current.Append('\"');
+                    }
+                    else
+                    {
+                        inQuotes = !inQuotes;
+                    }
+                }
+                else
+                {
+                    current.Append('\\', backslashCount);
+                    hasArg = true;
+                    i--;
+                }
+            }
+            else if (c == '\"')
             {
                 inQuotes = !inQuotes;
+                hasArg = true;
             }
-            else if (c == ' ' && !inQuotes)
+            else if ((c == ' ' || c == '\t') && !inQuotes)
             {
-                if (currentArg.Length > 0)
+                if (hasArg)
                 {
-                    result.Add(currentArg.ToString());
-                    currentArg.Clear();
+                    result.Add(current.ToString());
+                    current.Clear();
+                    hasArg = false;
                 }
             }
             else
             {
-                currentArg.Append(c);
+                current.Append(c);
+                hasArg = true;
             }
         }
 
-        if (currentArg.Length > 0)
+        if (hasArg)
         {
-            result.Add(currentArg.ToString());
+            result.Add(current.ToString());
         }
 
         return result;
@@ -165,10 +200,6 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 foreach (string path in paths)
                 {
                     string fullPath = Path.Combine(path, command);
-                    if (File.Exists(fullPath))
-                    {
-                        return Path.GetFullPath(fullPath);
-                    }
 
                     foreach (string ext in extensions)
                     {
@@ -177,6 +208,11 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                         {
                             return Path.GetFullPath(extPath);
                         }
+                    }
+
+                    if (File.Exists(fullPath))
+                    {
+                        return Path.GetFullPath(fullPath);
                     }
                 }
             }
