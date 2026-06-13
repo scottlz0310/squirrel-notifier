@@ -2,15 +2,15 @@
 .SYNOPSIS
     Pre-commit checks for code quality and security.
 .DESCRIPTION
-    This script runs various checks. Security checks (private keys, merge conflicts) run on staged Git blobs,
-    while style checks (line endings, trailing whitespace, YAML syntax) run on local workspace files.
+    This script runs various checks. Security and syntax checks (private keys, merge conflicts, YAML parser)
+    run on staged Git blobs, while style checks (line endings, trailing whitespace) run on local workspace files.
 #>
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "Running pre-commit quality and security checks..." -ForegroundColor Cyan
 
-# Helper function to validate YAML brackets syntax
+# Helper function to validate YAML syntax (brackets, quotes, and indentation)
 function Test-YamlSyntax {
     param(
         [string[]]$Lines,
@@ -19,7 +19,16 @@ function Test-YamlSyntax {
 
     $failed = $false
     $lineNum = 0
-    $bracketStack = @()
+
+    # Use .NET List for reliable stack operations (avoiding PowerShell array slice bugs)
+    $bracketStack = [System.Collections.Generic.List[char]]::new()
+    $inSingleQuote = $false
+    $inDoubleQuote = $false
+
+    # For duplicate key checking
+    $indentStack = [System.Collections.Generic.List[int]]::new()
+    $indentStack.Add(-1)
+    $keysPerIndent = @{}
 
     foreach ($line in $Lines) {
         $lineNum++
@@ -29,27 +38,67 @@ function Test-YamlSyntax {
             continue
         }
 
-        # Tabs are not allowed in YAML
+        # 1. Tabs are not allowed in YAML
         if ($line -match '^\t') {
             Write-Host "ERROR: YAML file '$Filename' contains tabs for indentation at line $lineNum." -ForegroundColor Red
             $failed = $true
             continue
         }
 
-        $inSingleQuote = $false
-        $inDoubleQuote = $false
-        $chars = $line.ToCharArray()
+        # Calculate indent level
+        $line -match '^ *' | Out-Null
+        $indent = $Matches[0].Length
 
+        # 2. Check for duplicate keys in same indent level
+        $isKeyLine = $false
+        $keyName = $null
+
+        if ($line -match '^( *)([^:#''"\{\[ ]+ *):(?: |$)') {
+            $isKeyLine = $true
+            $keyName = $Matches[2].Trim()
+        } elseif ($line -match '^( *)([''"])(.+?)\2 *:(?: |$)') {
+            $isKeyLine = $true
+            $keyName = $Matches[3]
+        }
+
+        if ($isKeyLine) {
+            # Maintain indent stack
+            while ($indentStack.Count -gt 0 -and $indentStack[$indentStack.Count - 1] -gt $indent) {
+                $deepIndent = $indentStack[$indentStack.Count - 1]
+                $keysPerIndent.Remove($deepIndent)
+                $indentStack.RemoveAt($indentStack.Count - 1)
+            }
+
+            if ($indentStack.Count -eq 0 -or $indentStack[$indentStack.Count - 1] -lt $indent) {
+                $indentStack.Add($indent)
+            }
+
+            if (-not $keysPerIndent.ContainsKey($indent)) {
+                $keysPerIndent[$indent] = [System.Collections.Generic.HashSet[string]]::new()
+            }
+
+            if ($keysPerIndent[$indent].Contains($keyName)) {
+                Write-Host "ERROR: YAML syntax error in staged '$Filename': Duplicate key '$keyName' at line $lineNum." -ForegroundColor Red
+                $failed = $true
+            } else {
+                $keysPerIndent[$indent].Add($keyName) | Out-Null
+            }
+        }
+
+        # 3. Parse brackets and quotes
+        $chars = $line.ToCharArray()
         for ($i = 0; $i -lt $chars.Length; $i++) {
             $char = $chars[$i]
 
-            # Simple quote escape handling
-            if ($char -eq "'" -and -not $inDoubleQuote) {
+            if ($char -eq "'") {
+                if ($inDoubleQuote) { continue }
                 if ($i -gt 0 -and $chars[$i-1] -eq "\") { continue }
                 $inSingleQuote = -not $inSingleQuote
                 continue
             }
-            if ($char -eq '"' -and -not $inSingleQuote) {
+
+            if ($char -eq '"') {
+                if ($inSingleQuote) { continue }
                 if ($i -gt 0 -and $chars[$i-1] -eq "\") { continue }
                 $inDoubleQuote = -not $inDoubleQuote
                 continue
@@ -59,31 +108,47 @@ function Test-YamlSyntax {
                 continue
             }
 
-            # Bracket validation
+            if ($char -eq '#') {
+                break # Comment line starts
+            }
+
+            # Bracket stack operations
             if ($char -eq '[' -or $char -eq '{') {
-                $bracketStack += $char
+                $bracketStack.Add($char)
             }
             elseif ($char -eq ']') {
-                if ($bracketStack.Length -gt 0 -and $bracketStack[-1] -eq '[') {
-                    $bracketStack = $bracketStack[0..($bracketStack.Length - 2)]
+                if ($bracketStack.Count -gt 0 -and $bracketStack[$bracketStack.Count - 1] -eq '[') {
+                    $bracketStack.RemoveAt($bracketStack.Count - 1)
                 } else {
-                    Write-Host "ERROR: YAML syntax error in '$Filename': Unmatched ']' at line $lineNum." -ForegroundColor Red
+                    Write-Host "ERROR: YAML syntax error in staged '$Filename': Unmatched ']' at line $lineNum." -ForegroundColor Red
                     $failed = $true
                 }
             }
             elseif ($char -eq '}') {
-                if ($bracketStack.Length -gt 0 -and $bracketStack[-1] -eq '{') {
-                    $bracketStack = $bracketStack[0..($bracketStack.Length - 2)]
+                if ($bracketStack.Count -gt 0 -and $bracketStack[$bracketStack.Count - 1] -eq '{') {
+                    $bracketStack.RemoveAt($bracketStack.Count - 1)
                 } else {
-                    Write-Host "ERROR: YAML syntax error in '$Filename': Unmatched '}' at line $lineNum." -ForegroundColor Red
+                    Write-Host "ERROR: YAML syntax error in staged '$Filename': Unmatched '}' at line $lineNum." -ForegroundColor Red
                     $failed = $true
                 }
             }
         }
+
+        # 4. Check for unterminated quotes at line end (exclude multiline syntax)
+        if ($inSingleQuote -or $inDoubleQuote) {
+            $isMultiLine = $trimmed -match ':\s*[\|>]\s*$'
+            if (-not $isMultiLine) {
+                Write-Host "ERROR: YAML syntax error in staged '$Filename': Unterminated string quote at line $lineNum." -ForegroundColor Red
+                $failed = $true
+                $inSingleQuote = $false
+                $inDoubleQuote = $false
+            }
+        }
     }
 
-    if ($bracketStack.Length -gt 0) {
-        Write-Host "ERROR: YAML syntax error in '$Filename': Unclosed bracket(s) '$($bracketStack -join ', ')' at end of file." -ForegroundColor Red
+    # 5. Check for unclosed brackets at end of file
+    if ($bracketStack.Count -gt 0) {
+        Write-Host "ERROR: YAML syntax error in staged '$Filename': Unclosed bracket(s) '$($bracketStack -join ', ')' at end of file." -ForegroundColor Red
         $failed = $true
     }
 
@@ -116,7 +181,7 @@ foreach ($file in $stagedFiles) {
     $gitFilePath = $file.Replace('\', '/')
     $ext = [System.IO.Path]::GetExtension($file).ToLowerInvariant()
 
-    # 1. Fetch staged content size
+    # Fetch staged content size
     $sizeStr = (git cat-file -s ":$gitFilePath" 2>$null)
     if ($LASTEXITCODE -ne 0) {
         continue
@@ -150,6 +215,14 @@ foreach ($file in $stagedFiles) {
                 if ($content -match '-----BEGIN[ A-Z0-9_-]+PRIVATE KEY-----') {
                     Write-Host "ERROR: Potential private key detected in staged '$file'!" -ForegroundColor Red
                     $failed = $true
+                }
+
+                # YAML syntax validation (Checking the actual STAGED blob)
+                if ($ext -eq ".yml" -or $ext -eq ".yaml") {
+                    $stagedLines = [System.IO.File]::ReadAllLines($tempFile, [System.Text.Encoding]::UTF8)
+                    if (-not (Test-YamlSyntax -Lines $stagedLines -Filename $file)) {
+                        $failed = $true
+                    }
                 }
             }
         }
@@ -202,13 +275,6 @@ foreach ($file in $stagedFiles) {
                     break
                 }
                 $lineNum++
-            }
-        }
-
-        # YAML syntax validation
-        if ($ext -eq ".yml" -or $ext -eq ".yaml") {
-            if (-not (Test-YamlSyntax -Lines $lines -Filename $file)) {
-                $failed = $true
             }
         }
     }
