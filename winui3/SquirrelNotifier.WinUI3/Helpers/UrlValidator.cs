@@ -36,4 +36,22 @@ internal static class UrlValidator
         string pathAndQuery = uri.PathAndQuery;
         return _safePathRegex.IsMatch(pathAndQuery);
     }
+
+    public static bool IsSafeGitHubUrl(string? url, string repository, int prNumber)
+    {
+        if (!IsSafeGitHubUrl(url))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
+        {
+            return false;
+        }
+
+        string expectedPath = $"/{repository}/pull/{prNumber}".ToUpperInvariant();
+        string actualPath = uri.AbsolutePath.TrimEnd('/').ToUpperInvariant();
+
+        return expectedPath == actualPath;
+    }
 }

@@ -45,4 +45,38 @@ public class ReviewEventParserTests
         // Assert
         result.Should().BeNull();
     }
+
+    [Fact]
+    public void Parse_ValidArrayJson_ShouldReturnReviewEvent()
+    {
+        // Arrange
+        string json = "[{\"owner\":\"org\",\"repo\":\"repo\",\"prNumber\":42,\"url\":\"https://github.com/org/repo/pull/42\",\"reason\":\"test\",\"author\":\"src\",\"message\":\"msg\",\"eventId\":\"evt_1\"}]";
+
+        // Act
+        ReviewEvent? result = ReviewEventParser.Parse(json);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.EventId.Should().Be("evt_1");
+        result.Repository.Should().Be("org/repo");
+        result.PrNumber.Should().Be(42);
+        result.PrUrl.Should().Be("https://github.com/org/repo/pull/42");
+        result.Reason.Should().Be("test");
+        result.Source.Should().Be("src");
+        result.Message.Should().Be("msg");
+    }
+
+    [Theory]
+    [InlineData("{\"eventId\":\"evt_1\",\"repository\":\"org/repo\",\"prNumber\":42,\"prUrl\":\"https://github.com/attacker/repo/pull/42\"}")] // repository mismatch in object
+    [InlineData("{\"eventId\":\"evt_1\",\"repository\":\"org/repo\",\"prNumber\":42,\"prUrl\":\"https://github.com/org/repo/pull/43\"}")] // prNumber mismatch in object
+    [InlineData("[{\"owner\":\"org\",\"repo\":\"repo\",\"prNumber\":42,\"url\":\"https://github.com/attacker/repo/pull/42\",\"reason\":\"test\"}]")] // repository mismatch in array
+    [InlineData("[{\"owner\":\"org\",\"repo\":\"repo\",\"prNumber\":42,\"url\":\"https://github.com/org/repo/pull/43\",\"reason\":\"test\"}]")] // prNumber mismatch in array
+    public void Parse_UnmatchedUrlInEvent_ShouldReturnNull(string json)
+    {
+        // Act
+        ReviewEvent? result = ReviewEventParser.Parse(json);
+
+        // Assert
+        result.Should().BeNull();
+    }
 }

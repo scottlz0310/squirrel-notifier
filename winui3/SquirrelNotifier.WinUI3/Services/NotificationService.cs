@@ -60,7 +60,7 @@ internal sealed class NotificationService : INotificationService
                 .AddText($"{reviewEvent.Reason}: {reviewEvent.Repository}#{reviewEvent.PrNumber}")
                 .AddText(reviewEvent.Message);
 
-            if (UrlValidator.IsSafeGitHubUrl(reviewEvent.PrUrl))
+            if (UrlValidator.IsSafeGitHubUrl(reviewEvent.PrUrl, reviewEvent.Repository, reviewEvent.PrNumber))
             {
                 builder.AddButton(new AppNotificationButton("PRを開く")
                     .AddArgument("action", "openUrl")
@@ -75,9 +75,9 @@ internal sealed class NotificationService : INotificationService
 
             ReviewEventReceived?.Invoke(this, reviewEvent);
         }
-        catch
+        catch (Exception ex)
         {
-            // Fallback
+            throw new InvalidOperationException($"Failed to show AppNotification: {ex.Message}", ex);
         }
     }
 

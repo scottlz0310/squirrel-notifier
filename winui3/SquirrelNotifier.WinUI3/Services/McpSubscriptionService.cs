@@ -378,13 +378,21 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                         }
                         else
                         {
-                            if (IsDuplicate(reviewEvent.EventId))
+                            if (HasBeenSeen(reviewEvent.EventId))
                             {
                                 await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
                             }
                             else
                             {
-                                _notificationService.NotifyReviewEvent(reviewEvent);
+                                try
+                                {
+                                    _notificationService.NotifyReviewEvent(reviewEvent);
+                                    MarkAsSeen(reviewEvent.EventId);
+                                }
+                                catch (Exception notifyEx)
+                                {
+                                    await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
+                                }
                             }
                         }
                     }
@@ -427,7 +435,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         await _loggingService.WriteAsync(message).ConfigureAwait(false);
     }
 
-    private bool IsDuplicate(string eventId)
+    private bool HasBeenSeen(string eventId)
     {
         if (string.IsNullOrEmpty(eventId))
         {
@@ -436,21 +444,29 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
         lock (_lock)
         {
-            if (_seenEventIds.Contains(eventId))
+            return _seenEventIds.Contains(eventId);
+        }
+    }
+
+    private void MarkAsSeen(string eventId)
+    {
+        if (string.IsNullOrEmpty(eventId))
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (_seenEventIds.Add(eventId))
             {
-                return true;
+                _eventIdQueue.Enqueue(eventId);
+
+                while (_eventIdQueue.Count > 100)
+                {
+                    string oldId = _eventIdQueue.Dequeue();
+                    _seenEventIds.Remove(oldId);
+                }
             }
-
-            _seenEventIds.Add(eventId);
-            _eventIdQueue.Enqueue(eventId);
-
-            while (_eventIdQueue.Count > 100)
-            {
-                string oldId = _eventIdQueue.Dequeue();
-                _seenEventIds.Remove(oldId);
-            }
-
-            return false;
         }
     }
 
