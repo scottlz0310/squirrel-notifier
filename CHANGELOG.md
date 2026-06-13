@@ -17,7 +17,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - `ReviewEventParser.Parse` の戻り値を `List<ReviewEvent>` に変更し、`ReviewCandidate` 配列内の全新着イベントをパース・ループ処理するよう拡張
-- `ReviewCandidate` ペイロードの変更（`url` 等の欠落）に合わせ、`Owner`/`Repo`/`PrNumber` からの PR URL 自動構築と、`queuedAt` 等による `eventId` 自動生成を追加
+- `ReviewCandidate` ペイロードの変更（`url` 等の欠落）に合わせ、`Owner`/`Repo`/`PrNumber` からの PR URL 自動構築と、`queuedAt` 等による `eventId` 自動生成を追加、および `sourceCommentId` の型を `long?` に修正しデシリアライズエラーを防止
 - 重複排除とトースト通知の安定動作を検証するユニットテストを `ReviewEventParserTests` 等に新設・追従
 - アプリケーション、ソリューション、プロジェクト、アセンブリ名、および C# の名前空間を `SquirrelNotifier` へ統一
 - 設定保存先ディレクトリを `%LocalAppData%\WSLKernelWatcher` から `%LocalAppData%\SquirrelNotifier` に変更
