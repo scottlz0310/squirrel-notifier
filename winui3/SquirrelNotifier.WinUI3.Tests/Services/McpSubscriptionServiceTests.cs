@@ -671,4 +671,44 @@ public class McpSubscriptionServiceTests : IDisposable
         // Assert
         result.Should().BeEquivalentTo(expected);
     }
+
+    [Fact]
+    public void IsDuplicate_ShouldDetectDuplicatesCorrectly()
+    {
+        // Arrange
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var isDuplicateMethod = typeof(McpSubscriptionService).GetMethod("IsDuplicate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        isDuplicateMethod.Should().NotBeNull();
+
+        // Act & Assert
+        var result1 = (bool)isDuplicateMethod!.Invoke(service, new object[] { "evt_1" })!;
+        result1.Should().BeFalse();
+
+        var result2 = (bool)isDuplicateMethod.Invoke(service, new object[] { "evt_1" })!;
+        result2.Should().BeTrue();
+
+        var result3 = (bool)isDuplicateMethod.Invoke(service, new object[] { "evt_2" })!;
+        result3.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsDuplicate_ShouldLimitCacheSizeTo100()
+    {
+        // Arrange
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var isDuplicateMethod = typeof(McpSubscriptionService).GetMethod("IsDuplicate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        isDuplicateMethod.Should().NotBeNull();
+
+        // Add 101 items
+        for (int i = 0; i < 101; i++)
+        {
+            isDuplicateMethod!.Invoke(service, new object[] { $"evt_{i}" });
+        }
+
+        // The first item should be evicted now, so it should not be detected as duplicate
+        var result = (bool)isDuplicateMethod!.Invoke(service, new object[] { "evt_0" })!;
+        result.Should().BeFalse();
+    }
 }

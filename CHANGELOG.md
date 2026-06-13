@@ -6,7 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - MCP 購読ブリッジ機構 (`McpSubscriptionService`) を新設。`mcp-resource-subscriber` と連携し、外部 MCP リソースからのレビュー更新イベントを取得可能に
-- `McpSubscriptionService` 用の動作確認 UI を設定ウィンドウに追加（コマンド実行パス、引数、URL、リソース URI、タイムアウトの編集に対応）
+- `McpSubscriptionService` 用の動作確認 UI を設定ウィンドウに追加（コマンド実行パス、引数、URL、リソース URI、タイムアウト of 編集に対応）
+- `mcp-resource-subscriber` から受信した JSON 形式のレビューイベント（`ReviewEvent`）をパースするデシリアライズ・検証機構を導入
+- レビューイベント専用の Windows 通知を構築（通知から検証済み PR URL をブラウザで開くアクション、およびアプリを開くアクションに対応）
+- メモリ内の重複排除キャッシュ（最大100件）による、同一 `eventId` を持つレビューイベントの重複通知防止機能を実装
+- メイン画面 UI に直近のレビューイベント（Recent review events）の履歴リストを追加し、一覧から直接 PR を開けるボタンを配置
 
 ### Removed
 - 旧 WSL カーネル監視機能 (`KernelWatcherService` および関連 UI / ロジック) を完全に廃止

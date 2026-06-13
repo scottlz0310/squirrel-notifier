@@ -23,9 +23,9 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
-        AppNotificationManager.Default.NotificationInvoked += OnNotificationInvoked;
         AppNotificationManager.Default.Register();
         _notificationService.Initialize();
+        _notificationService.OpenAppRequested += OnOpenAppRequested;
 
         // Create subscription service with settings
         _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService);
@@ -38,7 +38,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, showWindow);
         _window.Closed += OnWindowClosed;
 
         // Activate window if it should be shown
@@ -52,11 +52,12 @@ public partial class App : Application
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        _notificationService.OpenAppRequested -= OnOpenAppRequested;
         _subscriptionService.DisposeAsync().AsTask().ConfigureAwait(false);
         _autoUpdateService.Dispose();
     }
 
-    private void OnNotificationInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
+    private void OnOpenAppRequested(object? sender, EventArgs e)
     {
         // Show window when notification is clicked
         if (_window != null)
