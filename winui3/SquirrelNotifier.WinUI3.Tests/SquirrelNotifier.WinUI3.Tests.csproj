@@ -18,7 +18,7 @@
     <ThresholdType>line,branch,method</ThresholdType>
     <ThresholdStat>total</ThresholdStat>
     <ExcludeByFile>**/*.g.cs,**/*.g.i.cs,**/*.xaml.cs,**/obj/**</ExcludeByFile>
-    <Include>[WSLKernelWatcher.WinUI3]*</Include>
+    <Include>[SquirrelNotifier.WinUI3]*</Include>
   </PropertyGroup>
 
   <ItemGroup>
@@ -40,7 +40,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\WSLKernelWatcher.WinUI3\WSLKernelWatcher.WinUI3.csproj" />
+    <ProjectReference Include="..\SquirrelNotifier.WinUI3\SquirrelNotifier.WinUI3.csproj" />
   </ItemGroup>
 
 </Project>

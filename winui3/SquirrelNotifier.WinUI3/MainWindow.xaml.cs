@@ -9,12 +9,12 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using SquirrelNotifier.WinUI3.Helpers;
+using SquirrelNotifier.WinUI3.Services;
 using Windows.Graphics;
 using WinRT;
-using WSLKernelWatcher.WinUI3.Helpers;
-using WSLKernelWatcher.WinUI3.Services;
 
-namespace WSLKernelWatcher.WinUI3;
+namespace SquirrelNotifier.WinUI3;
 
 [ExcludeFromCodeCoverage]
 internal sealed partial class MainWindow : Window
@@ -88,7 +88,7 @@ internal sealed partial class MainWindow : Window
         _trayIconService = new TrayIconService(this);
         _trayIconService.LeftClick += OnTrayIconLeftClick;
         _trayIconService.RightClick += OnTrayIconRightClick;
-        _trayIconService.AddIcon("WSL Kernel Watcher");
+        _trayIconService.AddIcon("Squirrel Notifier");
 
         // Hook window messages to process tray icon messages
         _newWndProcDelegate = new WndProcDelegate(NewWndProc);
@@ -139,7 +139,7 @@ internal sealed partial class MainWindow : Window
     {
         try
         {
-            string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "wsl_watcher_icon.ico");
+            string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "squirrel-notifier.ico");
             if (File.Exists(iconPath))
             {
                 nint hIconSmall = LoadImage(nint.Zero, iconPath, _imageIcon, 16, 16, _lrLoadFromFile);

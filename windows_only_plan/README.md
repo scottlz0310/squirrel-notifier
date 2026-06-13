@@ -1,13 +1,12 @@
-<!--
-このファイルは `windows_only_plan/windows-only-prototype.ps1` の説明書です。
-このスクリプトは Windows 環境のみで動作する古いプロトタイプで、フォールバックとして残されています。
--->
+# 【歴史資料】Windows 完結型プロトタイプ: WSL Kernel Update Notifier
 
-# Windows 完結型プロトタイプ: WSL Kernel Update Notifier
+> [!NOTE]
+> 本ディレクトリおよびスクリプトは、WSLカーネル監視時代の古いプロトタイプ（履歴資料）です。
+> 現在の `Squirrel Notifier` プロジェクトの動作やビルドには関係ありません。
 
 このディレクトリにある `windows-only-prototype.ps1` は、Windows 上で WSL2 カーネルの更新を監視し、通知するための単一 PowerShell スクリプトのプロトタイプです。
 
-**重要:** これは古い実装であり、メインのアプリケーションロジックは WinUI3 アプリ (`winui3/WSLKernelWatcher.WinUI3`) に移行しています。現在はフォールバックとして保管しています。
+**重要:** これは古い実装であり、メインのアプリケーションロジックは WinUI3 アプリ (`winui3/SquirrelNotifier.WinUI3`) に移行しています。現在は履歴資料として保管しています。
 
 ## 機能概要
 - WSL のカーネルバージョンを取得し、GitHub のリポジトリの最新リリースと比較します。
@@ -68,5 +67,5 @@ PowerShell を管理者で開く必要はありません（スケジュール登
 このリポジトリのライセンスに準拠します。必要に応じて `LICENSE` を確認してください。
 
 ## 参考リンク
-- メインプロジェクト: /winui3/WSLKernelWatcher.WinUI3
+- メインプロジェクト: /winui3/SquirrelNotifier.WinUI3
 - 既存ドキュメント: /docs/WINDOWS_LIGHTWEIGHT_APP.md

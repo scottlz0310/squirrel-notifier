@@ -1,7 +1,7 @@
 using FluentAssertions;
-using WSLKernelWatcher.WinUI3.Services;
+using SquirrelNotifier.WinUI3.Services;
 
-namespace WSLKernelWatcher.WinUI3.Tests.Services;
+namespace SquirrelNotifier.WinUI3.Tests.Services;
 
 public class LoggingServiceTests : IDisposable
 {
@@ -10,7 +10,7 @@ public class LoggingServiceTests : IDisposable
     public LoggingServiceTests()
     {
         // テスト専用のログ出力先を用意する
-        _logDirectory = Path.Combine(Path.GetTempPath(), $"WSLKernelWatcherLogs_{Guid.NewGuid()}");
+        _logDirectory = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierLogs_{Guid.NewGuid()}");
     }
 
     public void Dispose()
@@ -106,7 +106,7 @@ public class LoggingServiceTests : IDisposable
         var service = new LoggingService();
 
         // Assert
-        string expected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WSLKernelWatcher", "logs");
+        string expected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier", "logs");
         service.LogDirectory.Should().Be(expected);
     }
 }

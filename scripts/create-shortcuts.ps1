@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-    WSL Kernel Watcher のショートカットを作成します。
+    Squirrel Notifier のショートカットを作成します。
 
 .DESCRIPTION
     指定された実行ファイルへのショートカットを Start Menu と/または Desktop に作成します。
     既存のショートカットは上書きされます。
 
 .PARAMETER ExePath
-    WSLKernelWatcher.WinUI3.exe のフルパス。省略時はスクリプトと同じフォルダを優先し、見つからない場合は入力を求めます。
+    SquirrelNotifier.WinUI3.exe のフルパス。省略時はスクリプトと同じフォルダを優先し、見つからない場合は入力を求めます。
 
 .PARAMETER Tray
     ショートカットの引数に --tray を付与してトレイ起動する場合に指定します。
@@ -20,7 +20,7 @@
 
 .EXAMPLE
     .\create-shortcuts.ps1
-    同一フォルダの WSLKernelWatcher.WinUI3.exe へスタートメニューショートカットを作成。
+    同一フォルダの SquirrelNotifier.WinUI3.exe へスタートメニューショートカットを作成。
 
 .EXAMPLE
     .\create-shortcuts.ps1 -Tray -Desktop
@@ -50,13 +50,13 @@ function Resolve-ExePath {
     }
 
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $candidate = Join-Path $scriptDir "WSLKernelWatcher.WinUI3.exe"
+    $candidate = Join-Path $scriptDir "SquirrelNotifier.WinUI3.exe"
     if (Test-Path $candidate) {
         return (Resolve-Path $candidate).Path
     }
 
     while ($true) {
-        $inputPath = Read-Host "WSLKernelWatcher.WinUI3.exe のパスを入力してください"
+        $inputPath = Read-Host "SquirrelNotifier.WinUI3.exe のパスを入力してください"
         if ([string]::IsNullOrWhiteSpace($inputPath)) {
             continue
         }
@@ -89,13 +89,13 @@ $exe = Resolve-ExePath -Path $ExePath
 $args = if ($Tray) { "--tray" } else { "" }
 
 if ($StartMenu) {
-    $startMenuPath = Join-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" "WSL Kernel Watcher.lnk"
+    $startMenuPath = Join-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" "Squirrel Notifier.lnk"
     New-AppShortcut -Target $exe -ShortcutPath $startMenuPath -Arguments $args
     Write-Host "スタートメニューにショートカットを作成しました: $startMenuPath" -ForegroundColor Green
 }
 
 if ($Desktop) {
-    $desktopPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "WSL Kernel Watcher.lnk"
+    $desktopPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "Squirrel Notifier.lnk"
     New-AppShortcut -Target $exe -ShortcutPath $desktopPath -Arguments $args
     Write-Host "デスクトップにショートカットを作成しました: $desktopPath" -ForegroundColor Green
 }

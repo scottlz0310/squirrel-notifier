@@ -1,10 +1,10 @@
-﻿Microsoft Visual Studio Solution File, Format Version 12.00
+Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31912.275
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "WSLKernelWatcher.WinUI3", "WSLKernelWatcher.WinUI3\WSLKernelWatcher.WinUI3.csproj", "{F0A9D7B5-4B0F-4D76-A4A7-FCF8D2F6BE6B}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SquirrelNotifier.WinUI3", "SquirrelNotifier.WinUI3\SquirrelNotifier.WinUI3.csproj", "{F0A9D7B5-4B0F-4D76-A4A7-FCF8D2F6BE6B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WSLKernelWatcher.WinUI3.Tests", "WSLKernelWatcher.WinUI3.Tests\WSLKernelWatcher.WinUI3.Tests.csproj", "{9994A02B-6D5D-44CE-8E49-C6D94ACDD18D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SquirrelNotifier.WinUI3.Tests", "SquirrelNotifier.WinUI3.Tests\SquirrelNotifier.WinUI3.Tests.csproj", "{9994A02B-6D5D-44CE-8E49-C6D94ACDD18D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

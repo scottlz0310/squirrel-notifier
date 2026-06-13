@@ -8,7 +8,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$solutionPath = "winui3/WSLKernelWatcher.WinUI3.sln"
+$solutionPath = "winui3/SquirrelNotifier.WinUI3.sln"
 
 Write-Host "Running dotnet format..." -ForegroundColor Cyan
 

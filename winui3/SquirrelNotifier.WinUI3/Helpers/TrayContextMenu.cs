@@ -5,7 +5,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
-namespace WSLKernelWatcher.WinUI3.Helpers;
+namespace SquirrelNotifier.WinUI3.Helpers;
 
 [ExcludeFromCodeCoverage]
 internal sealed class TrayContextMenu : IDisposable

@@ -8,7 +8,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace WSLKernelWatcher.WinUI3.Services;
+namespace SquirrelNotifier.WinUI3.Services;
 
 [ExcludeFromCodeCoverage]
 internal sealed class KernelWatcherService : IAsyncDisposable
@@ -29,7 +29,7 @@ internal sealed class KernelWatcherService : IAsyncDisposable
         _notificationService = notificationService;
         _loggingService = loggingService;
         _httpClient = new HttpClient();
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WSL-Kernel-Watcher-WinUI3/0.1");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Squirrel-Notifier-WinUI3/0.1");
     }
 
     public void Start()

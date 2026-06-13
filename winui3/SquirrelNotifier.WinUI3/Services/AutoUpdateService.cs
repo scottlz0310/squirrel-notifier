@@ -2,11 +2,11 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text.Json;
 
-namespace WSLKernelWatcher.WinUI3.Services;
+namespace SquirrelNotifier.WinUI3.Services;
 
 internal sealed class AutoUpdateService : IDisposable
 {
-    private const string _releasesUrl = "https://api.github.com/repos/scottlz0310/WSL-kernel-watcher/releases/latest";
+    private const string _releasesUrl = "https://api.github.com/repos/scottlz0310/squirrel-notifier/releases/latest";
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
     private readonly LoggingService _loggingService;
@@ -19,7 +19,7 @@ internal sealed class AutoUpdateService : IDisposable
         _ownsHttpClient = httpClient is null;
         if (_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
         {
-            _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("WSL-Kernel-Watcher-WinUI3", "3.0"));
+            _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Squirrel-Notifier-WinUI3", "3.0"));
         }
 
         _currentVersion = currentVersionOverride ?? Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);

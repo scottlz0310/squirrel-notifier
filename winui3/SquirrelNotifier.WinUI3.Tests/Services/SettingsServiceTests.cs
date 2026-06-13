@@ -1,8 +1,8 @@
 using System.Text.Json;
 using FluentAssertions;
-using WSLKernelWatcher.WinUI3.Services;
+using SquirrelNotifier.WinUI3.Services;
 
-namespace WSLKernelWatcher.WinUI3.Tests.Services;
+namespace SquirrelNotifier.WinUI3.Tests.Services;
 
 public class SettingsServiceTests : IDisposable
 {
@@ -12,7 +12,7 @@ public class SettingsServiceTests : IDisposable
     public SettingsServiceTests()
     {
         // テスト専用の一時ディレクトリを使用する
-        _settingsDirectory = Path.Combine(Path.GetTempPath(), $"WSLKernelWatcherTests_{Guid.NewGuid()}");
+        _settingsDirectory = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierTests_{Guid.NewGuid()}");
         _settingsService = new SettingsService(_settingsDirectory);
     }
 
@@ -64,7 +64,7 @@ public class SettingsServiceTests : IDisposable
     public void SettingsService_ShouldLoadExistingFile()
     {
         // Arrange
-        string tempDir = Path.Combine(Path.GetTempPath(), $"WSLKernelWatcherTests_{Guid.NewGuid()}");
+        string tempDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierTests_{Guid.NewGuid()}");
         Directory.CreateDirectory(tempDir);
         string settingsPath = Path.Combine(tempDir, "settings.json");
         File.WriteAllText(settingsPath, JsonSerializer.Serialize(new AppSettings { CheckIntervalHours = 7 }));

@@ -4,7 +4,7 @@
 
 using System.Text.Json;
 
-namespace WSLKernelWatcher.WinUI3.Services;
+namespace SquirrelNotifier.WinUI3.Services;
 
 internal sealed class SettingsService
 {
@@ -17,7 +17,7 @@ internal sealed class SettingsService
     public event EventHandler? SettingsChanged;
 
     public SettingsService()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WSLKernelWatcher"))
+        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"))
     {
     }
 

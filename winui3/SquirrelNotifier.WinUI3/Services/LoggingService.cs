@@ -5,7 +5,7 @@
 using System.Diagnostics;
 using System.IO;
 
-namespace WSLKernelWatcher.WinUI3.Services;
+namespace SquirrelNotifier.WinUI3.Services;
 
 internal sealed class LoggingService
 {
@@ -17,7 +17,7 @@ internal sealed class LoggingService
     public event EventHandler<string>? LogAppended;
 
     public LoggingService()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WSLKernelWatcher", "logs"), _defaultMaxBytes)
+        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier", "logs"), _defaultMaxBytes)
     {
     }
 

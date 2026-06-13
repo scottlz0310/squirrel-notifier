@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-    Install WSL Kernel Watcher to start automatically at user logon.
+    Install Squirrel Notifier to start automatically at user logon.
 
 .DESCRIPTION
-    This script registers WSL Kernel Watcher with Windows Task Scheduler to start automatically
+    This script registers Squirrel Notifier with Windows Task Scheduler to start automatically
     when the user logs in. The application will start minimized to the system tray.
 
 .PARAMETER ExePath
-    Path to the WSL Kernel Watcher executable. If not specified, the script will search for it
+    Path to the Squirrel Notifier executable. If not specified, the script will search for it
     in common locations.
 
 .PARAMETER StartMinimized
@@ -18,7 +18,7 @@
     Installs using auto-detected executable path.
 
 .EXAMPLE
-    .\install.ps1 -ExePath "C:\Program Files\WSLKernelWatcher\WSLKernelWatcher.WinUI3.exe"
+    .\install.ps1 -ExePath "C:\Program Files\SquirrelNotifier\SquirrelNotifier.WinUI3.exe"
     Installs using the specified executable path.
 
 .EXAMPLE
@@ -38,17 +38,17 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Task name
-$TaskName = "WSL Kernel Watcher"
+$TaskName = "Squirrel Notifier"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "WSL Kernel Watcher Installation Script" -ForegroundColor Cyan
+Write-Host "Squirrel Notifier Installation Script" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Function to find the executable
 function Find-Executable {
     # Prefer executables shipped alongside this script (installer bundle)
-    $localExe = Join-Path $PSScriptRoot "WSLKernelWatcher.WinUI3.exe"
+    $localExe = Join-Path $PSScriptRoot "SquirrelNotifier.WinUI3.exe"
     if (Test-Path $localExe) {
         return (Resolve-Path $localExe).Path
     }
@@ -56,11 +56,11 @@ function Find-Executable {
     # Dynamic search for build output paths
     $buildPaths = @(
         @{
-            Base = "$PSScriptRoot\..\winui3\WSLKernelWatcher.WinUI3\bin\x64\Release"
+            Base = "$PSScriptRoot\..\winui3\SquirrelNotifier.WinUI3\bin\x64\Release"
             Priority = 1
         },
         @{
-            Base = "$PSScriptRoot\..\winui3\WSLKernelWatcher.WinUI3\bin\x64\Debug"
+            Base = "$PSScriptRoot\..\winui3\SquirrelNotifier.WinUI3\bin\x64\Debug"
             Priority = 2
         }
     )
@@ -68,7 +68,7 @@ function Find-Executable {
     # Search in build output directories
     foreach ($buildPath in ($buildPaths | Sort-Object Priority)) {
         if (Test-Path $buildPath.Base) {
-            $exe = Get-ChildItem -Path $buildPath.Base -Filter "WSLKernelWatcher.WinUI3.exe" -Recurse -ErrorAction SilentlyContinue |
+            $exe = Get-ChildItem -Path $buildPath.Base -Filter "SquirrelNotifier.WinUI3.exe" -Recurse -ErrorAction SilentlyContinue |
                 Sort-Object LastWriteTime -Descending |
                 Select-Object -First 1
 
@@ -80,8 +80,8 @@ function Find-Executable {
 
     # Static paths for common installation locations
     $installPaths = @(
-        "$env:ProgramFiles\WSL Kernel Watcher\WSLKernelWatcher.WinUI3.exe",
-        "$env:LOCALAPPDATA\WSL Kernel Watcher\WSLKernelWatcher.WinUI3.exe"
+        "$env:ProgramFiles\Squirrel Notifier\SquirrelNotifier.WinUI3.exe",
+        "$env:LOCALAPPDATA\Squirrel Notifier\SquirrelNotifier.WinUI3.exe"
     )
 
     foreach ($path in $installPaths) {
@@ -95,11 +95,11 @@ function Find-Executable {
 
 # Determine executable path
 if ([string]::IsNullOrWhiteSpace($ExePath)) {
-    Write-Host "Searching for WSL Kernel Watcher executable..." -ForegroundColor Yellow
+    Write-Host "Searching for Squirrel Notifier executable..." -ForegroundColor Yellow
     $ExePath = Find-Executable
 
     if ($null -eq $ExePath) {
-        Write-Host "ERROR: Could not find WSL Kernel Watcher executable." -ForegroundColor Red
+        Write-Host "ERROR: Could not find Squirrel Notifier executable." -ForegroundColor Red
         Write-Host "Please build the project first or specify the path using -ExePath parameter." -ForegroundColor Red
         exit 1
     }
@@ -114,6 +114,19 @@ if ([string]::IsNullOrWhiteSpace($ExePath)) {
 }
 
 Write-Host ""
+
+# Check for old WSL Kernel Watcher task to prompt migration
+$oldTaskName = "WSL Kernel Watcher"
+$oldTask = Get-ScheduledTask -TaskName $oldTaskName -ErrorAction SilentlyContinue
+if ($oldTask) {
+    Write-Host "=================================================================" -ForegroundColor Yellow
+    Write-Host "警告: 旧バージョンのタスク '$oldTaskName' が登録されています。" -ForegroundColor Yellow
+    Write-Host "重複起動を防ぐため、以下の手順で旧バージョンを停止および登録解除してください:" -ForegroundColor Yellow
+    Write-Host "  1. 以前のインストールフォルダにある .\uninstall.ps1 を管理者権限で実行する" -ForegroundColor Yellow
+    Write-Host "  2. または、タスクスケジューラから手動で '$oldTaskName' を削除する" -ForegroundColor Yellow
+    Write-Host "=================================================================" -ForegroundColor Yellow
+    Write-Host ""
+}
 
 # Check if task already exists
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -170,7 +183,7 @@ try {
         -Trigger $trigger `
         -Settings $settings `
         -Principal $principal `
-        -Description "Monitors WSL kernel version and notifies when updates are available."
+        -Description "Monitors review updates from mcp-gateway and notifies the user."
 
     Write-Host ""
     Write-Host "SUCCESS: Task registered successfully!" -ForegroundColor Green
@@ -183,7 +196,7 @@ try {
     Write-Host ""
 
     # Ask if user wants to start the task now
-    $response = Read-Host "Do you want to start WSL Kernel Watcher now? (Y/N)"
+    $response = Read-Host "Do you want to start Squirrel Notifier now? (Y/N)"
 
     if ($response -eq 'Y' -or $response -eq 'y') {
         Write-Host "Starting task..." -ForegroundColor Yellow
@@ -195,7 +208,7 @@ try {
         $process = Get-Process -Name $processName -ErrorAction SilentlyContinue
 
         if ($process) {
-            Write-Host "SUCCESS: WSL Kernel Watcher is now running!" -ForegroundColor Green
+            Write-Host "SUCCESS: Squirrel Notifier is now running!" -ForegroundColor Green
             if ($StartMinimized) {
                 Write-Host "The application is running in the system tray." -ForegroundColor Cyan
             }
@@ -205,7 +218,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Installation complete! WSL Kernel Watcher will start automatically at logon." -ForegroundColor Green
+    Write-Host "Installation complete! Squirrel Notifier will start automatically at logon." -ForegroundColor Green
     Write-Host ""
     Write-Host "To uninstall, run: .\uninstall.ps1" -ForegroundColor Cyan
 

@@ -2,9 +2,9 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using FluentAssertions;
-using WSLKernelWatcher.WinUI3.Services;
+using SquirrelNotifier.WinUI3.Services;
 
-namespace WSLKernelWatcher.WinUI3.Tests.Services;
+namespace SquirrelNotifier.WinUI3.Tests.Services;
 
 public class AutoUpdateServiceTests : IDisposable
 {

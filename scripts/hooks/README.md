@@ -14,7 +14,7 @@
 
 **修正方法**:
 ```powershell
-dotnet format winui3/WSLKernelWatcher.WinUI3.sln
+dotnet format winui3/SquirrelNotifier.WinUI3.sln
 git add .
 git commit
 ```
@@ -33,7 +33,7 @@ git commit
 **修正方法**:
 ```powershell
 # エラーを修正してから
-dotnet build winui3/WSLKernelWatcher.WinUI3.sln -c Release /p:Platform=x64
+dotnet build winui3/SquirrelNotifier.WinUI3.sln -c Release /p:Platform=x64
 git add .
 git commit
 ```
@@ -52,7 +52,7 @@ git commit
 **修正方法**:
 ```powershell
 # テストを修正・追加してから
-dotnet test winui3/WSLKernelWatcher.WinUI3.sln -c Release
+dotnet test winui3/SquirrelNotifier.WinUI3.sln -c Release
 git push
 ```
 
@@ -97,8 +97,8 @@ pre-commit run --all-files
 
 ```powershell
 # クリーンビルド
-dotnet clean winui3/WSLKernelWatcher.WinUI3.sln
-dotnet build winui3/WSLKernelWatcher.WinUI3.sln -c Release /p:Platform=x64
+dotnet clean winui3/SquirrelNotifier.WinUI3.sln
+dotnet build winui3/SquirrelNotifier.WinUI3.sln -c Release /p:Platform=x64
 ```
 
 ---

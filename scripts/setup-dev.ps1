@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Setup development environment for WSL Kernel Watcher.
+    Setup development environment for Squirrel Notifier.
 
 .DESCRIPTION
     This script sets up the development environment by installing pre-commit
@@ -27,7 +27,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "WSL Kernel Watcher Development Setup" -ForegroundColor Cyan
+Write-Host "Squirrel Notifier Development Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -92,7 +92,7 @@ Write-Host ""
 Write-Host "Restoring NuGet packages..." -ForegroundColor Yellow
 
 try {
-    dotnet restore winui3/WSLKernelWatcher.WinUI3.sln
+    dotnet restore winui3/SquirrelNotifier.WinUI3.sln
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✓ NuGet packages restored" -ForegroundColor Green
     }
@@ -115,9 +115,9 @@ if (-not $SkipPreCommit) {
 }
 
 Write-Host "Quick commands:" -ForegroundColor Cyan
-Write-Host "  • Format code:  dotnet format winui3/WSLKernelWatcher.WinUI3.sln" -ForegroundColor White
-Write-Host "  • Build:        dotnet build winui3/WSLKernelWatcher.WinUI3.sln -c Release /p:Platform=x64" -ForegroundColor White
-Write-Host "  • Run tests:    dotnet test winui3/WSLKernelWatcher.WinUI3.sln" -ForegroundColor White
+Write-Host "  • Format code:  dotnet format winui3/SquirrelNotifier.WinUI3.sln" -ForegroundColor White
+Write-Host "  • Build:        dotnet build winui3/SquirrelNotifier.WinUI3.sln -c Release /p:Platform=x64" -ForegroundColor White
+Write-Host "  • Run tests:    dotnet test winui3/SquirrelNotifier.WinUI3.sln" -ForegroundColor White
 Write-Host "  • Install app:  .\scripts\install.ps1 -StartMinimized" -ForegroundColor White
 Write-Host ""
 

@@ -1,16 +1,16 @@
 <Window
-    x:Class="WSLKernelWatcher.WinUI3.MainWindow"
+    x:Class="SquirrelNotifier.WinUI3.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Title="WSL Kernel Watcher (WinUI 3)">
+    Title="Squirrel Notifier">
     <Grid Padding="16"
           RowDefinitions="Auto,Auto,*,Auto"
           RowSpacing="12">
         <StackPanel Spacing="6">
-            <TextBlock Text="WSL Kernel Watcher (WinUI 3 preview)"
+            <TextBlock Text="Squirrel Notifier (WinUI 3 preview)"
                        FontSize="20"
                        FontWeight="SemiBold"/>
             <TextBlock x:Name="StatusText"

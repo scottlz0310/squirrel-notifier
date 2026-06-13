@@ -7,7 +7,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 
-namespace WSLKernelWatcher.WinUI3.Services;
+namespace SquirrelNotifier.WinUI3.Services;
 
 [ExcludeFromCodeCoverage]
 internal sealed class NotificationService

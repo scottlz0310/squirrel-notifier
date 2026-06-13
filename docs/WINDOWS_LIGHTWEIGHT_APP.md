@@ -17,7 +17,7 @@
 ## 推奨構成
 - **短期 (B)**: PowerShellモジュール化 + タスクスケジューラ。
   - ファイル例
-    - `WSL-Kernel-Notifier.psm1`（機能本体）
+    - `Squirrel-Notifier.psm1`（機能本体）
     - `Install.ps1` / `Uninstall.ps1` / `Test.ps1`
     - `config.json`（間隔、リポジトリ、ログパス等）
   - 配布: GitHub Release zip、PowerShell Gallery (`Install-Module`)、必要なら Chocolatey。
@@ -33,7 +33,7 @@
   - 権限: 通常ユーザーで動作、サービスは不要。
 
 ## 短期実装ステップ（PowerShellモジュール化）
-1) **モジュール化**: プロトタイプの関数群を `WSL-Kernel-Notifier.psm1` に移動し、公開関数を絞る。
+1) **モジュール化**: プロトタイプの関数群を `Squirrel-Notifier.psm1` に移動し、公開関数を絞る。
 2) **設定分離**: `config.json` に間隔/リポジトリ/ログパス。デフォルト生成 + ユーザー上書き。
 3) **タスク登録スクリプト**: `Install.ps1` でタスクスケジューラ登録（pwsh 優先、未インストールなら PowerShell）。`Uninstall.ps1` で削除。
 4) **通知のフォールバック**: BurntToast が無ければ標準通知。初回インストール時に BurntToast 自動インストール。

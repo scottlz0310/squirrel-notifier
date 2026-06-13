@@ -6,7 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 
-namespace WSLKernelWatcher.WinUI3.Services;
+namespace SquirrelNotifier.WinUI3.Services;
 
 [ExcludeFromCodeCoverage]
 internal sealed class TrayIconService : IDisposable
@@ -75,7 +75,7 @@ internal sealed class TrayIconService : IDisposable
         }
 
         // Try to load custom icon from Assets folder
-        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "wsl_watcher_icon.ico");
+        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "squirrel-notifier.ico");
         if (File.Exists(iconPath))
         {
             _hIcon = LoadImage(nint.Zero, iconPath, _imageIcon, 16, 16, _lrLoadFromFile);
