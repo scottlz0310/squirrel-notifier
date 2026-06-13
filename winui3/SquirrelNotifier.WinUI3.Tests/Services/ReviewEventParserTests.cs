@@ -92,7 +92,8 @@ public class ReviewEventParserTests
                 ""installationId"": 12345,
                 ""queuedAt"": ""2026-06-13T22:00:00Z"",
                 ""reason"": ""review requested"",
-                ""requestedBy"": ""some-user""
+                ""requestedBy"": ""some-user"",
+                ""sourceCommentId"": 3407917385
             },
             {
                 ""owner"": ""scottlz0310"",

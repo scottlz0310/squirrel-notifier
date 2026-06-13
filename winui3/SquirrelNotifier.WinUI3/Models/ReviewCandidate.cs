@@ -27,7 +27,7 @@ internal sealed class ReviewCandidate
     public string Reason { get; set; } = string.Empty;
 
     [JsonPropertyName("sourceCommentId")]
-    public string? SourceCommentId { get; set; }
+    public long? SourceCommentId { get; set; }
 
     [JsonPropertyName("requestedBy")]
     public string? RequestedBy { get; set; }
