@@ -106,14 +106,96 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         await LogAsync("Subscription service stopped by user.").ConfigureAwait(false);
     }
 
+    public static List<string> ParseArguments(string arguments)
+    {
+        List<string> result = new List<string>();
+        if (string.IsNullOrWhiteSpace(arguments))
+        {
+            return result;
+        }
+
+        System.Text.StringBuilder currentArg = new System.Text.StringBuilder();
+        bool inQuotes = false;
+
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            char c = arguments[i];
+
+            if (c == '\"')
+            {
+                inQuotes = !inQuotes;
+            }
+            else if (c == ' ' && !inQuotes)
+            {
+                if (currentArg.Length > 0)
+                {
+                    result.Add(currentArg.ToString());
+                    currentArg.Clear();
+                }
+            }
+            else
+            {
+                currentArg.Append(c);
+            }
+        }
+
+        if (currentArg.Length > 0)
+        {
+            result.Add(currentArg.ToString());
+        }
+
+        return result;
+    }
+
+    private static string ResolveCommandPath(string command)
+    {
+        if (File.Exists(command))
+        {
+            return Path.GetFullPath(command);
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+            if (!string.IsNullOrEmpty(pathEnv))
+            {
+                string[] paths = pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                string[] extensions = new[] { ".exe", ".cmd", ".bat", ".ps1" };
+
+                foreach (string path in paths)
+                {
+                    string fullPath = Path.Combine(path, command);
+                    if (File.Exists(fullPath))
+                    {
+                        return Path.GetFullPath(fullPath);
+                    }
+
+                    foreach (string ext in extensions)
+                    {
+                        string extPath = fullPath + ext;
+                        if (File.Exists(extPath))
+                        {
+                            return Path.GetFullPath(extPath);
+                        }
+                    }
+                }
+            }
+        }
+
+        return command;
+    }
+
     public async Task<bool> PreflightCheckAsync(CancellationToken token)
     {
+        _activeProcessCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        CancellationToken processToken = _activeProcessCts.Token;
+
         try
         {
             AppSettings settings = _settingsService.Settings;
             ProcessStartInfo psi = new ProcessStartInfo
             {
-                FileName = settings.SubscriberCommandPath,
+                FileName = ResolveCommandPath(settings.SubscriberCommandPath),
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
@@ -121,15 +203,23 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             };
             psi.ArgumentList.Add("--help");
 
-            using IProcessInstance process = _processRunner.Start(psi);
-            await process.WaitForExitAsync(token).ConfigureAwait(false);
-            return process.ExitCode == 0;
+            using (_activeProcess = _processRunner.Start(psi))
+            {
+                await _activeProcess.WaitForExitAsync(processToken).ConfigureAwait(false);
+                return _activeProcess.ExitCode == 0;
+            }
         }
         catch (Exception ex)
         {
             LastError = $"Preflight check failed: {ex.Message}";
             await LogAsync($"Preflight check error: {ex.Message}").ConfigureAwait(false);
             return false;
+        }
+        finally
+        {
+            _activeProcess = null;
+            _activeProcessCts?.Dispose();
+            _activeProcessCts = null;
         }
     }
 
@@ -159,7 +249,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 AppSettings settings = _settingsService.Settings;
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
-                    FileName = settings.SubscriberCommandPath,
+                    FileName = ResolveCommandPath(settings.SubscriberCommandPath),
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
@@ -176,7 +266,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 // Add arguments
                 if (!string.IsNullOrWhiteSpace(settings.SubscriberArguments))
                 {
-                    string[] args = settings.SubscriberArguments.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    List<string> args = ParseArguments(settings.SubscriberArguments);
                     foreach (string arg in args)
                     {
                         psi.ArgumentList.Add(arg);
@@ -233,7 +323,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     if (result.Route == "subscription" && result.NotificationReceived == true)
                     {
                         await LogAsync($"Notification received: {result.FinalText}").ConfigureAwait(false);
-                        _notificationService.NotifyReviewEventReceived(result.FinalText, result.RecommendedNextAction, result.ServerUrl);
+                        _notificationService.NotifyReviewEventReceived(result.FinalText, result.RecommendedNextAction);
                     }
                     else
                     {

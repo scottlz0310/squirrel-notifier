@@ -25,7 +25,7 @@ internal sealed class NotificationService
         _initialized = true;
     }
 
-    public void NotifyReviewEventReceived(string? message, string? recommendedNextAction, string? serverUrl)
+    public void NotifyReviewEventReceived(string? message, string? recommendedNextAction)
     {
         try
         {
@@ -33,13 +33,6 @@ internal sealed class NotificationService
                 .AddText("New Review Event Received")
                 .AddText(message ?? "A review event has occurred.")
                 .AddText(recommendedNextAction ?? "Check the gateway/repository.");
-
-            if (!string.IsNullOrWhiteSpace(serverUrl))
-            {
-                builder.AddButton(new AppNotificationButton("Open Review URL")
-                    .AddArgument("action", "open_review_url")
-                    .AddArgument("url", serverUrl));
-            }
 
             AppNotification notification = builder.BuildNotification();
             AppNotificationManager.Default.Show(notification);
@@ -52,15 +45,6 @@ internal sealed class NotificationService
 
     private void OnNotificationInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
     {
-        if (!args.Arguments.TryGetValue("action", out string? action))
-        {
-            return;
-        }
-
-        if (action == "open_review_url" && args.Arguments.TryGetValue("url", out string? url))
-        {
-            TryOpenUrl(url);
-        }
     }
 
     private static void TryOpenUrl(string url)

@@ -183,7 +183,7 @@ try {
         -Trigger $trigger `
         -Settings $settings `
         -Principal $principal `
-        -Description "Monitors WSL kernel version and notifies when updates are available."
+        -Description "Monitors external MCP resources and notifies when review updates are available."
 
     Write-Host ""
     Write-Host "SUCCESS: Task registered successfully!" -ForegroundColor Green

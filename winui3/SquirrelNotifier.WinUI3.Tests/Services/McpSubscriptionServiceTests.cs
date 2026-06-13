@@ -505,4 +505,78 @@ public class McpSubscriptionServiceTests : IDisposable
         await act.Should().NotThrowAsync();
         service.State.Should().Be(SubscriptionState.Stopped);
     }
+
+    [Fact]
+    public async Task PreflightCheck_ShouldKillProcessOnCancellation()
+    {
+        // Arrange
+        var mockProcess = new Mock<IProcessInstance>();
+        mockProcess.SetupGet(p => p.ExitCode).Returns(0);
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream()));
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+        mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>())).Returns(Task.Delay(10000));
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+
+        var cts = new CancellationTokenSource();
+        var task = service.PreflightCheckAsync(cts.Token);
+
+        await Task.Delay(100);
+        await service.StopAsync();
+
+        // Assert
+        mockProcess.Verify(p => p.Kill(true), Times.Once);
+        var result = await task;
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IntegrationTest_ShouldExecuteCommandSuccessfully()
+    {
+        // Arrange
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"IntegrationTests_{Guid.NewGuid()}");
+        var settingsService = new SettingsService(tempDir);
+        settingsService.UpdateSettings("cmd.exe", "/c exit 0", "http://localhost:3000", "queue://res", 30000);
+
+        var runner = new ProcessRunner();
+        var service = new McpSubscriptionService(settingsService, _notificationService, _loggingService, runner);
+
+        try
+        {
+            // Act
+            var result = await service.PreflightCheckAsync(CancellationToken.None);
+
+            // Assert
+            result.Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("arg1 arg2", new[] { "arg1", "arg2" })]
+    [InlineData("\"C:\\\\Program Files\\\\app.js\" --arg", new[] { "C:\\\\Program Files\\\\app.js", "--arg" })]
+    [InlineData("--profile \"my queue\"", new[] { "--profile", "my queue" })]
+    [InlineData("", new string[0])]
+    public void ParseArguments_ShouldParseComplexArgumentsCorrectly(string input, string[] expected)
+    {
+        // Act
+        var result = McpSubscriptionService.ParseArguments(input);
+
+        // Assert
+        result.Should().BeEquivalentTo(expected);
+    }
 }
