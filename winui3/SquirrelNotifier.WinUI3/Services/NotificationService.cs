@@ -10,7 +10,7 @@ using Microsoft.Windows.AppNotifications.Builder;
 namespace SquirrelNotifier.WinUI3.Services;
 
 [ExcludeFromCodeCoverage]
-internal sealed class NotificationService
+internal sealed class NotificationService : INotificationService
 {
     private bool _initialized;
 

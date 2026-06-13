@@ -10,7 +10,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 internal sealed class McpSubscriptionService : IAsyncDisposable
 {
     private readonly SettingsService _settingsService;
-    private readonly NotificationService _notificationService;
+    private readonly INotificationService _notificationService;
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
     private readonly CancellationTokenSource _cts = new();
@@ -46,7 +46,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
     public McpSubscriptionService(
         SettingsService settingsService,
-        NotificationService notificationService,
+        INotificationService notificationService,
         LoggingService loggingService,
         IProcessRunner? processRunner = null)
     {
@@ -205,7 +205,14 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
             using (_activeProcess = _processRunner.Start(psi))
             {
+                Task<string> stdoutTask = _activeProcess.StandardOutput.ReadToEndAsync(processToken);
+                Task<string> stderrTask = _activeProcess.StandardError.ReadToEndAsync(processToken);
+
                 await _activeProcess.WaitForExitAsync(processToken).ConfigureAwait(false);
+
+                await stdoutTask.ConfigureAwait(false);
+                await stderrTask.ConfigureAwait(false);
+
                 return _activeProcess.ExitCode == 0;
             }
         }

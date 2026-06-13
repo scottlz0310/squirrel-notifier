@@ -33,6 +33,54 @@ internal sealed class SettingsService
         _settingsPath = Path.Combine(_settingsDirectory, "settings.json");
 
         _settings = LoadSettings();
+
+        if (_settings.SubscriberCommandPath == "mcp-resource-subscriber")
+        {
+            string resolved = ResolveCommandPath(_settings.SubscriberCommandPath);
+            if (resolved != "mcp-resource-subscriber")
+            {
+                _settings.SubscriberCommandPath = resolved;
+                SaveSettings();
+            }
+        }
+    }
+
+    private static string ResolveCommandPath(string command)
+    {
+        if (File.Exists(command))
+        {
+            return Path.GetFullPath(command);
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+            if (!string.IsNullOrEmpty(pathEnv))
+            {
+                string[] paths = pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                string[] extensions = new[] { ".exe", ".cmd", ".bat", ".ps1" };
+
+                foreach (string path in paths)
+                {
+                    string fullPath = Path.Combine(path, command);
+                    if (File.Exists(fullPath))
+                    {
+                        return Path.GetFullPath(fullPath);
+                    }
+
+                    foreach (string ext in extensions)
+                    {
+                        string extPath = fullPath + ext;
+                        if (File.Exists(extPath))
+                        {
+                            return Path.GetFullPath(extPath);
+                        }
+                    }
+                }
+            }
+        }
+
+        return command;
     }
 
     private AppSettings LoadSettings()

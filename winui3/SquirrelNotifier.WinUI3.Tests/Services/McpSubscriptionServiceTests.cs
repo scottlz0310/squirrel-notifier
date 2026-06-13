@@ -20,14 +20,16 @@ public class McpSubscriptionServiceTests : IDisposable
 {
     private readonly string _settingsDirectory;
     private readonly SettingsService _settingsService;
-    private readonly NotificationService _notificationService;
+    private readonly Mock<INotificationService> _mockNotificationService;
+    private readonly INotificationService _notificationService;
     private readonly LoggingService _loggingService;
 
     public McpSubscriptionServiceTests()
     {
         _settingsDirectory = Path.Combine(Path.GetTempPath(), $"McpSubscriptionServiceTests_{Guid.NewGuid()}");
         _settingsService = new SettingsService(_settingsDirectory);
-        _notificationService = new NotificationService();
+        _mockNotificationService = new Mock<INotificationService>();
+        _notificationService = _mockNotificationService.Object;
         _loggingService = new LoggingService(_settingsDirectory);
     }
 
@@ -514,7 +516,8 @@ public class McpSubscriptionServiceTests : IDisposable
         mockProcess.SetupGet(p => p.ExitCode).Returns(0);
         mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream()));
         mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
-        mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>())).Returns(Task.Delay(10000));
+        mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+            .Returns<CancellationToken>(async ct => await Task.Delay(10000, ct));
 
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
@@ -543,11 +546,16 @@ public class McpSubscriptionServiceTests : IDisposable
         }
 
         var tempDir = Path.Combine(Path.GetTempPath(), $"IntegrationTests_{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempDir);
+
+        var testCmd = Path.Combine(tempDir, "test-helper.cmd");
+        await File.WriteAllTextAsync(testCmd, "@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\nexit /b 1\r\n", Encoding.ASCII);
+
         var settingsService = new SettingsService(tempDir);
-        settingsService.UpdateSettings("cmd.exe", "/c exit 0", "http://localhost:3000", "queue://res", 30000);
+        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", "queue://res", 30000);
 
         var runner = new ProcessRunner();
-        var service = new McpSubscriptionService(settingsService, _notificationService, _loggingService, runner);
+        await using var service = new McpSubscriptionService(settingsService, _notificationService, _loggingService, runner);
 
         try
         {
@@ -561,10 +569,88 @@ public class McpSubscriptionServiceTests : IDisposable
         {
             if (Directory.Exists(tempDir))
             {
-                Directory.Delete(tempDir, true);
+                try
+                {
+                    Directory.Delete(tempDir, true);
+                }
+                catch
+                {
+                    // ignore
+                }
             }
         }
     }
+
+    [Fact]
+    public async Task IntegrationTest_ShouldResolveAndRunSubscriberFromPathWithSpaces()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var baseTempDir = Path.Combine(Path.GetTempPath(), $"IntegrationTests_{Guid.NewGuid()}");
+        var testDir = Path.Combine(baseTempDir, "Test Folder With Spaces");
+        Directory.CreateDirectory(testDir);
+
+        var cmdPath = Path.Combine(testDir, "mcp-resource-subscriber.cmd");
+        var resultJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = true,
+            FinalText = "Notification from dummy CLI",
+            RecommendedNextAction = "Check reviews"
+        });
+
+        var scriptContent = $"@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\necho {resultJson}\r\nping 127.0.0.1 -n 10 > nul\r\nexit /b 0\r\n";
+        await File.WriteAllTextAsync(cmdPath, scriptContent, Encoding.ASCII);
+
+        var oldPath = Environment.GetEnvironmentVariable("PATH");
+        Environment.SetEnvironmentVariable("PATH", $"{testDir};{oldPath}");
+
+        var settingsDir = Path.Combine(baseTempDir, "settings");
+        Directory.CreateDirectory(settingsDir);
+
+        try
+        {
+            var settingsService = new SettingsService(settingsDir);
+            settingsService.Settings.SubscriberCommandPath.Should().Be(Path.GetFullPath(cmdPath));
+
+            var runner = new ProcessRunner();
+            await using var service = new McpSubscriptionService(settingsService, _notificationService, _loggingService, runner);
+
+            var preflightResult = await service.PreflightCheckAsync(CancellationToken.None);
+            preflightResult.Should().BeTrue();
+
+            var cts = new CancellationTokenSource();
+            service.Start();
+
+            await Task.Delay(2000);
+
+            service.State.Should().Be(SubscriptionState.Running, because: service.LastError);
+            service.LastError.Should().BeEmpty();
+
+            await service.StopAsync();
+            service.State.Should().Be(SubscriptionState.Stopped);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", oldPath);
+            if (Directory.Exists(baseTempDir))
+            {
+                try
+                {
+                    Directory.Delete(baseTempDir, true);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+        }
+    }
+
+
 
     [Theory]
     [InlineData("arg1 arg2", new[] { "arg1", "arg2" })]

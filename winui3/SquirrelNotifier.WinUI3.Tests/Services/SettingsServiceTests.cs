@@ -1,5 +1,8 @@
 using FluentAssertions;
 using SquirrelNotifier.WinUI3.Services;
+using Xunit;
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace SquirrelNotifier.WinUI3.Tests.Services;
 
@@ -12,7 +15,17 @@ public class SettingsServiceTests : IDisposable
     {
         // テスト専用の一時ディレクトリを使用する
         _settingsDirectory = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierTests_{Guid.NewGuid()}");
-        _settingsService = new SettingsService(_settingsDirectory);
+
+        string? oldPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", string.Empty);
+            _settingsService = new SettingsService(_settingsDirectory);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", oldPath);
+        }
     }
 
     public void Dispose()
