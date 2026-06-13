@@ -17,18 +17,18 @@ internal sealed class ReviewCandidate
     [JsonPropertyName("prNumber")]
     public int PrNumber { get; set; }
 
-    [JsonPropertyName("url")]
-    public string Url { get; set; } = string.Empty;
+    [JsonPropertyName("installationId")]
+    public int InstallationId { get; set; }
+
+    [JsonPropertyName("queuedAt")]
+    public string QueuedAt { get; set; } = string.Empty;
 
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = string.Empty;
 
-    [JsonPropertyName("author")]
-    public string Author { get; set; } = string.Empty;
+    [JsonPropertyName("sourceCommentId")]
+    public string? SourceCommentId { get; set; }
 
-    [JsonPropertyName("eventId")]
-    public string? EventId { get; set; }
-
-    [JsonPropertyName("message")]
-    public string? Message { get; set; }
+    [JsonPropertyName("requestedBy")]
+    public string? RequestedBy { get; set; }
 }

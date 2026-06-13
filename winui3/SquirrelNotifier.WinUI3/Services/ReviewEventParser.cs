@@ -12,11 +12,12 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal static class ReviewEventParser
 {
-    public static ReviewEvent? Parse(string? json)
+    public static List<ReviewEvent> Parse(string? json)
     {
+        List<ReviewEvent> events = new List<ReviewEvent>();
         if (string.IsNullOrWhiteSpace(json))
         {
-            return null;
+            return events;
         }
 
         try
@@ -30,12 +31,21 @@ internal static class ReviewEventParser
             if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
             {
                 List<ReviewCandidate>? candidates = JsonSerializer.Deserialize<List<ReviewCandidate>>(trimmed, options);
-                if (candidates == null || candidates.Count == 0)
+                if (candidates != null)
                 {
-                    return null;
+                    foreach (ReviewCandidate candidate in candidates)
+                    {
+                        try
+                        {
+                            ReviewEvent reviewEvent = ConvertToEvent(candidate);
+                            events.Add(reviewEvent);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Failed to parse candidate: {ex.Message}");
+                        }
+                    }
                 }
-
-                return ConvertToEvent(candidates[0]);
             }
             else if (trimmed.StartsWith('{') && trimmed.EndsWith('}'))
             {
@@ -44,38 +54,59 @@ internal static class ReviewEventParser
                 if (reviewEvent != null && !string.IsNullOrEmpty(reviewEvent.Repository) && !string.IsNullOrEmpty(reviewEvent.PrUrl))
                 {
                     reviewEvent.Validate();
-                    if (!UrlValidator.IsSafeGitHubUrl(reviewEvent.PrUrl, reviewEvent.Repository, reviewEvent.PrNumber))
+                    if (UrlValidator.IsSafeGitHubUrl(reviewEvent.PrUrl, reviewEvent.Repository, reviewEvent.PrNumber))
                     {
-                        return null;
+                        events.Add(reviewEvent);
+                        return events;
                     }
-
-                    return reviewEvent;
                 }
 
                 // If not, try parsing as a single ReviewCandidate object
                 ReviewCandidate? candidate = JsonSerializer.Deserialize<ReviewCandidate>(trimmed, options);
                 if (candidate != null)
                 {
-                    return ConvertToEvent(candidate);
+                    try
+                    {
+                        ReviewEvent converted = ConvertToEvent(candidate);
+                        events.Add(converted);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to parse candidate: {ex.Message}");
+                    }
                 }
             }
-
-            return null;
         }
         catch
         {
-            return null;
+            // ignore
         }
+
+        return events;
     }
 
     private static ReviewEvent ConvertToEvent(ReviewCandidate candidate)
     {
-        string repository = $"{candidate.Owner}/{candidate.Repo}";
-        string prUrl = candidate.Url;
+        if (string.IsNullOrEmpty(candidate.Owner) || string.IsNullOrEmpty(candidate.Repo))
+        {
+            throw new ArgumentException("Owner and Repo cannot be empty.");
+        }
 
-        string eventId = candidate.EventId ?? $"evt_{repository.Replace('/', '_')}_{candidate.PrNumber}_{candidate.Reason}";
-        string message = candidate.Message ?? $"{candidate.Reason} by {candidate.Author}";
-        string source = !string.IsNullOrEmpty(candidate.Author) ? candidate.Author : "thread-owl";
+        string repository = $"{candidate.Owner}/{candidate.Repo}";
+        string prUrl = $"https://github.com/{candidate.Owner}/{candidate.Repo}/pull/{candidate.PrNumber}";
+
+        string queuedAtStr = !string.IsNullOrEmpty(candidate.QueuedAt) ? candidate.QueuedAt : "unknown_time";
+        string safeOwner = candidate.Owner.Replace('/', '_').Replace('\\', '_').Replace(' ', '_');
+        string safeRepo = candidate.Repo.Replace('/', '_').Replace('\\', '_').Replace(' ', '_');
+        string safeReason = candidate.Reason.Replace('/', '_').Replace('\\', '_').Replace(' ', '_');
+        string safeQueuedAt = queuedAtStr.Replace('/', '_').Replace('\\', '_').Replace(':', '_').Replace(' ', '_');
+
+        string eventId = $"evt_{safeOwner}_{safeRepo}_{candidate.PrNumber}_{safeReason}_{safeQueuedAt}";
+
+        string source = !string.IsNullOrEmpty(candidate.RequestedBy) ? candidate.RequestedBy : "thread-owl";
+        string message = !string.IsNullOrEmpty(candidate.RequestedBy)
+            ? $"{candidate.Reason} by {candidate.RequestedBy}"
+            : candidate.Reason;
 
         ReviewEvent reviewEvent = new ReviewEvent
         {

@@ -371,27 +371,30 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     {
                         await LogAsync($"Notification payload received: {result.FinalText}").ConfigureAwait(false);
 
-                        ReviewEvent? reviewEvent = ReviewEventParser.Parse(result.FinalText);
-                        if (reviewEvent == null)
+                        List<ReviewEvent> reviewEvents = ReviewEventParser.Parse(result.FinalText);
+                        if (reviewEvents.Count == 0)
                         {
                             await LogAsync($"Warning: Malformed or unsupported review event payload received: {result.FinalText}").ConfigureAwait(false);
                         }
                         else
                         {
-                            if (HasBeenSeen(reviewEvent.EventId))
+                            foreach (ReviewEvent reviewEvent in reviewEvents)
                             {
-                                await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                try
+                                if (HasBeenSeen(reviewEvent.EventId))
                                 {
-                                    _notificationService.NotifyReviewEvent(reviewEvent);
-                                    MarkAsSeen(reviewEvent.EventId);
+                                    await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
                                 }
-                                catch (Exception notifyEx)
+                                else
                                 {
-                                    await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
+                                    try
+                                    {
+                                        _notificationService.NotifyReviewEvent(reviewEvent);
+                                        MarkAsSeen(reviewEvent.EventId);
+                                    }
+                                    catch (Exception notifyEx)
+                                    {
+                                        await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
+                                    }
                                 }
                             }
                         }
