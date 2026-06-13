@@ -3,6 +3,8 @@
 
 pre-commit:
   commands:
+    quality-and-security:
+      run: pwsh -File scripts/hooks/pre-commit-checks.ps1
     dotnet-format:
       run: pwsh -File scripts/hooks/pre-commit-format.ps1
     dotnet-build:

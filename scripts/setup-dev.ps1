@@ -36,19 +36,19 @@ if (-not $SkipHooks) {
     $lefthookInstalled = $null -ne (Get-Command lefthook -ErrorAction SilentlyContinue)
 
     if (-not $lefthookInstalled) {
-        Write-Host "WARNING: Lefthook is not installed." -ForegroundColor Yellow
-        Write-Host "Lefthook is required for running Git hooks." -ForegroundColor Yellow
+        Write-Host "ERROR: Lefthook is not installed." -ForegroundColor Red
+        Write-Host "Lefthook is required for running Git hooks under our standard quality toolchain." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please install Lefthook using one of the following methods:" -ForegroundColor Cyan
         Write-Host "  • winget: winget install evilmartians.lefthook" -ForegroundColor Cyan
         Write-Host "  • scoop:  scoop install lefthook" -ForegroundColor Cyan
         Write-Host "  • npm:    npm install -g @evilmartians/lefthook" -ForegroundColor Cyan
         Write-Host ""
-        $response = Read-Host "Continue without Git hooks setup? (Y/N)"
-        if ($response -ne 'Y' -and $response -ne 'y') {
-            exit 0
-        }
-        $SkipHooks = $true
+        Write-Host "Or, if you intentionally want to bypass hooks (not recommended for production development)," -ForegroundColor Yellow
+        Write-Host "run the setup script with the -SkipHooks parameter:" -ForegroundColor Yellow
+        Write-Host "  pwsh -File .\scripts\setup-dev.ps1 -SkipHooks" -ForegroundColor White
+        Write-Host ""
+        exit 1
     }
 }
 

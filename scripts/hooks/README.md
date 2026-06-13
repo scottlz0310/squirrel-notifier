@@ -1,15 +1,31 @@
 # Git Hooks
 
-このディレクトリには、pre-commitフレームワーク用のGitフックスクリプトが含まれています。
+このディレクトリには、Lefthook 用の Git フックスクリプトが含まれています。
 
 ## フックの種類
+
+### pre-commit-checks.ps1
+
+**実行タイミング**: コミット時
+
+**チェック内容**:
+- ステージングされたファイルの大文字小文字のファイル名競合の検出 (check-case-conflict)
+- ステージングされたファイルのサイズ制限 (check-added-large-files: 最大 1000KB)
+- 不要な末尾の空白 of チェック (trailing-whitespace: markdown ファイルを除く)
+- ファイル末尾の改行のチェック (end-of-file-fixer: SVG などを除くテキストファイル)
+- コンフリクトマーカー (`<<<<<<<`, `=======`, `>>>>>>>`) の検出 (check-merge-conflict)
+- プライベートキーや秘密情報の漏洩検知 (detect-private-key)
+- 改行コードのチェック (mixed-line-ending: CRLF 統一)
+- YAML ファイルのタブインデント検知 (check-yaml)
+
+---
 
 ### pre-commit-format.ps1
 
 **実行タイミング**: コミット時
 
 **チェック内容**:
-- `dotnet format`によるコードフォーマット検証
+- `dotnet format` によるコードフォーマット検証
 - フォーマット違反があればコミットを拒否
 
 **修正方法**:
@@ -26,7 +42,7 @@ git commit
 **実行タイミング**: コミット時
 
 **チェック内容**:
-- Release構成でのビルド
+- Release 構成でのビルド
 - 警告をエラーとして扱う（TreatWarningsAsErrors=true）
 - ビルドエラーがあればコミットを拒否
 
@@ -46,7 +62,7 @@ git commit
 
 **チェック内容**:
 - すべてのユニットテストを実行
-- コードカバレッジを測定（80%必須）
+- コードカバレッジを測定（80% 必須）
 - テスト失敗またはカバレッジ不足でプッシュを拒否
 
 **修正方法**:
@@ -60,7 +76,7 @@ git push
 
 ## フックのスキップ
 
-緊急時やWIP（Work In Progress）のコミットでフックをスキップする場合:
+緊急時や WIP (Work In Progress) のコミットでフックをスキップする場合:
 
 ```powershell
 # コミット時のフックをスキップ
@@ -70,27 +86,30 @@ git commit --no-verify
 git push --no-verify
 ```
 
-**警告**: フックをスキップすると、CI/CDで失敗する可能性があります。
+**警告**: フックをスキップすると、CI/CD で失敗する可能性があります。
 
 ---
 
 ## トラブルシューティング
 
-### PowerShell実行ポリシーエラー
+### PowerShell 実行ポリシーエラー
+
+スクリプトの実行が許可されていないエラーが出た場合は、以下を実行してください:
 
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-### pre-commitフックが動作しない
+### Git フックが動作しない / 再設定したい
+
+Lefthook の設定を再インストールするには以下を実行します:
 
 ```powershell
 # フックの再インストール
-pre-commit install
-pre-commit install --hook-type pre-push
+lefthook install
 
-# 手動実行でテスト
-pre-commit run --all-files
+# 手動でコミット前フックを実行してテスト
+lefthook run pre-commit
 ```
 
 ### ビルドエラーが解決できない
@@ -105,14 +124,5 @@ dotnet build winui3/SquirrelNotifier.WinUI3.sln -c Release /p:Platform=x64
 
 ## カスタマイズ
 
-フックの動作をカスタマイズするには、`.pre-commit-config.yaml`を編集してください。
-
-例: テストフックを無効化
-```yaml
-repos:
-  - repo: local
-    hooks:
-      - id: dotnet-test
-        name: dotnet test
-        # stages: [push]  # この行をコメントアウト
-```
+フックの動作をカスタマイズするには、`lefthook.yml` を edit してください。
+詳細は [Lefthook ドキュメント](https://github.com/evilmartians/lefthook/blob/master/docs/configuration.md) を参照してください。
