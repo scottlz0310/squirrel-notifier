@@ -4,14 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- MCP 購読ブリッジ機構 (`McpSubscriptionService`) を新設。`mcp-resource-subscriber` と連携し、外部 MCP リソースからのレビュー更新イベントを取得可能に
+- `McpSubscriptionService` 用の動作確認 UI を設定ウィンドウに追加（コマンド実行パス、引数、URL、リソース URI、タイムアウトの編集に対応）
+
+### Removed
+- 旧 WSL カーネル監視機能 (`KernelWatcherService` および関連 UI / ロジック) を完全に廃止
+
 ### Changed
 - アプリケーション、ソリューション、プロジェクト、アセンブリ名、および C# の名前空間を `SquirrelNotifier` へ統一
 - 設定保存先ディレクトリを `%LocalAppData%\WSLKernelWatcher` から `%LocalAppData%\SquirrelNotifier` に変更
 - ウィンドウタイトル、トレイアイコンのツールチップ、メニュー、アプリ表示名を `Squirrel Notifier` へ変更
 - 自動更新用の GitHub リポジトリ URL および User-Agent を `squirrel-notifier` に追従
 - タスクスケジューラのタスク登録（`install.ps1`）を `Squirrel Notifier` に変更し、旧タスク検出時に手動移行手順を促すよう改善
+- タスクスケジューラのタスク登録スクリプト (`install.ps1`) の説明文を MCP リソース監視のものに更新
 - アプリケーションのアイコンファイルを `squirrel-notifier.ico` (新アセット `assets/squirrel-notifier.png` を基に生成) に差し替え
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
+- トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
 ## [3.1.0] - 2025-12-15
 

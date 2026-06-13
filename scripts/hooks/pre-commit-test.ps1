@@ -19,7 +19,6 @@ try {
 
         $output = dotnet test $solutionPath `
             --configuration Release `
-            --no-build `
             --nologo `
             --verbosity quiet `
             "/p:CollectCoverage=true" `

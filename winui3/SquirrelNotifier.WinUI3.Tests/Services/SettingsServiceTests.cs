@@ -1,6 +1,8 @@
-using System.Text.Json;
 using FluentAssertions;
 using SquirrelNotifier.WinUI3.Services;
+using Xunit;
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace SquirrelNotifier.WinUI3.Tests.Services;
 
@@ -13,7 +15,17 @@ public class SettingsServiceTests : IDisposable
     {
         // テスト専用の一時ディレクトリを使用する
         _settingsDirectory = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierTests_{Guid.NewGuid()}");
-        _settingsService = new SettingsService(_settingsDirectory);
+
+        string? oldPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", string.Empty);
+            _settingsService = new SettingsService(_settingsDirectory);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", oldPath);
+        }
     }
 
     public void Dispose()
@@ -32,31 +44,48 @@ public class SettingsServiceTests : IDisposable
         AppSettings settings = _settingsService.Settings;
 
         // Assert
-        settings.CheckIntervalHours.Should().Be(2);
+        settings.SubscriberCommandPath.Should().Be("mcp-resource-subscriber");
+        settings.SubscriberArguments.Should().BeEmpty();
+        settings.GatewayUrl.Should().Be("http://localhost:3000");
+        settings.ResourceUri.Should().Be("queue://review/queue");
+        settings.NotificationTimeoutMs.Should().Be(60000);
     }
 
     [Fact]
-    public void UpdateCheckInterval_ShouldUpdateSettings()
+    public void UpdateSettings_ShouldUpdateSettings()
     {
-        // Arrange
-        const int newInterval = 5;
-
         // Act
-        _settingsService.UpdateCheckInterval(newInterval);
+        _settingsService.UpdateSettings("custom-cmd", "--arg", "https://example.com/gw", "queue://custom", 120000);
 
         // Assert
-        _settingsService.Settings.CheckIntervalHours.Should().Be(newInterval);
+        _settingsService.Settings.SubscriberCommandPath.Should().Be("custom-cmd");
+        _settingsService.Settings.SubscriberArguments.Should().Be("--arg");
+        _settingsService.Settings.GatewayUrl.Should().Be("https://example.com/gw");
+        _settingsService.Settings.ResourceUri.Should().Be("queue://custom");
+        _settingsService.Settings.NotificationTimeoutMs.Should().Be(120000);
+    }
+
+    [Theory]
+    [InlineData("", "--arg", "http://localhost:3000", "queue://custom", 60000)] // Empty command path
+    [InlineData("cmd", "--arg", "invalid-url", "queue://custom", 60000)] // Invalid URL
+    [InlineData("cmd", "--arg", "ftp://localhost:3000", "queue://custom", 60000)] // Non-http/https URL
+    [InlineData("cmd", "--arg", "http://localhost:3000", "", 60000)] // Empty resource URI
+    public void UpdateSettings_ShouldThrowArgumentExceptionForInvalidInputs(
+        string cmd, string args, string url, string uri, int timeout)
+    {
+        // Act & Assert
+        Action act = () => _settingsService.UpdateSettings(cmd, args, url, uri, timeout);
+        act.Should().Throw<ArgumentException>();
     }
 
     [Theory]
     [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(25)]
-    [InlineData(100)]
-    public void UpdateCheckInterval_ShouldThrowForInvalidValues(int invalidInterval)
+    [InlineData(-100)]
+    [InlineData(300001)]
+    public void UpdateSettings_ShouldThrowArgumentOutOfRangeExceptionForInvalidTimeout(int invalidTimeout)
     {
         // Act & Assert
-        Action act = () => _settingsService.UpdateCheckInterval(invalidInterval);
+        Action act = () => _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", invalidTimeout);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -67,7 +96,14 @@ public class SettingsServiceTests : IDisposable
         string tempDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierTests_{Guid.NewGuid()}");
         Directory.CreateDirectory(tempDir);
         string settingsPath = Path.Combine(tempDir, "settings.json");
-        File.WriteAllText(settingsPath, JsonSerializer.Serialize(new AppSettings { CheckIntervalHours = 7 }));
+        var settingsObj = new AppSettings
+        {
+            SubscriberCommandPath = "saved-cmd",
+            GatewayUrl = "https://saved-url.com",
+            ResourceUri = "queue://saved",
+            NotificationTimeoutMs = 30000
+        };
+        File.WriteAllText(settingsPath, System.Text.Json.JsonSerializer.Serialize(settingsObj));
 
         try
         {
@@ -75,7 +111,10 @@ public class SettingsServiceTests : IDisposable
             var service = new SettingsService(tempDir);
 
             // Assert
-            service.Settings.CheckIntervalHours.Should().Be(7);
+            service.Settings.SubscriberCommandPath.Should().Be("saved-cmd");
+            service.Settings.GatewayUrl.Should().Be("https://saved-url.com");
+            service.Settings.ResourceUri.Should().Be("queue://saved");
+            service.Settings.NotificationTimeoutMs.Should().Be(30000);
         }
         finally
         {
@@ -93,20 +132,6 @@ public class SettingsServiceTests : IDisposable
         act.Should().Throw<ArgumentException>();
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(12)]
-    [InlineData(24)]
-    public void UpdateCheckInterval_ShouldAcceptValidValues(int validInterval)
-    {
-        // Act
-        Action act = () => _settingsService.UpdateCheckInterval(validInterval);
-
-        // Assert
-        act.Should().NotThrow();
-        _settingsService.Settings.CheckIntervalHours.Should().Be(validInterval);
-    }
-
     [Fact]
     public void SettingsChanged_ShouldBeRaisedWhenSettingsUpdated()
     {
@@ -115,7 +140,7 @@ public class SettingsServiceTests : IDisposable
         _settingsService.SettingsChanged += (_, _) => eventRaised = true;
 
         // Act
-        _settingsService.UpdateCheckInterval(3);
+        _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", 60000);
 
         // Assert
         eventRaised.Should().BeTrue();

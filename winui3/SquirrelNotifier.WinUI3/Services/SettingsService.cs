@@ -33,6 +33,55 @@ internal sealed class SettingsService
         _settingsPath = Path.Combine(_settingsDirectory, "settings.json");
 
         _settings = LoadSettings();
+
+        if (_settings.SubscriberCommandPath == "mcp-resource-subscriber")
+        {
+            string resolved = ResolveCommandPath(_settings.SubscriberCommandPath);
+            if (resolved != "mcp-resource-subscriber")
+            {
+                _settings.SubscriberCommandPath = resolved;
+                SaveSettings();
+            }
+        }
+    }
+
+    private static string ResolveCommandPath(string command)
+    {
+        if (File.Exists(command))
+        {
+            return Path.GetFullPath(command);
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+            if (!string.IsNullOrEmpty(pathEnv))
+            {
+                string[] paths = pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                string[] extensions = new[] { ".exe", ".cmd", ".bat", ".ps1" };
+
+                foreach (string path in paths)
+                {
+                    string fullPath = Path.Combine(path, command);
+
+                    foreach (string ext in extensions)
+                    {
+                        string extPath = fullPath + ext;
+                        if (File.Exists(extPath))
+                        {
+                            return Path.GetFullPath(extPath);
+                        }
+                    }
+
+                    if (File.Exists(fullPath))
+                    {
+                        return Path.GetFullPath(fullPath);
+                    }
+                }
+            }
+        }
+
+        return command;
     }
 
     private AppSettings LoadSettings()
@@ -74,19 +123,46 @@ internal sealed class SettingsService
         }
     }
 
-    public void UpdateCheckInterval(int hours)
+    public void UpdateSettings(string commandPath, string arguments, string gatewayUrl, string resourceUri, int timeoutMs)
     {
-        if (hours < 1 || hours > 24)
+        if (string.IsNullOrWhiteSpace(commandPath))
         {
-            throw new ArgumentOutOfRangeException(nameof(hours), "Check interval must be between 1 and 24 hours");
+            throw new ArgumentException("Command path cannot be empty", nameof(commandPath));
         }
 
-        _settings.CheckIntervalHours = hours;
+        if (string.IsNullOrWhiteSpace(gatewayUrl) || !Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException("Gateway URL must be a valid http/https absolute URL", nameof(gatewayUrl));
+        }
+
+        if (string.IsNullOrWhiteSpace(resourceUri))
+        {
+            throw new ArgumentException("Resource URI cannot be empty", nameof(resourceUri));
+        }
+
+        if (timeoutMs <= 0 || timeoutMs > 300000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeoutMs), "Timeout must be between 1 and 300000 ms");
+        }
+
+        _settings.SubscriberCommandPath = commandPath;
+        _settings.SubscriberArguments = arguments;
+        _settings.GatewayUrl = gatewayUrl;
+        _settings.ResourceUri = resourceUri;
+        _settings.NotificationTimeoutMs = timeoutMs;
         SaveSettings();
     }
 }
 
 internal sealed class AppSettings
 {
-    public int CheckIntervalHours { get; set; } = 2;
+    public string SubscriberCommandPath { get; set; } = "mcp-resource-subscriber";
+
+    public string SubscriberArguments { get; set; } = string.Empty;
+
+    public string GatewayUrl { get; set; } = "http://localhost:3000";
+
+    public string ResourceUri { get; set; } = "queue://review/queue";
+
+    public int NotificationTimeoutMs { get; set; } = 60000;
 }

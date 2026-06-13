@@ -7,15 +7,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![codecov](https://codecov.io/gh/YOUR_USERNAME/squirrel-notifier/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USERNAME/squirrel-notifier)
 
-Squirrel Notifierは、Windows上でWSL（Windows Subsystem for Linux）のカーネルバージョンを監視し、更新があった場合に通知を行う常駐型軽量アプリケーションです（安定版: 3.1.0）。
+Squirrel Notifierは、mcp-gateway を経由して MCP resource update（レビュー更新イベントなど）を監視し、更新があった場合に通知を行う常駐型軽量アプリケーションです（安定版: 3.1.0）。
 
 ## 機能
 
-- WSLカーネルバージョンの定期監視（1〜24時間で設定可能）
+- mcp-gateway を経由したレビュー更新イベントの監視（mcp-resource-subscriberを使用）
 - 更新時のトースト通知
 - ログファイルへの記録
 - システムトレイ常駐
-- カスタマイズ可能な更新確認間隔
+- コマンドパス、引数、Gateway URL、Resource URI、タイムアウトのカスタマイズ
 
 ## WinUI3版
 
@@ -99,9 +99,14 @@ PowerShell でインストールスクリプトを実行して自動起動を設
 
 アプリケーションを起動後、「Settings」セクションから以下の設定が可能です:
 
-- **Check interval (hours)**: 更新確認の間隔（1〜24時間）
+- **Command Path**: mcp-resource-subscriber の絶対パス（またはPATH内のコマンド名）
+- **Arguments**: 必要な固定引数（スペース区切り）
+- **Gateway URL**: mcp-gateway のエンドポイントURL（例: http://localhost:3000）
+- **Resource URI**: 監視対象の MCP リソース URI（例: queue://review/queue）
+- **Timeout (ms)**: タイムアウトミリ秒（1〜300,000 ms）
 
 設定は `%LocalAppData%\SquirrelNotifier\settings.json` に保存されます。
+なお、認証トークンなどの機密情報は設定ファイルには保存せず、環境変数 `MCP_PROBE_AUTH_TOKEN` から子プロセスへ渡されます。
 
 ## 開発
 
