@@ -25,24 +25,28 @@ internal sealed class NotificationService
         _initialized = true;
     }
 
-    public void NotifyUpdateAvailable(string current, string latest)
+    public void NotifyReviewEventReceived(string? message, string? recommendedNextAction, string? serverUrl)
     {
         try
         {
             AppNotificationBuilder builder = new AppNotificationBuilder()
-                .AddText("WSL2 kernel update available")
-                .AddText($"Current: {current}")
-                .AddText($"Latest: {latest}")
-                .AddButton(new AppNotificationButton("Open release page")
-                    .AddArgument("action", "open_release")
-                    .AddArgument("version", latest));
+                .AddText("New Review Event Received")
+                .AddText(message ?? "A review event has occurred.")
+                .AddText(recommendedNextAction ?? "Check the gateway/repository.");
+
+            if (!string.IsNullOrWhiteSpace(serverUrl))
+            {
+                builder.AddButton(new AppNotificationButton("Open Review URL")
+                    .AddArgument("action", "open_review_url")
+                    .AddArgument("url", serverUrl));
+            }
 
             AppNotification notification = builder.BuildNotification();
             AppNotificationManager.Default.Show(notification);
         }
         catch
         {
-            // Fallback could be added here (e.g., message dialog) if AppNotification identity is unavailable.
+            // Fallback could be added here
         }
     }
 
@@ -53,9 +57,8 @@ internal sealed class NotificationService
             return;
         }
 
-        if (action == "open_release" && args.Arguments.TryGetValue("version", out string? version))
+        if (action == "open_review_url" && args.Arguments.TryGetValue("url", out string? url))
         {
-            string url = $"https://github.com/microsoft/WSL2-Linux-Kernel/releases/tag/{version}";
             TryOpenUrl(url);
         }
     }

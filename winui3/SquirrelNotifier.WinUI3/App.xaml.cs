@@ -17,7 +17,7 @@ public partial class App : Application
     private readonly NotificationService _notificationService = new();
     private readonly LoggingService _loggingService = new();
     private readonly SettingsService _settingsService = new();
-    private readonly KernelWatcherService _watcherService;
+    private readonly McpSubscriptionService _subscriptionService;
     private readonly AutoUpdateService _autoUpdateService;
 
     public App()
@@ -27,9 +27,8 @@ public partial class App : Application
         AppNotificationManager.Default.Register();
         _notificationService.Initialize();
 
-        // Create watcher service with settings
-        var interval = TimeSpan.FromHours(_settingsService.Settings.CheckIntervalHours);
-        _watcherService = new KernelWatcherService(_notificationService, _loggingService, interval);
+        // Create subscription service with settings
+        _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
     }
 
@@ -39,7 +38,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_watcherService, _loggingService, _settingsService, _autoUpdateService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, showWindow);
         _window.Closed += OnWindowClosed;
 
         // Activate window if it should be shown
@@ -48,12 +47,12 @@ public partial class App : Application
             _window.Activate();
         }
 
-        _watcherService.Start();
+        _subscriptionService.Start();
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        _watcherService.DisposeAsync().AsTask().ConfigureAwait(false);
+        _subscriptionService.DisposeAsync().AsTask().ConfigureAwait(false);
         _autoUpdateService.Dispose();
     }
 

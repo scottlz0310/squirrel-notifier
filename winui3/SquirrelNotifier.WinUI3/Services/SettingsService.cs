@@ -74,19 +74,46 @@ internal sealed class SettingsService
         }
     }
 
-    public void UpdateCheckInterval(int hours)
+    public void UpdateSettings(string commandPath, string arguments, string gatewayUrl, string resourceUri, int timeoutMs)
     {
-        if (hours < 1 || hours > 24)
+        if (string.IsNullOrWhiteSpace(commandPath))
         {
-            throw new ArgumentOutOfRangeException(nameof(hours), "Check interval must be between 1 and 24 hours");
+            throw new ArgumentException("Command path cannot be empty", nameof(commandPath));
         }
 
-        _settings.CheckIntervalHours = hours;
+        if (string.IsNullOrWhiteSpace(gatewayUrl) || !Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException("Gateway URL must be a valid http/https absolute URL", nameof(gatewayUrl));
+        }
+
+        if (string.IsNullOrWhiteSpace(resourceUri))
+        {
+            throw new ArgumentException("Resource URI cannot be empty", nameof(resourceUri));
+        }
+
+        if (timeoutMs <= 0 || timeoutMs > 300000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeoutMs), "Timeout must be between 1 and 300000 ms");
+        }
+
+        _settings.SubscriberCommandPath = commandPath;
+        _settings.SubscriberArguments = arguments;
+        _settings.GatewayUrl = gatewayUrl;
+        _settings.ResourceUri = resourceUri;
+        _settings.NotificationTimeoutMs = timeoutMs;
         SaveSettings();
     }
 }
 
 internal sealed class AppSettings
 {
-    public int CheckIntervalHours { get; set; } = 2;
+    public string SubscriberCommandPath { get; set; } = "mcp-resource-subscriber";
+
+    public string SubscriberArguments { get; set; } = string.Empty;
+
+    public string GatewayUrl { get; set; } = "http://localhost:3000";
+
+    public string ResourceUri { get; set; } = "queue://review/queue";
+
+    public int NotificationTimeoutMs { get; set; } = 60000;
 }
