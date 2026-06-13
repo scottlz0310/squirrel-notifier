@@ -183,7 +183,7 @@ try {
         -Trigger $trigger `
         -Settings $settings `
         -Principal $principal `
-        -Description "Monitors review updates from mcp-gateway and notifies the user."
+        -Description "Monitors WSL kernel version and notifies when updates are available."
 
     Write-Host ""
     Write-Host "SUCCESS: Task registered successfully!" -ForegroundColor Green

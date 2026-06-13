@@ -7,11 +7,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![codecov](https://codecov.io/gh/YOUR_USERNAME/squirrel-notifier/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USERNAME/squirrel-notifier)
 
-Squirrel Notifierは、Windows上でレビュー更新などを監視し、通知を行う常駐型軽量アプリケーションです（安定版: 3.1.0）。
+Squirrel Notifierは、Windows上でWSL（Windows Subsystem for Linux）のカーネルバージョンを監視し、更新があった場合に通知を行う常駐型軽量アプリケーションです（安定版: 3.1.0）。
 
 ## 機能
 
-- レビュー更新の定期監視（1〜24時間で設定可能）
+- WSLカーネルバージョンの定期監視（1〜24時間で設定可能）
 - 更新時のトースト通知
 - ログファイルへの記録
 - システムトレイ常駐
