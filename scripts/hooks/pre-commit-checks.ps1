@@ -10,149 +10,57 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Running pre-commit quality and security checks..." -ForegroundColor Cyan
 
-# Helper function to validate YAML syntax (brackets, quotes, and indentation)
+# Helper function to validate YAML syntax using the real YamlDotNet parser
 function Test-YamlSyntax {
     param(
-        [string[]]$Lines,
+        [string]$Filepath,
         [string]$Filename
     )
 
-    $failed = $false
-    $lineNum = 0
-
-    # Use .NET List for reliable stack operations (avoiding PowerShell array slice bugs)
-    $bracketStack = [System.Collections.Generic.List[char]]::new()
-    $inSingleQuote = $false
-    $inDoubleQuote = $false
-
-    # For duplicate key checking
-    $indentStack = [System.Collections.Generic.List[int]]::new()
-    $indentStack.Add(-1)
-    $keysPerIndent = @{}
-
-    foreach ($line in $Lines) {
-        $lineNum++
-
-        $trimmed = $line.Trim()
-        if ($trimmed.StartsWith("#") -or $trimmed -eq "") {
-            continue
-        }
-
-        # 1. Tabs are not allowed in YAML
-        if ($line -match '^\t') {
-            Write-Host "ERROR: YAML file '$Filename' contains tabs for indentation at line $lineNum." -ForegroundColor Red
-            $failed = $true
-            continue
-        }
-
-        # Calculate indent level
-        $line -match '^ *' | Out-Null
-        $indent = $Matches[0].Length
-
-        # 2. Check for duplicate keys in same indent level
-        $isKeyLine = $false
-        $keyName = $null
-
-        if ($line -match '^( *)([^:#''"\{\[ ]+ *):(?: |$)') {
-            $isKeyLine = $true
-            $keyName = $Matches[2].Trim()
-        } elseif ($line -match '^( *)([''"])(.+?)\2 *:(?: |$)') {
-            $isKeyLine = $true
-            $keyName = $Matches[3]
-        }
-
-        if ($isKeyLine) {
-            # Maintain indent stack
-            while ($indentStack.Count -gt 0 -and $indentStack[$indentStack.Count - 1] -gt $indent) {
-                $deepIndent = $indentStack[$indentStack.Count - 1]
-                $keysPerIndent.Remove($deepIndent)
-                $indentStack.RemoveAt($indentStack.Count - 1)
-            }
-
-            if ($indentStack.Count -eq 0 -or $indentStack[$indentStack.Count - 1] -lt $indent) {
-                $indentStack.Add($indent)
-            }
-
-            if (-not $keysPerIndent.ContainsKey($indent)) {
-                $keysPerIndent[$indent] = [System.Collections.Generic.HashSet[string]]::new()
-            }
-
-            if ($keysPerIndent[$indent].Contains($keyName)) {
-                Write-Host "ERROR: YAML syntax error in staged '$Filename': Duplicate key '$keyName' at line $lineNum." -ForegroundColor Red
-                $failed = $true
-            } else {
-                $keysPerIndent[$indent].Add($keyName) | Out-Null
-            }
-        }
-
-        # 3. Parse brackets and quotes
-        $chars = $line.ToCharArray()
-        for ($i = 0; $i -lt $chars.Length; $i++) {
-            $char = $chars[$i]
-
-            if ($char -eq "'") {
-                if ($inDoubleQuote) { continue }
-                if ($i -gt 0 -and $chars[$i-1] -eq "\") { continue }
-                $inSingleQuote = -not $inSingleQuote
-                continue
-            }
-
-            if ($char -eq '"') {
-                if ($inSingleQuote) { continue }
-                if ($i -gt 0 -and $chars[$i-1] -eq "\") { continue }
-                $inDoubleQuote = -not $inDoubleQuote
-                continue
-            }
-
-            if ($inSingleQuote -or $inDoubleQuote) {
-                continue
-            }
-
-            if ($char -eq '#') {
-                break # Comment line starts
-            }
-
-            # Bracket stack operations
-            if ($char -eq '[' -or $char -eq '{') {
-                $bracketStack.Add($char)
-            }
-            elseif ($char -eq ']') {
-                if ($bracketStack.Count -gt 0 -and $bracketStack[$bracketStack.Count - 1] -eq '[') {
-                    $bracketStack.RemoveAt($bracketStack.Count - 1)
-                } else {
-                    Write-Host "ERROR: YAML syntax error in staged '$Filename': Unmatched ']' at line $lineNum." -ForegroundColor Red
-                    $failed = $true
-                }
-            }
-            elseif ($char -eq '}') {
-                if ($bracketStack.Count -gt 0 -and $bracketStack[$bracketStack.Count - 1] -eq '{') {
-                    $bracketStack.RemoveAt($bracketStack.Count - 1)
-                } else {
-                    Write-Host "ERROR: YAML syntax error in staged '$Filename': Unmatched '}' at line $lineNum." -ForegroundColor Red
-                    $failed = $true
-                }
-            }
-        }
-
-        # 4. Check for unterminated quotes at line end (exclude multiline syntax)
-        if ($inSingleQuote -or $inDoubleQuote) {
-            $isMultiLine = $trimmed -match ':\s*[\|>]\s*$'
-            if (-not $isMultiLine) {
-                Write-Host "ERROR: YAML syntax error in staged '$Filename': Unterminated string quote at line $lineNum." -ForegroundColor Red
-                $failed = $true
-                $inSingleQuote = $false
-                $inDoubleQuote = $false
-            }
+    # Search for YamlDotNet DLL generated by the tests build
+    $dllSearchPaths = @(
+        "winui3/SquirrelNotifier.WinUI3.Tests/bin/Release/net10.0-windows10.0.26100.0/win-x64/YamlDotNet.dll",
+        "winui3/SquirrelNotifier.WinUI3.Tests/bin/Debug/net10.0-windows10.0.26100.0/win-x64/YamlDotNet.dll"
+    )
+    $yamlDotNetDll = $null
+    foreach ($path in $dllSearchPaths) {
+        if (Test-Path $path) {
+            $yamlDotNetDll = (Resolve-Path $path).Path
+            break
         }
     }
 
-    # 5. Check for unclosed brackets at end of file
-    if ($bracketStack.Count -gt 0) {
-        Write-Host "ERROR: YAML syntax error in staged '$Filename': Unclosed bracket(s) '$($bracketStack -join ', ')' at end of file." -ForegroundColor Red
-        $failed = $true
+    if ($null -eq $yamlDotNetDll) {
+        Write-Host "ERROR: YamlDotNet.dll is missing! Please build the solution first: dotnet build winui3\SquirrelNotifier.WinUI3.sln" -ForegroundColor Red
+        return $false
     }
 
-    return -not $failed
+    try {
+        # Load YamlDotNet assembly into the PowerShell session
+        Add-Type -Path $yamlDotNetDll
+    } catch {
+        Write-Host "ERROR: Failed to load YamlDotNet assembly: $_" -ForegroundColor Red
+        return $false
+    }
+
+    $reader = $null
+    try {
+        $reader = [System.IO.StreamReader]::new($Filepath)
+        $deserializer = [YamlDotNet.Serialization.DeserializerBuilder]::new().Build()
+
+        # Parse YAML structure. Exceptions will be thrown on any syntax/semantic errors
+        $deserializer.Deserialize($reader) | Out-Null
+
+        return $true
+    } catch {
+        Write-Host "ERROR: YAML syntax error in staged '$Filename':" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Yellow
+        return $false
+    } finally {
+        if ($null -ne $reader) {
+            $reader.Close()
+        }
+    }
 }
 
 # Get staged files
@@ -217,10 +125,9 @@ foreach ($file in $stagedFiles) {
                     $failed = $true
                 }
 
-                # YAML syntax validation (Checking the actual STAGED blob)
+                # YAML syntax validation using real YamlDotNet parser
                 if ($ext -eq ".yml" -or $ext -eq ".yaml") {
-                    $stagedLines = [System.IO.File]::ReadAllLines($tempFile, [System.Text.Encoding]::UTF8)
-                    if (-not (Test-YamlSyntax -Lines $stagedLines -Filename $file)) {
+                    if (-not (Test-YamlSyntax -Filepath $tempFile -Filename $file)) {
                         $failed = $true
                     }
                 }
