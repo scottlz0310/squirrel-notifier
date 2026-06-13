@@ -1,5 +1,7 @@
 # Squirrel Notifier
 
+<img src="assets/squirrel-notifier.png" width="128" alt="Squirrel Notifier" />
+
 [![CI](https://github.com/YOUR_USERNAME/squirrel-notifier/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/squirrel-notifier/actions/workflows/ci.yml)
 [![Release](https://github.com/YOUR_USERNAME/squirrel-notifier/actions/workflows/release.yml/badge.svg)](https://github.com/YOUR_USERNAME/squirrel-notifier/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
