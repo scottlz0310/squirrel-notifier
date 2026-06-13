@@ -1,90 +1,74 @@
 <#
 .SYNOPSIS
-    Setup development environment for WSL Kernel Watcher.
+    Setup development environment for Squirrel Notifier.
 
 .DESCRIPTION
-    This script sets up the development environment by installing pre-commit
-    and configuring Git hooks.
+    This script sets up the development environment by installing Lefthook Git hooks
+    and restoring NuGet packages.
 
-.PARAMETER SkipPreCommit
-    Skip pre-commit installation (useful if you want to set up manually).
+.PARAMETER SkipHooks
+    Skip Lefthook installation.
 
 .EXAMPLE
     .\setup-dev.ps1
     Sets up the development environment.
 
 .EXAMPLE
-    .\setup-dev.ps1 -SkipPreCommit
-    Sets up the environment without pre-commit.
+    .\setup-dev.ps1 -SkipHooks
+    Sets up the environment without Lefthook hooks.
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$false)]
-    [switch]$SkipPreCommit
+    [switch]$SkipHooks
 )
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "WSL Kernel Watcher Development Setup" -ForegroundColor Cyan
+Write-Host "Squirrel Notifier Development Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Check if Python is installed
-$pythonInstalled = $null -ne (Get-Command python -ErrorAction SilentlyContinue)
+# Check if Lefthook is installed
+if (-not $SkipHooks) {
+    $lefthookInstalled = $null -ne (Get-Command lefthook -ErrorAction SilentlyContinue)
 
-if (-not $pythonInstalled) {
-    Write-Host "WARNING: Python is not installed." -ForegroundColor Yellow
-    Write-Host "Python is required for pre-commit hooks." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Please install Python from: https://www.python.org/downloads/" -ForegroundColor Cyan
-    Write-Host "Or use: winget install Python.Python.3.12" -ForegroundColor Cyan
-    Write-Host ""
-    $response = Read-Host "Continue without pre-commit setup? (Y/N)"
-    if ($response -ne 'Y' -and $response -ne 'y') {
-        exit 0
+    if (-not $lefthookInstalled) {
+        Write-Host "ERROR: Lefthook is not installed." -ForegroundColor Red
+        Write-Host "Lefthook is required for running Git hooks under our standard quality toolchain." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please install Lefthook using one of the following methods:" -ForegroundColor Cyan
+        Write-Host "  • winget: winget install evilmartians.lefthook" -ForegroundColor Cyan
+        Write-Host "  • scoop:  scoop install lefthook" -ForegroundColor Cyan
+        Write-Host "  • npm:    npm install -g @evilmartians/lefthook" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Or, if you intentionally want to bypass hooks (not recommended for production development)," -ForegroundColor Yellow
+        Write-Host "run the setup script with the -SkipHooks parameter:" -ForegroundColor Yellow
+        Write-Host "  pwsh -File .\scripts\setup-dev.ps1 -SkipHooks" -ForegroundColor White
+        Write-Host ""
+        exit 1
     }
-    $SkipPreCommit = $true
 }
 
-# Install pre-commit
-if (-not $SkipPreCommit) {
-    Write-Host "Installing pre-commit..." -ForegroundColor Yellow
+# Install Lefthook hooks
+if (-not $SkipHooks) {
+    Write-Host "Installing Lefthook Git hooks..." -ForegroundColor Yellow
 
     try {
-        # Check if pre-commit is already installed
-        $preCommitInstalled = $null -ne (Get-Command pre-commit -ErrorAction SilentlyContinue)
-
-        if (-not $preCommitInstalled) {
-            python -m pip install --user pre-commit
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to install pre-commit"
-            }
-            Write-Host "✓ pre-commit installed" -ForegroundColor Green
-        } else {
-            Write-Host "✓ pre-commit already installed" -ForegroundColor Green
-        }
-
-        # Install pre-commit hooks
-        Write-Host "Installing pre-commit hooks..." -ForegroundColor Yellow
-        pre-commit install
-        pre-commit install --hook-type pre-push
-
+        lefthook install
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ pre-commit hooks installed" -ForegroundColor Green
+            Write-Host "✓ Lefthook hooks installed successfully" -ForegroundColor Green
         } else {
-            throw "Failed to install pre-commit hooks"
+            throw "Failed to install lefthook hooks"
         }
-
     } catch {
-        Write-Host "ERROR: Failed to setup pre-commit" -ForegroundColor Red
+        Write-Host "ERROR: Failed to setup Lefthook" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
         Write-Host ""
-        Write-Host "You can setup pre-commit manually later by running:" -ForegroundColor Yellow
-        Write-Host "  python -m pip install --user pre-commit" -ForegroundColor White
-        Write-Host "  pre-commit install" -ForegroundColor White
-        Write-Host "  pre-commit install --hook-type pre-push" -ForegroundColor White
+        Write-Host "You can setup Lefthook manually later by running:" -ForegroundColor Yellow
+        Write-Host "  lefthook install" -ForegroundColor White
     }
 }
 
@@ -92,7 +76,7 @@ Write-Host ""
 Write-Host "Restoring NuGet packages..." -ForegroundColor Yellow
 
 try {
-    dotnet restore winui3/WSLKernelWatcher.WinUI3.sln
+    dotnet restore winui3/SquirrelNotifier.WinUI3.sln
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✓ NuGet packages restored" -ForegroundColor Green
     }
@@ -107,22 +91,22 @@ Write-Host "Development environment setup complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-if (-not $SkipPreCommit) {
-    Write-Host "Pre-commit hooks are now active:" -ForegroundColor Cyan
+if (-not $SkipHooks) {
+    Write-Host "Lefthook Git hooks are now active:" -ForegroundColor Cyan
     Write-Host "  • On commit: Code formatting & build check" -ForegroundColor White
     Write-Host "  • On push: Test execution & coverage check" -ForegroundColor White
     Write-Host ""
 }
 
 Write-Host "Quick commands:" -ForegroundColor Cyan
-Write-Host "  • Format code:  dotnet format winui3/WSLKernelWatcher.WinUI3.sln" -ForegroundColor White
-Write-Host "  • Build:        dotnet build winui3/WSLKernelWatcher.WinUI3.sln -c Release /p:Platform=x64" -ForegroundColor White
-Write-Host "  • Run tests:    dotnet test winui3/WSLKernelWatcher.WinUI3.sln" -ForegroundColor White
+Write-Host "  • Format code:  dotnet format winui3/SquirrelNotifier.WinUI3.sln" -ForegroundColor White
+Write-Host "  • Build:        dotnet build winui3/SquirrelNotifier.WinUI3.sln -c Release /p:Platform=x64" -ForegroundColor White
+Write-Host "  • Run tests:    dotnet test winui3/SquirrelNotifier.WinUI3.sln" -ForegroundColor White
 Write-Host "  • Install app:  .\scripts\install.ps1 -StartMinimized" -ForegroundColor White
 Write-Host ""
 
-if (-not $SkipPreCommit) {
-    Write-Host "To skip pre-commit hooks temporarily:" -ForegroundColor Cyan
+if (-not $SkipHooks) {
+    Write-Host "To skip Lefthook hooks temporarily:" -ForegroundColor Cyan
     Write-Host "  git commit --no-verify" -ForegroundColor White
     Write-Host "  git push --no-verify" -ForegroundColor White
     Write-Host ""

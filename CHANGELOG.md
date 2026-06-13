@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- アプリケーション、ソリューション、プロジェクト、アセンブリ名、および C# の名前空間を `SquirrelNotifier` へ統一
+- 設定保存先ディレクトリを `%LocalAppData%\WSLKernelWatcher` から `%LocalAppData%\SquirrelNotifier` に変更
+- ウィンドウタイトル、トレイアイコンのツールチップ、メニュー、アプリ表示名を `Squirrel Notifier` へ変更
+- 自動更新用の GitHub リポジトリ URL および User-Agent を `squirrel-notifier` に追従
+- タスクスケジューラのタスク登録（`install.ps1`）を `Squirrel Notifier` に変更し、旧タスク検出時に手動移行手順を促すよう改善
+- アプリケーションのアイコンファイルを `squirrel-notifier.ico` (新アセット `assets/squirrel-notifier.png` を基に生成) に差し替え
+- 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
+
 ## [3.1.0] - 2025-12-15
 
 ### Added
@@ -180,8 +191,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - レート制限対応
 - リトライ機能
 
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/scottlz0310/WSL-kernel-watcher/compare/v2.1.1...v3.0.0
-[3.1.0]: https://github.com/scottlz0310/WSL-kernel-watcher/compare/v3.0.0...v3.1.0
 [2.1.1]: https://github.com/scottlz0310/WSL-kernel-watcher/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/scottlz0310/WSL-kernel-watcher/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/scottlz0310/WSL-kernel-watcher/compare/v1.2.0...v2.0.0

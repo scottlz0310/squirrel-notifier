@@ -1,0 +1,16 @@
+# Lefthook configuration
+# Refer to https://github.com/evilmartians/lefthook/blob/master/docs/configuration.md
+
+pre-commit:
+  commands:
+    quality-and-security:
+      run: pwsh -File scripts/hooks/pre-commit-checks.ps1
+    dotnet-format:
+      run: pwsh -File scripts/hooks/pre-commit-format.ps1
+    dotnet-build:
+      run: pwsh -File scripts/hooks/pre-commit-build.ps1
+
+pre-push:
+  commands:
+    dotnet-test:
+      run: pwsh -File scripts/hooks/pre-commit-test.ps1

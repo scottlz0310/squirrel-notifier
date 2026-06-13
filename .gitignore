@@ -227,7 +227,7 @@ project.lock.json
 publish/
 
 # Test coverage outputs
-winui3/WSLKernelWatcher.WinUI3.Tests/coverage*.xml
+winui3/SquirrelNotifier.WinUI3.Tests/coverage*.xml
 
 # Auto-generated entries from templates
 *.manifest

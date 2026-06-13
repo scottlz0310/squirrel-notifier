@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Uninstall WSL Kernel Watcher from Task Scheduler.
+    Uninstall Squirrel Notifier from Task Scheduler.
 
 .DESCRIPTION
-    This script removes the WSL Kernel Watcher scheduled task and optionally stops
+    This script removes the Squirrel Notifier scheduled task and optionally stops
     the running process.
 
 .PARAMETER KeepSettings
@@ -27,10 +27,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Task name
-$TaskName = "WSL Kernel Watcher"
+$TaskName = "Squirrel Notifier"
 
 Write-Host "===========================================" -ForegroundColor Cyan
-Write-Host "WSL Kernel Watcher Uninstallation Script" -ForegroundColor Cyan
+Write-Host "Squirrel Notifier Uninstallation Script" -ForegroundColor Cyan
 Write-Host "===========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -42,15 +42,15 @@ if (-not $existingTask) {
     Write-Host "It may have already been uninstalled." -ForegroundColor Yellow
 } else {
     # Check if process is running
-    $processName = "WSLKernelWatcher.WinUI3"
+    $processName = "SquirrelNotifier.WinUI3"
     $process = Get-Process -Name $processName -ErrorAction SilentlyContinue
 
     if ($process) {
-        Write-Host "WSL Kernel Watcher is currently running." -ForegroundColor Yellow
+        Write-Host "Squirrel Notifier is currently running." -ForegroundColor Yellow
         $response = Read-Host "Do you want to stop it? (Y/N)"
 
         if ($response -eq 'Y' -or $response -eq 'y') {
-            Write-Host "Stopping WSL Kernel Watcher..." -ForegroundColor Yellow
+            Write-Host "Stopping Squirrel Notifier..." -ForegroundColor Yellow
             try {
                 Stop-Process -Name $processName -Force -ErrorAction Stop
                 Start-Sleep -Seconds 2
@@ -76,7 +76,7 @@ if (-not $existingTask) {
 Write-Host ""
 
 # Handle settings
-$settingsPath = "$env:LOCALAPPDATA\WSLKernelWatcher"
+$settingsPath = "$env:LOCALAPPDATA\SquirrelNotifier"
 
 if (Test-Path $settingsPath) {
     if ($KeepSettings) {

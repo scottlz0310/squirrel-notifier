@@ -14,4 +14,4 @@
 - `scripts/setup-dev.ps1`: 初回セットアップ（pre-commit インストール、NuGet 復元など）。
 
 ### 補足: インストーラ用バンドル
-リリースワークフローで `publish/<platform>` の実行ファイルと `install.ps1` / `uninstall.ps1` を同梱した Zip (`WSLKernelWatcher-Setup-<version>-x64.zip`) を生成し、リリースアセットに含めます。README にダウンロード方法を追記してください。
+リリースワークフローで `publish/<platform>` の実行ファイルと `install.ps1` / `uninstall.ps1` を同梱した Zip (`SquirrelNotifier-Setup-<version>-x64.zip`) を生成し、リリースアセットに含めます。README にダウンロード方法を追記してください。
