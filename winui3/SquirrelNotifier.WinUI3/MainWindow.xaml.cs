@@ -10,7 +10,9 @@ using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SquirrelNotifier.WinUI3.Helpers;
+using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
+using Windows.Foundation;
 using Windows.Graphics;
 using WinRT;
 
@@ -31,6 +33,7 @@ internal sealed partial class MainWindow : Window
     private readonly nint _hwnd;
     private readonly bool _isInitializing = true;
     private readonly INotificationService _notificationService;
+    private readonly IReviewLauncherService _launcherService;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
 
@@ -62,7 +65,14 @@ internal sealed partial class MainWindow : Window
     private const uint _imageIcon = 1;
     private const uint _lrLoadFromFile = 0x00000010;
 
-    internal MainWindow(McpSubscriptionService service, LoggingService loggingService, SettingsService settingsService, AutoUpdateService autoUpdateService, INotificationService notificationService, bool showWindow = true)
+    internal MainWindow(
+        McpSubscriptionService service,
+        LoggingService loggingService,
+        SettingsService settingsService,
+        AutoUpdateService autoUpdateService,
+        INotificationService notificationService,
+        IReviewLauncherService launcherService,
+        bool showWindow = true)
     {
         InitializeComponent();
 
@@ -81,10 +91,12 @@ internal sealed partial class MainWindow : Window
         _settingsService = settingsService;
         _autoUpdateService = autoUpdateService;
         _notificationService = notificationService;
+        _launcherService = launcherService;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
         _notificationService.ReviewEventReceived += OnReviewEventReceived;
+        _notificationService.LaunchReviewRequested += OnLaunchReviewRequested;
         LogList.ItemsSource = _logEntries;
         ReviewEventList.ItemsSource = _reviewEvents;
 
@@ -95,6 +107,9 @@ internal sealed partial class MainWindow : Window
         GatewayUrlBox.Text = settings.GatewayUrl;
         ResourceUriBox.Text = settings.ResourceUri;
         TimeoutBox.Value = settings.NotificationTimeoutMs;
+        LauncherPathBox.Text = settings.LauncherCommandPath;
+        LauncherArgumentsBox.Text = settings.LauncherArguments;
+        LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
 
         _isInitializing = false;
 
@@ -224,6 +239,7 @@ internal sealed partial class MainWindow : Window
         _service.StateChanged -= OnStateChanged;
         _loggingService.LogAppended -= OnLogAppended;
         _notificationService.ReviewEventReceived -= OnReviewEventReceived;
+        _notificationService.LaunchReviewRequested -= OnLaunchReviewRequested;
         _trayIconService?.Dispose();
         _contextMenu?.Dispose();
         Close();
@@ -336,7 +352,19 @@ internal sealed partial class MainWindow : Window
             string resourceUri = ResourceUriBox.Text;
             int timeoutMs = double.IsNaN(TimeoutBox.Value) ? 60000 : (int)TimeoutBox.Value;
 
-            _settingsService.UpdateSettings(commandPath, arguments, gatewayUrl, resourceUri, timeoutMs);
+            string launcherPath = LauncherPathBox.Text;
+            string launcherArguments = LauncherArgumentsBox.Text;
+            int launcherTimeoutMs = double.IsNaN(LauncherTimeoutBox.Value) ? 300000 : (int)LauncherTimeoutBox.Value;
+
+            _settingsService.UpdateSettings(
+                commandPath,
+                arguments,
+                gatewayUrl,
+                resourceUri,
+                timeoutMs,
+                launcherPath,
+                launcherArguments,
+                launcherTimeoutMs);
         }
         catch
         {
@@ -461,6 +489,142 @@ internal sealed partial class MainWindow : Window
                     // ignore
                 }
             }
+        }
+    }
+
+    private void OnLaunchReviewRequested(object? sender, string eventId)
+    {
+        _ = DispatcherQueue.TryEnqueue(async () =>
+        {
+            Models.ReviewEvent? targetEvent = null;
+            foreach (Models.ReviewEvent ev in _reviewEvents)
+            {
+                if (ev.EventId == eventId)
+                {
+                    targetEvent = ev;
+                    break;
+                }
+            }
+
+            if (targetEvent == null)
+            {
+                await _loggingService.WriteAsync($"Launch request ignored: event with ID {eventId} not found in history.").ConfigureAwait(false);
+                return;
+            }
+
+            ShowWindowFromTray();
+            await ExecuteReviewAsync(targetEvent).ConfigureAwait(false);
+        });
+    }
+
+    private async void OnLaunchReviewClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.CommandParameter is Models.ReviewEvent reviewEvent)
+        {
+            await ExecuteReviewAsync(reviewEvent).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ExecuteReviewAsync(Models.ReviewEvent reviewEvent)
+    {
+        if (_launcherService.IsRunning)
+        {
+            ContentDialog dialog = new ContentDialog
+            {
+                Title = "レビュー実行エラー",
+                Content = "別のレビューアクションが既に実行中です。",
+                CloseButtonText = "閉じる",
+                XamlRoot = Content.XamlRoot,
+            };
+            await dialog.ShowAsync(ContentDialogPlacement.Popup);
+            return;
+        }
+
+        try
+        {
+            using CancellationTokenSource cts = new CancellationTokenSource();
+
+            ProgressRing progressRing = new ProgressRing { IsActive = true, Margin = new Thickness(0, 16, 0, 0) };
+            StackPanel panel = new StackPanel();
+            panel.Children.Add(new TextBlock { Text = $"{reviewEvent.Repository}#{reviewEvent.PrNumber} のレビューを実行しています..." });
+            panel.Children.Add(progressRing);
+
+            ContentDialog dialog = new ContentDialog
+            {
+                Title = "レビュー実行中",
+                Content = panel,
+                CloseButtonText = "キャンセル",
+                XamlRoot = Content.XamlRoot,
+            };
+
+            Task<LauncherResult> launchTask = _launcherService.LaunchAsync(reviewEvent, cts.Token);
+            IAsyncOperation<ContentDialogResult> dialogTask = dialog.ShowAsync(ContentDialogPlacement.Popup);
+
+            Task completedTask = await Task.WhenAny(launchTask, dialogTask.AsTask()).ConfigureAwait(true);
+
+            if (completedTask == launchTask)
+            {
+                dialog.Hide();
+                LauncherResult result = await launchTask.ConfigureAwait(true);
+
+                StackPanel resultPanel = new StackPanel { Spacing = 8 };
+                if (result.Success)
+                {
+                    resultPanel.Children.Add(new TextBlock { Text = "レビューの実行に成功しました。", FontWeight = Microsoft.UI.Text.FontWeights.Bold });
+                }
+                else
+                {
+                    string err = string.IsNullOrEmpty(result.ErrorMessage) ? "レビューが異常終了しました。" : result.ErrorMessage;
+                    resultPanel.Children.Add(new TextBlock
+                    {
+                        Text = $"エラー: {err}",
+                        Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red),
+                    });
+                }
+
+                if (result.ExitCode.HasValue)
+                {
+                    resultPanel.Children.Add(new TextBlock { Text = $"終了コード: {result.ExitCode}" });
+                }
+
+                if (!string.IsNullOrWhiteSpace(result.Stdout))
+                {
+                    resultPanel.Children.Add(new TextBlock { Text = "標準出力:", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+                    resultPanel.Children.Add(new TextBox { Text = result.Stdout, TextWrapping = TextWrapping.Wrap, IsReadOnly = true, MaxHeight = 120, AcceptsReturn = true });
+                }
+
+                if (!string.IsNullOrWhiteSpace(result.Stderr))
+                {
+                    resultPanel.Children.Add(new TextBlock { Text = "標準エラー出力:", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+                    resultPanel.Children.Add(new TextBox { Text = result.Stderr, TextWrapping = TextWrapping.Wrap, IsReadOnly = true, MaxHeight = 120, AcceptsReturn = true });
+                }
+
+                ContentDialog resultDialog = new ContentDialog
+                {
+                    Title = result.Success ? "レビュー実行成功" : "レビュー実行失敗",
+                    Content = resultPanel,
+                    CloseButtonText = "閉じる",
+                    XamlRoot = Content.XamlRoot,
+                };
+                await resultDialog.ShowAsync(ContentDialogPlacement.Popup);
+            }
+            else
+            {
+                cts.Cancel();
+                _launcherService.Cancel();
+                await launchTask.ConfigureAwait(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            ContentDialog errDialog = new ContentDialog
+            {
+                Title = "エラー",
+                Content = $"レビューの実行中に予期しないエラーが発生しました:\n{ex.Message}",
+                CloseButtonText = "閉じる",
+                XamlRoot = Content.XamlRoot,
+            };
+            await errDialog.ShowAsync(ContentDialogPlacement.Popup);
         }
     }
 }

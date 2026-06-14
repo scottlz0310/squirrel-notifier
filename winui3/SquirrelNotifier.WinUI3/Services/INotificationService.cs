@@ -11,7 +11,9 @@ internal interface INotificationService
 
     void NotifyReviewEvent(ReviewEvent reviewEvent);
 
-    event EventHandler<ReviewEvent>? ReviewEventReceived;
+    event System.EventHandler<ReviewEvent>? ReviewEventReceived;
 
-    event EventHandler? OpenAppRequested;
+    event System.EventHandler? OpenAppRequested;
+
+    event System.EventHandler<string>? LaunchReviewRequested;
 }

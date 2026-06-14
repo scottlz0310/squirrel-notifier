@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- ユーザー起点の安全な外部 launcher (`ReviewLauncherService`) を実装。通知またはアプリ UI から、設定された外部レビューアクションを安全に起動可能に
+- 安全な引数置換機構 (`LauncherArgumentBuilder`) を導入。プレースホルダー (`{owner}`, `{repo}`, `{prNumber}`, `{prUrl}`) を用いて、シェルインジェクションを完全に防ぎつつ安全に引数を構築
+- 設定ウィンドウに外部 launcher 用の設定項目 (Launcher Path, Launcher Args, Launcher Timeout) を追加
+- トースト通知に「レビューを起動」ボタンを追加し、通知から即座にレビュー実行をトリガー可能に
+- レビュー実行中のステータス表示、ユーザーからのキャンセル、実行完了後の詳細な結果 (終了コード、stdout/stderr) を表示するダイアログ UI を MainWindow に追加
 - MCP 購読ブリッジ機構 (`McpSubscriptionService`) を新設。`mcp-resource-subscriber` と連携し、外部 MCP リソースからのレビュー更新イベントを取得可能に
 - `McpSubscriptionService` 用の動作確認 UI を設定ウィンドウに追加（コマンド実行パス、引数、URL、リソース URI、タイムアウト of 編集に対応）
 - `mcp-resource-subscriber` から受信した JSON 形式のレビューイベント（`ReviewEvent`）をパースするデシリアライズ・検証機構を導入

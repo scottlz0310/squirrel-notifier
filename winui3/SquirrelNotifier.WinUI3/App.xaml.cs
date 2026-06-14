@@ -19,6 +19,7 @@ public partial class App : Application
     private readonly SettingsService _settingsService = new();
     private readonly McpSubscriptionService _subscriptionService;
     private readonly AutoUpdateService _autoUpdateService;
+    private readonly ReviewLauncherService _launcherService;
 
     public App()
     {
@@ -29,6 +30,7 @@ public partial class App : Application
 
         // Create subscription service with settings
         _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService);
+        _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
     }
 
@@ -38,7 +40,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, showWindow);
         _window.Closed += OnWindowClosed;
 
         // Activate window if it should be shown

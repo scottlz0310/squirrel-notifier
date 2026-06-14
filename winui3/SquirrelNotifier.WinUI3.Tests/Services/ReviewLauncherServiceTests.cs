@@ -1,0 +1,207 @@
+// <copyright file="ReviewLauncherServiceTests.cs" company="PlaceholderCompany">
+// Copyright (c) PlaceholderCompany. All rights reserved.
+// </copyright>
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using FluentAssertions;
+using Moq;
+using SquirrelNotifier.WinUI3.Models;
+using SquirrelNotifier.WinUI3.Services;
+using Xunit;
+
+namespace SquirrelNotifier.WinUI3.Tests.Services;
+
+public class ReviewLauncherServiceTests : IDisposable
+{
+    private readonly string _tempDir;
+    private readonly SettingsService _settingsService;
+    private readonly LoggingService _loggingService;
+
+    public ReviewLauncherServiceTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), $"ReviewLauncherTests_{Guid.NewGuid()}");
+        Directory.CreateDirectory(_tempDir);
+        _settingsService = new SettingsService(_tempDir);
+        _loggingService = new LoggingService(_tempDir);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDir))
+        {
+            Directory.Delete(_tempDir, true);
+        }
+    }
+
+    private Mock<IProcessInstance> CreateMockProcess(int exitCode, string stdout, string stderr, int delayMs = 0)
+    {
+        var mockProcess = new Mock<IProcessInstance>();
+        mockProcess.SetupGet(p => p.ExitCode).Returns(exitCode);
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stdout))));
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stderr))));
+
+        if (delayMs > 0)
+        {
+            mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                .Returns(async (CancellationToken t) => await Task.Delay(delayMs, t));
+        }
+        else
+        {
+            mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+        }
+
+        return mockProcess;
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldRunSuccessfullyAndReturnExitCodeZero()
+    {
+        // Arrange
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-event-1",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52"
+        };
+
+        _settingsService.UpdateSettings("my-review-cmd", "--repo {owner}/{repo}", "http://localhost:3000", "queue://res", 30000, "launcher-cmd", "--launcher-arg", 10000);
+
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Success Output", "");
+        ProcessStartInfo? capturedPsi = null;
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
+            .Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        LauncherResult result = await service.LaunchAsync(reviewEvent, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExitCode.Should().Be(0);
+        result.Stdout.Should().Be("Success Output");
+        result.Stderr.Should().BeEmpty();
+
+        capturedPsi.Should().NotBeNull();
+        capturedPsi!.FileName.Should().Contain("launcher-cmd");
+        capturedPsi.ArgumentList.Should().Contain("--launcher-arg");
+        mockProcess.Verify(p => p.Dispose(), Times.Once);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldPreventDoubleActivation()
+    {
+        // Arrange
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-event-2",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52"
+        };
+
+        _settingsService.UpdateSettings("my-review-cmd", "--repo {owner}/{repo}", "http://localhost:3000", "queue://res", 30000, "launcher-cmd", "--launcher-arg", 10000);
+
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Success Output", "", delayMs: 1000);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act & Assert
+        Task<LauncherResult> firstRunTask = service.LaunchAsync(reviewEvent, CancellationToken.None);
+
+        // Wait a small delay to make sure the first run has set _isRunning to true
+        await Task.Delay(100);
+
+        LauncherResult secondResult = await service.LaunchAsync(reviewEvent, CancellationToken.None);
+        secondResult.Success.Should().BeFalse();
+        secondResult.ErrorMessage.Should().Contain("already running");
+
+        LauncherResult firstResult = await firstRunTask;
+        firstResult.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldSupportCancellation()
+    {
+        // Arrange
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-event-3",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52"
+        };
+
+        _settingsService.UpdateSettings("my-review-cmd", "--repo {owner}/{repo}", "http://localhost:3000", "queue://res", 30000, "launcher-cmd", "--launcher-arg", 10000);
+
+        // Delay mock process to simulate execution time
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Pending...", "", delayMs: 5000);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        using var cts = new CancellationTokenSource();
+
+        // Act
+        Task<LauncherResult> launchTask = service.LaunchAsync(reviewEvent, cts.Token);
+
+        await Task.Delay(100);
+        cts.Cancel();
+
+        LauncherResult result = await launchTask;
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("cancelled by user");
+        mockProcess.Verify(p => p.Kill(true), Times.Once);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldTimeoutProcess()
+    {
+        // Arrange
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-event-4",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52"
+        };
+
+        // Timeout is set to 200ms
+        _settingsService.UpdateSettings("my-review-cmd", "--repo {owner}/{repo}", "http://localhost:3000", "queue://res", 30000, "launcher-cmd", "--launcher-arg", 200);
+
+        // Process takes 5000ms
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Slow...", "", delayMs: 5000);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        LauncherResult result = await service.LaunchAsync(reviewEvent, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("timed out");
+        mockProcess.Verify(p => p.Kill(true), Times.Once);
+    }
+}
