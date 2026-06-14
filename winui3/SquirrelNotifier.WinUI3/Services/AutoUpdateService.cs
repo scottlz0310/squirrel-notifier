@@ -27,47 +27,88 @@ internal sealed class AutoUpdateService : IDisposable
 
     public async Task<AutoUpdateResult> CheckForUpdatesAsync(CancellationToken cancellationToken)
     {
-        try
+        const int maxAttempts = 3;
+        int delayMs = 1000;
+        int attempt = 0;
+
+        while (attempt < maxAttempts)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, _releasesUrl);
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            cancellationToken.ThrowIfCancellationRequested();
+            attempt++;
+            bool isLastAttempt = attempt == maxAttempts;
+
+            try
             {
-                await _loggingService.WriteAsync($"自動更新チェックに失敗しました: {response.StatusCode}").ConfigureAwait(false);
-                return AutoUpdateResult.NoUpdate(_currentVersion);
-            }
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(5));
 
-            string content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            using JsonDocument doc = JsonDocument.Parse(content);
-            if (!doc.RootElement.TryGetProperty("tag_name", out JsonElement tagElement))
+                using var request = new HttpRequestMessage(HttpMethod.Get, _releasesUrl);
+                using HttpResponseMessage response = await _httpClient.SendAsync(request, cts.Token).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    if (isLastAttempt)
+                    {
+                        await _loggingService.WriteAsync($"自動更新チェックに失敗しました: {response.StatusCode}").ConfigureAwait(false);
+                        return AutoUpdateResult.NoUpdate(_currentVersion);
+                    }
+
+                    await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+                    delayMs *= 2;
+                    continue;
+                }
+
+                string content = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                using JsonDocument doc = JsonDocument.Parse(content);
+                if (!doc.RootElement.TryGetProperty("tag_name", out JsonElement tagElement))
+                {
+                    return AutoUpdateResult.NoUpdate(_currentVersion);
+                }
+
+                string? tag = tagElement.GetString();
+                if (string.IsNullOrWhiteSpace(tag))
+                {
+                    return AutoUpdateResult.NoUpdate(_currentVersion);
+                }
+
+                string rawVersion = tag.TrimStart('v', 'V');
+                if (!Version.TryParse(rawVersion, out Version? latestVersion))
+                {
+                    return AutoUpdateResult.NoUpdate(_currentVersion);
+                }
+
+                string releaseUrl = doc.RootElement.TryGetProperty("html_url", out JsonElement htmlUrl)
+                    ? htmlUrl.GetString() ?? string.Empty
+                    : string.Empty;
+
+                bool hasUpdate = latestVersion > _currentVersion;
+                return new AutoUpdateResult(_currentVersion, latestVersion, hasUpdate, tag, releaseUrl);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return AutoUpdateResult.NoUpdate(_currentVersion);
+                throw;
             }
-
-            string? tag = tagElement.GetString();
-            if (string.IsNullOrWhiteSpace(tag))
+            catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is JsonException || ex is OperationCanceledException)
             {
-                return AutoUpdateResult.NoUpdate(_currentVersion);
+                if (isLastAttempt)
+                {
+                    await _loggingService.WriteAsync($"自動更新チェックに失敗しました: {ex.Message}").ConfigureAwait(false);
+                    return AutoUpdateResult.NoUpdate(_currentVersion);
+                }
+
+                try
+                {
+                    await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+
+                delayMs *= 2;
             }
-
-            string rawVersion = tag.TrimStart('v', 'V');
-            if (!Version.TryParse(rawVersion, out Version? latestVersion))
-            {
-                return AutoUpdateResult.NoUpdate(_currentVersion);
-            }
-
-            string releaseUrl = doc.RootElement.TryGetProperty("html_url", out JsonElement htmlUrl)
-                ? htmlUrl.GetString() ?? string.Empty
-                : string.Empty;
-
-            bool hasUpdate = latestVersion > _currentVersion;
-            return new AutoUpdateResult(_currentVersion, latestVersion, hasUpdate, tag, releaseUrl);
         }
-        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is JsonException)
-        {
-            await _loggingService.WriteAsync($"自動更新チェックに失敗しました: {ex.Message}").ConfigureAwait(false);
-            return AutoUpdateResult.NoUpdate(_currentVersion);
-        }
+
+        return AutoUpdateResult.NoUpdate(_currentVersion);
     }
 
     public void Dispose()

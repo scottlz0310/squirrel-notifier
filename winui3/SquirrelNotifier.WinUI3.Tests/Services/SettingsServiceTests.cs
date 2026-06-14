@@ -152,4 +152,23 @@ public class SettingsServiceTests : IDisposable
         // Assert
         eventRaised.Should().BeTrue();
     }
+
+    [Fact]
+    public void UpdateLastSkippedVersion_ShouldUpdateAndPersistVersion()
+    {
+        // Arrange
+        bool eventRaised = false;
+        _settingsService.SettingsChanged += (_, _) => eventRaised = true;
+
+        // Act
+        _settingsService.UpdateLastSkippedVersion("v3.1.0");
+
+        // Assert
+        _settingsService.Settings.LastSkippedVersion.Should().Be("v3.1.0");
+        eventRaised.Should().BeTrue();
+
+        // Verify persistence
+        var anotherService = new SettingsService(_settingsDirectory);
+        anotherService.Settings.LastSkippedVersion.Should().Be("v3.1.0");
+    }
 }
