@@ -1,8 +1,10 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-06-14
 
 ### Added
 - 起動時自動チェック等において、特定のバージョンをスキップするための「スキップされたバージョン」保存機能 (`LastSkippedVersion`) を `AppSettings`/`SettingsService` に追加
@@ -215,7 +217,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - レート制限対応
 - リトライ機能
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/scottlz0310/squirrel-notifier/releases/tag/v0.1.0
 [3.1.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/scottlz0310/WSL-kernel-watcher/compare/v2.1.1...v3.0.0
 [2.1.1]: https://github.com/scottlz0310/WSL-kernel-watcher/compare/v2.1.0...v2.1.1
