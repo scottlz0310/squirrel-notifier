@@ -57,7 +57,7 @@ internal sealed class AutoUpdateService : IDisposable
                     continue;
                 }
 
-                string content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                string content = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
                 using JsonDocument doc = JsonDocument.Parse(content);
                 if (!doc.RootElement.TryGetProperty("tag_name", out JsonElement tagElement))
                 {

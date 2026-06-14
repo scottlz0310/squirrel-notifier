@@ -34,6 +34,7 @@ internal sealed partial class MainWindow : Window
     private readonly bool _isInitializing = true;
     private readonly INotificationService _notificationService;
     private readonly IReviewLauncherService _launcherService;
+    private bool _isCheckingForUpdates;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
 
@@ -385,27 +386,30 @@ internal sealed partial class MainWindow : Window
 
     private async Task CheckForUpdatesAsync(bool showNoUpdateDialog)
     {
+        if (_isCheckingForUpdates)
+        {
+            return;
+        }
+
+        _isCheckingForUpdates = true;
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            AutoUpdateResult result = await _autoUpdateService.CheckForUpdatesAsync(cts.Token).ConfigureAwait(false);
+            AutoUpdateResult result = await _autoUpdateService.CheckForUpdatesAsync(cts.Token);
             if (!result.HasUpdate || string.IsNullOrWhiteSpace(result.ReleaseUrl))
             {
                 if (showNoUpdateDialog)
                 {
-                    _ = DispatcherQueue.TryEnqueue(async () =>
+                    var noUpdateDialog = new ContentDialog
                     {
-                        var dialog = new ContentDialog
-                        {
-                            Title = "最新バージョンを利用中です",
-                            Content = "新しいバージョンは見つかりませんでした。",
-                            CloseButtonText = "閉じる",
-                            DefaultButton = ContentDialogButton.Close,
-                            XamlRoot = Content.XamlRoot,
-                        };
+                        Title = "最新バージョンを利用中です",
+                        Content = "新しいバージョンは見つかりませんでした。",
+                        CloseButtonText = "閉じる",
+                        DefaultButton = ContentDialogButton.Close,
+                        XamlRoot = Content.XamlRoot,
+                    };
 
-                        await dialog.ShowAsync(ContentDialogPlacement.Popup);
-                    });
+                    await noUpdateDialog.ShowAsync(ContentDialogPlacement.Popup);
                 }
 
                 return;
@@ -418,33 +422,34 @@ internal sealed partial class MainWindow : Window
                 return;
             }
 
-            _ = DispatcherQueue.TryEnqueue(async () =>
+            var updateDialog = new ContentDialog
             {
-                var dialog = new ContentDialog
-                {
-                    Title = "新しいバージョンがあります",
-                    Content = $"最新バージョン {result.LatestVersion} がリリースされています。ダウンロードページを開きますか？",
-                    PrimaryButtonText = "ダウンロード",
-                    SecondaryButtonText = "このバージョンをスキップ",
-                    CloseButtonText = "後で",
-                    DefaultButton = ContentDialogButton.Primary,
-                    XamlRoot = Content.XamlRoot,
-                };
+                Title = "新しいバージョンがあります",
+                Content = $"最新バージョン {result.LatestVersion} がリリースされています。ダウンロードページを開きますか？",
+                PrimaryButtonText = "ダウンロード",
+                SecondaryButtonText = "このバージョンをスキップ",
+                CloseButtonText = "後で",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = Content.XamlRoot,
+            };
 
-                ContentDialogResult dialogResult = await dialog.ShowAsync(ContentDialogPlacement.Popup);
-                if (dialogResult == ContentDialogResult.Primary)
-                {
-                    TryOpenReleasePage(result.ReleaseUrl);
-                }
-                else if (dialogResult == ContentDialogResult.Secondary)
-                {
-                    _settingsService.UpdateLastSkippedVersion(result.Tag ?? result.LatestVersion.ToString());
-                }
-            });
+            ContentDialogResult dialogResult = await updateDialog.ShowAsync(ContentDialogPlacement.Popup);
+            if (dialogResult == ContentDialogResult.Primary)
+            {
+                TryOpenReleasePage(result.ReleaseUrl);
+            }
+            else if (dialogResult == ContentDialogResult.Secondary)
+            {
+                _settingsService.UpdateLastSkippedVersion(result.Tag ?? result.LatestVersion.ToString());
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            // サイレントに失敗させる
+            await _loggingService.WriteAsync($"自動更新チェック中にエラーが発生しました: {ex.Message}").ConfigureAwait(false);
+        }
+        finally
+        {
+            _isCheckingForUpdates = false;
         }
     }
 
