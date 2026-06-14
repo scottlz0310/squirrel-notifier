@@ -671,4 +671,54 @@ public class McpSubscriptionServiceTests : IDisposable
         // Assert
         result.Should().BeEquivalentTo(expected);
     }
+
+    [Fact]
+    public void Deduplication_ShouldWorkCorrectly()
+    {
+        // Arrange
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var hasBeenSeenMethod = typeof(McpSubscriptionService).GetMethod("HasBeenSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var markAsSeenMethod = typeof(McpSubscriptionService).GetMethod("MarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        hasBeenSeenMethod.Should().NotBeNull();
+        markAsSeenMethod.Should().NotBeNull();
+
+        // Act & Assert
+        // First check: not seen
+        var result1 = (bool)hasBeenSeenMethod!.Invoke(service, new object[] { "evt_1" })!;
+        result1.Should().BeFalse();
+
+        // Mark as seen
+        markAsSeenMethod!.Invoke(service, new object[] { "evt_1" });
+
+        // Second check: seen
+        var result2 = (bool)hasBeenSeenMethod.Invoke(service, new object[] { "evt_1" })!;
+        result2.Should().BeTrue();
+
+        // Different ID: not seen
+        var result3 = (bool)hasBeenSeenMethod.Invoke(service, new object[] { "evt_2" })!;
+        result3.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Deduplication_ShouldLimitCacheSizeTo100()
+    {
+        // Arrange
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var hasBeenSeenMethod = typeof(McpSubscriptionService).GetMethod("HasBeenSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var markAsSeenMethod = typeof(McpSubscriptionService).GetMethod("MarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        hasBeenSeenMethod.Should().NotBeNull();
+        markAsSeenMethod.Should().NotBeNull();
+
+        // Add 101 items
+        for (int i = 0; i < 101; i++)
+        {
+            markAsSeenMethod!.Invoke(service, new object[] { $"evt_{i}" });
+        }
+
+        // The first item should be evicted now, so it should not be detected as seen
+        var result = (bool)hasBeenSeenMethod!.Invoke(service, new object[] { "evt_0" })!;
+        result.Should().BeFalse();
+    }
 }

@@ -4,6 +4,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
@@ -14,6 +15,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
     private readonly CancellationTokenSource _cts = new();
+    private readonly HashSet<string> _seenEventIds = new();
+    private readonly Queue<string> _eventIdQueue = new();
+    private readonly object _lock = new();
 
     private Task? _loopTask;
     private CancellationTokenSource? _activeProcessCts;
@@ -365,8 +369,35 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
                     if (result.Route == "subscription" && result.NotificationReceived == true)
                     {
-                        await LogAsync($"Notification received: {result.FinalText}").ConfigureAwait(false);
-                        _notificationService.NotifyReviewEventReceived(result.FinalText, result.RecommendedNextAction);
+                        await LogAsync($"Notification payload received: {result.FinalText}").ConfigureAwait(false);
+
+                        List<ReviewEvent> reviewEvents = ReviewEventParser.Parse(result.FinalText);
+                        if (reviewEvents.Count == 0)
+                        {
+                            await LogAsync($"Warning: Malformed or unsupported review event payload received: {result.FinalText}").ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            foreach (ReviewEvent reviewEvent in reviewEvents)
+                            {
+                                if (HasBeenSeen(reviewEvent.EventId))
+                                {
+                                    await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
+                                }
+                                else
+                                {
+                                    try
+                                    {
+                                        _notificationService.NotifyReviewEvent(reviewEvent);
+                                        MarkAsSeen(reviewEvent.EventId);
+                                    }
+                                    catch (Exception notifyEx)
+                                    {
+                                        await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
+                                    }
+                                }
+                            }
+                        }
                     }
                     else
                     {
@@ -405,6 +436,41 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private async Task LogAsync(string message)
     {
         await _loggingService.WriteAsync(message).ConfigureAwait(false);
+    }
+
+    private bool HasBeenSeen(string eventId)
+    {
+        if (string.IsNullOrEmpty(eventId))
+        {
+            return false;
+        }
+
+        lock (_lock)
+        {
+            return _seenEventIds.Contains(eventId);
+        }
+    }
+
+    private void MarkAsSeen(string eventId)
+    {
+        if (string.IsNullOrEmpty(eventId))
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (_seenEventIds.Add(eventId))
+            {
+                _eventIdQueue.Enqueue(eventId);
+
+                while (_eventIdQueue.Count > 100)
+                {
+                    string oldId = _eventIdQueue.Dequeue();
+                    _seenEventIds.Remove(oldId);
+                }
+            }
+        }
     }
 
     public async ValueTask DisposeAsync()

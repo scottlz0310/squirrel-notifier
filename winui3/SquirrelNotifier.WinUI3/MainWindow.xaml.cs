@@ -25,10 +25,12 @@ internal sealed partial class MainWindow : Window
     private readonly SettingsService _settingsService;
     private readonly AutoUpdateService _autoUpdateService;
     private readonly ObservableCollection<string> _logEntries = new();
+    private readonly ObservableCollection<Models.ReviewEvent> _reviewEvents = new();
     private readonly TrayIconService _trayIconService;
     private TrayContextMenu? _contextMenu;
     private readonly nint _hwnd;
     private readonly bool _isInitializing = true;
+    private readonly INotificationService _notificationService;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
 
@@ -60,7 +62,7 @@ internal sealed partial class MainWindow : Window
     private const uint _imageIcon = 1;
     private const uint _lrLoadFromFile = 0x00000010;
 
-    internal MainWindow(McpSubscriptionService service, LoggingService loggingService, SettingsService settingsService, AutoUpdateService autoUpdateService, bool showWindow = true)
+    internal MainWindow(McpSubscriptionService service, LoggingService loggingService, SettingsService settingsService, AutoUpdateService autoUpdateService, INotificationService notificationService, bool showWindow = true)
     {
         InitializeComponent();
 
@@ -68,7 +70,7 @@ internal sealed partial class MainWindow : Window
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         Microsoft.UI.WindowId windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hwnd);
         var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
-        appWindow.Resize(new SizeInt32(520, 480));
+        appWindow.Resize(new SizeInt32(520, 580));
         appWindow.Closing += OnAppWindowClosing;
 
         // Set window icon
@@ -78,10 +80,13 @@ internal sealed partial class MainWindow : Window
         _loggingService = loggingService;
         _settingsService = settingsService;
         _autoUpdateService = autoUpdateService;
+        _notificationService = notificationService;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
+        _notificationService.ReviewEventReceived += OnReviewEventReceived;
         LogList.ItemsSource = _logEntries;
+        ReviewEventList.ItemsSource = _reviewEvents;
 
         // Load settings
         AppSettings settings = _settingsService.Settings;
@@ -218,6 +223,7 @@ internal sealed partial class MainWindow : Window
         _service.StatusTextChanged -= OnStatusTextChanged;
         _service.StateChanged -= OnStateChanged;
         _loggingService.LogAppended -= OnLogAppended;
+        _notificationService.ReviewEventReceived -= OnReviewEventReceived;
         _trayIconService?.Dispose();
         _contextMenu?.Dispose();
         Close();
@@ -420,6 +426,41 @@ internal sealed partial class MainWindow : Window
         catch
         {
             // ignore
+        }
+    }
+
+    private void OnReviewEventReceived(object? sender, Models.ReviewEvent e)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            _reviewEvents.Insert(0, e);
+            const int maxEvents = 20;
+            if (_reviewEvents.Count > maxEvents)
+            {
+                _reviewEvents.RemoveAt(_reviewEvents.Count - 1);
+            }
+        });
+    }
+
+    private void OnOpenPrClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.CommandParameter is string url)
+        {
+            if (Helpers.UrlValidator.IsSafeGitHubUrl(url))
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = url,
+                        UseShellExecute = true,
+                    });
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
         }
     }
 }

@@ -6,12 +6,19 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - MCP 購読ブリッジ機構 (`McpSubscriptionService`) を新設。`mcp-resource-subscriber` と連携し、外部 MCP リソースからのレビュー更新イベントを取得可能に
-- `McpSubscriptionService` 用の動作確認 UI を設定ウィンドウに追加（コマンド実行パス、引数、URL、リソース URI、タイムアウトの編集に対応）
+- `McpSubscriptionService` 用の動作確認 UI を設定ウィンドウに追加（コマンド実行パス、引数、URL、リソース URI、タイムアウト of 編集に対応）
+- `mcp-resource-subscriber` から受信した JSON 形式のレビューイベント（`ReviewEvent`）をパースするデシリアライズ・検証機構を導入
+- レビューイベント専用の Windows 通知を構築（通知から検証済み PR URL をブラウザで開くアクション、およびアプリを開くアクションに対応）
+- メモリ内の重複排除キャッシュ（最大100件）による、同一 `eventId` を持つレビューイベントの重複通知防止機能を実装
+- メイン画面 UI に直近のレビューイベント（Recent review events）の履歴リストを追加し、一覧から直接 PR を開けるボタンを配置
 
 ### Removed
 - 旧 WSL カーネル監視機能 (`KernelWatcherService` および関連 UI / ロジック) を完全に廃止
 
 ### Changed
+- `ReviewEventParser.Parse` の戻り値を `List<ReviewEvent>` に変更し、`ReviewCandidate` 配列内の全新着イベントをパース・ループ処理するよう拡張
+- `ReviewCandidate` ペイロードの変更（`url` 等の欠落）に合わせ、`Owner`/`Repo`/`PrNumber` からの PR URL 自動構築と、`queuedAt` 等による `eventId` 自動生成を追加、および `sourceCommentId` の型を `long?` に修正しデシリアライズエラーを防止
+- 重複排除とトースト通知の安定動作を検証するユニットテストを `ReviewEventParserTests` 等に新設・追従
 - アプリケーション、ソリューション、プロジェクト、アセンブリ名、および C# の名前空間を `SquirrelNotifier` へ統一
 - 設定保存先ディレクトリを `%LocalAppData%\WSLKernelWatcher` から `%LocalAppData%\SquirrelNotifier` に変更
 - ウィンドウタイトル、トレイアイコンのツールチップ、メニュー、アプリ表示名を `Squirrel Notifier` へ変更
