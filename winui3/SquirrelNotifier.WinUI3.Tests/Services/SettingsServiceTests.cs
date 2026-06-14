@@ -55,7 +55,7 @@ public class SettingsServiceTests : IDisposable
     public void UpdateSettings_ShouldUpdateSettings()
     {
         // Act
-        _settingsService.UpdateSettings("custom-cmd", "--arg", "https://example.com/gw", "queue://custom", 120000);
+        _settingsService.UpdateSettings("custom-cmd", "--arg", "https://example.com/gw", "queue://custom", 120000, "launcher-cmd", "--launcher-arg", 150000);
 
         // Assert
         _settingsService.Settings.SubscriberCommandPath.Should().Be("custom-cmd");
@@ -63,18 +63,22 @@ public class SettingsServiceTests : IDisposable
         _settingsService.Settings.GatewayUrl.Should().Be("https://example.com/gw");
         _settingsService.Settings.ResourceUri.Should().Be("queue://custom");
         _settingsService.Settings.NotificationTimeoutMs.Should().Be(120000);
+        _settingsService.Settings.LauncherCommandPath.Should().Be("launcher-cmd");
+        _settingsService.Settings.LauncherArguments.Should().Be("--launcher-arg");
+        _settingsService.Settings.LauncherTimeoutMs.Should().Be(150000);
     }
 
     [Theory]
-    [InlineData("", "--arg", "http://localhost:3000", "queue://custom", 60000)] // Empty command path
-    [InlineData("cmd", "--arg", "invalid-url", "queue://custom", 60000)] // Invalid URL
-    [InlineData("cmd", "--arg", "ftp://localhost:3000", "queue://custom", 60000)] // Non-http/https URL
-    [InlineData("cmd", "--arg", "http://localhost:3000", "", 60000)] // Empty resource URI
+    [InlineData("", "--arg", "http://localhost:3000", "queue://custom", 60000, "launcher-cmd", 60000)] // Empty command path
+    [InlineData("cmd", "--arg", "invalid-url", "queue://custom", 60000, "launcher-cmd", 60000)] // Invalid URL
+    [InlineData("cmd", "--arg", "ftp://localhost:3000", "queue://custom", 60000, "launcher-cmd", 60000)] // Non-http/https URL
+    [InlineData("cmd", "--arg", "http://localhost:3000", "", 60000, "launcher-cmd", 60000)] // Empty resource URI
+    [InlineData("cmd", "--arg", "http://localhost:3000", "queue://custom", 60000, "", 60000)] // Empty launcher path
     public void UpdateSettings_ShouldThrowArgumentExceptionForInvalidInputs(
-        string cmd, string args, string url, string uri, int timeout)
+        string cmd, string args, string url, string uri, int timeout, string launcherCmd, int launcherTimeout)
     {
         // Act & Assert
-        Action act = () => _settingsService.UpdateSettings(cmd, args, url, uri, timeout);
+        Action act = () => _settingsService.UpdateSettings(cmd, args, url, uri, timeout, launcherCmd, "--launcher-arg", launcherTimeout);
         act.Should().Throw<ArgumentException>();
     }
 
@@ -85,8 +89,11 @@ public class SettingsServiceTests : IDisposable
     public void UpdateSettings_ShouldThrowArgumentOutOfRangeExceptionForInvalidTimeout(int invalidTimeout)
     {
         // Act & Assert
-        Action act = () => _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", invalidTimeout);
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Action act1 = () => _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", invalidTimeout, "launcher-cmd", "--launcher-arg", 60000);
+        act1.Should().Throw<ArgumentOutOfRangeException>();
+
+        Action act2 = () => _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", 60000, "launcher-cmd", "--launcher-arg", invalidTimeout);
+        act2.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]
@@ -140,7 +147,7 @@ public class SettingsServiceTests : IDisposable
         _settingsService.SettingsChanged += (_, _) => eventRaised = true;
 
         // Act
-        _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", 60000);
+        _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", 60000, "launcher-cmd", "--launcher-arg", 60000);
 
         // Assert
         eventRaised.Should().BeTrue();

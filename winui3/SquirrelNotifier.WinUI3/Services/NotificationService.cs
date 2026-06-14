@@ -50,6 +50,8 @@ internal sealed class NotificationService : INotificationService
         }
     }
 
+    public event EventHandler<string>? LaunchReviewRequested;
+
     public void NotifyReviewEvent(ReviewEvent reviewEvent)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
@@ -66,6 +68,10 @@ internal sealed class NotificationService : INotificationService
                     .AddArgument("action", "openUrl")
                     .AddArgument("url", reviewEvent.PrUrl));
             }
+
+            builder.AddButton(new AppNotificationButton("レビューを起動")
+                .AddArgument("action", "launchReview")
+                .AddArgument("eventId", reviewEvent.EventId));
 
             builder.AddButton(new AppNotificationButton("アプリを開く")
                 .AddArgument("action", "openApp"));
@@ -90,6 +96,13 @@ internal sealed class NotificationService : INotificationService
                 if (UrlValidator.IsSafeGitHubUrl(url))
                 {
                     TryOpenUrl(url);
+                }
+            }
+            else if (action == "launchReview" && args.Arguments.TryGetValue("eventId", out string? eventId))
+            {
+                if (!string.IsNullOrEmpty(eventId))
+                {
+                    LaunchReviewRequested?.Invoke(this, eventId);
                 }
             }
             else if (action == "openApp")

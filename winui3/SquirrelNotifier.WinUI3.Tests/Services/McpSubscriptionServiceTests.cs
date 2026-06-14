@@ -204,7 +204,7 @@ public class McpSubscriptionServiceTests : IDisposable
     public async Task Start_ShouldPassArgumentsAndSecretsCorrectly()
     {
         // Arrange
-        _settingsService.UpdateSettings("my-cmd", "--foo bar", "http://gateway:80", "queue://res", 30000);
+        _settingsService.UpdateSettings("my-cmd", "--foo bar", "http://gateway:80", "queue://res", 30000, "review-raven", "", 300000);
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", "super-secret-token");
 
         var preflightProcess = CreateMockProcess(0, "help", "");
@@ -360,7 +360,7 @@ public class McpSubscriptionServiceTests : IDisposable
     public async Task Start_ShouldSkipTokenAndArgumentsWhenEmpty()
     {
         // Arrange
-        _settingsService.UpdateSettings("my-cmd", "", "http://gateway:80", "queue://res", 30000);
+        _settingsService.UpdateSettings("my-cmd", "", "http://gateway:80", "queue://res", 30000, "review-raven", "", 300000);
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", null);
 
         var preflightProcess = CreateMockProcess(0, "help", "");
@@ -552,7 +552,7 @@ public class McpSubscriptionServiceTests : IDisposable
         await File.WriteAllTextAsync(testCmd, "@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\nexit /b 1\r\n", Encoding.ASCII);
 
         var settingsService = new SettingsService(tempDir);
-        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", "queue://res", 30000);
+        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", "queue://res", 30000, "review-raven", "", 300000);
 
         var runner = new ProcessRunner();
         await using var service = new McpSubscriptionService(settingsService, _notificationService, _loggingService, runner);

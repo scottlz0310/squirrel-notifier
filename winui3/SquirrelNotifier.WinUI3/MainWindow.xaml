@@ -23,7 +23,7 @@
                   HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Stretch">
             <ScrollViewer MaxHeight="180">
-                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                       ColumnDefinitions="Auto,*"
                       RowSpacing="8"
                       ColumnSpacing="8"
@@ -42,6 +42,15 @@
 
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Timeout (ms):" VerticalAlignment="Center"/>
                     <NumberBox Grid.Row="4" Grid.Column="1" x:Name="TimeoutBox" Minimum="1" Maximum="300000" ValueChanged="OnTimeoutChanged"/>
+
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Launcher Path:" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="5" Grid.Column="1" x:Name="LauncherPathBox" TextChanged="OnSettingChanged"/>
+
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Launcher Args:" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="6" Grid.Column="1" x:Name="LauncherArgumentsBox" TextChanged="OnSettingChanged"/>
+
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Launcher Timeout:" VerticalAlignment="Center"/>
+                    <NumberBox Grid.Row="7" Grid.Column="1" x:Name="LauncherTimeoutBox" Minimum="1" Maximum="300000" ValueChanged="OnTimeoutChanged"/>
                 </Grid>
             </ScrollViewer>
         </Expander>
@@ -57,8 +66,8 @@
                                FontWeight="SemiBold"
                                Margin="0,0,0,4"/>
                     <ListView x:Name="ReviewEventList"
-                              Height="110"
-                              SelectionMode="None">
+                               Height="110"
+                               SelectionMode="None">
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="models:ReviewEvent">
                                 <Grid ColumnDefinitions="*,Auto" Margin="0,2,0,2">
@@ -66,10 +75,14 @@
                                         <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap" FontWeight="Medium"/>
                                         <TextBlock Text="{x:Bind Repository}" FontSize="11" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="PRを開く"
-                                            Click="OnOpenPrClick"
-                                            CommandParameter="{x:Bind PrUrl}"
-                                            VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                        <Button Content="PRを開く"
+                                                Click="OnOpenPrClick"
+                                                CommandParameter="{x:Bind PrUrl}"/>
+                                        <Button Content="レビュー起動"
+                                                Click="OnLaunchReviewClick"
+                                                CommandParameter="{x:Bind}"/>
+                                    </StackPanel>
                                 </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>

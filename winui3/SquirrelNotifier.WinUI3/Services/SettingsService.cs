@@ -45,7 +45,7 @@ internal sealed class SettingsService
         }
     }
 
-    private static string ResolveCommandPath(string command)
+    internal static string ResolveCommandPath(string command)
     {
         if (File.Exists(command))
         {
@@ -123,7 +123,15 @@ internal sealed class SettingsService
         }
     }
 
-    public void UpdateSettings(string commandPath, string arguments, string gatewayUrl, string resourceUri, int timeoutMs)
+    public void UpdateSettings(
+        string commandPath,
+        string arguments,
+        string gatewayUrl,
+        string resourceUri,
+        int timeoutMs,
+        string launcherCommandPath,
+        string launcherArguments,
+        int launcherTimeoutMs)
     {
         if (string.IsNullOrWhiteSpace(commandPath))
         {
@@ -145,11 +153,24 @@ internal sealed class SettingsService
             throw new ArgumentOutOfRangeException(nameof(timeoutMs), "Timeout must be between 1 and 300000 ms");
         }
 
+        if (string.IsNullOrWhiteSpace(launcherCommandPath))
+        {
+            throw new ArgumentException("Launcher command path cannot be empty", nameof(launcherCommandPath));
+        }
+
+        if (launcherTimeoutMs <= 0 || launcherTimeoutMs > 300000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(launcherTimeoutMs), "Launcher timeout must be between 1 and 300000 ms");
+        }
+
         _settings.SubscriberCommandPath = commandPath;
         _settings.SubscriberArguments = arguments;
         _settings.GatewayUrl = gatewayUrl;
         _settings.ResourceUri = resourceUri;
         _settings.NotificationTimeoutMs = timeoutMs;
+        _settings.LauncherCommandPath = launcherCommandPath;
+        _settings.LauncherArguments = launcherArguments;
+        _settings.LauncherTimeoutMs = launcherTimeoutMs;
         SaveSettings();
     }
 }
@@ -165,4 +186,10 @@ internal sealed class AppSettings
     public string ResourceUri { get; set; } = "queue://review/queue";
 
     public int NotificationTimeoutMs { get; set; } = 60000;
+
+    public string LauncherCommandPath { get; set; } = "review-raven";
+
+    public string LauncherArguments { get; set; } = "review --interactive --repo {owner}/{repo} --pr {prNumber}";
+
+    public int LauncherTimeoutMs { get; set; } = 300000;
 }
