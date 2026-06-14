@@ -123,6 +123,12 @@ internal sealed class SettingsService
         }
     }
 
+    public void UpdateLastSkippedVersion(string version)
+    {
+        _settings.LastSkippedVersion = version ?? string.Empty;
+        SaveSettings();
+    }
+
     public void UpdateSettings(
         string commandPath,
         string arguments,
@@ -192,4 +198,6 @@ internal sealed class AppSettings
     public string LauncherArguments { get; set; } = "review --interactive --repo {owner}/{repo} --pr {prNumber}";
 
     public int LauncherTimeoutMs { get; set; } = 300000;
+
+    public string LastSkippedVersion { get; set; } = string.Empty;
 }

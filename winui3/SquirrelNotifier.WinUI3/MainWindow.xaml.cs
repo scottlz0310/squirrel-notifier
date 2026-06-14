@@ -411,6 +411,13 @@ internal sealed partial class MainWindow : Window
                 return;
             }
 
+            // スキップされたバージョンの判定（自動チェック時のみスキップを考慮）
+            bool isSkipped = !string.IsNullOrEmpty(result.Tag) && result.Tag == _settingsService.Settings.LastSkippedVersion;
+            if (isSkipped && !showNoUpdateDialog)
+            {
+                return;
+            }
+
             _ = DispatcherQueue.TryEnqueue(async () =>
             {
                 var dialog = new ContentDialog
@@ -418,6 +425,7 @@ internal sealed partial class MainWindow : Window
                     Title = "新しいバージョンがあります",
                     Content = $"最新バージョン {result.LatestVersion} がリリースされています。ダウンロードページを開きますか？",
                     PrimaryButtonText = "ダウンロード",
+                    SecondaryButtonText = "このバージョンをスキップ",
                     CloseButtonText = "後で",
                     DefaultButton = ContentDialogButton.Primary,
                     XamlRoot = Content.XamlRoot,
@@ -427,6 +435,10 @@ internal sealed partial class MainWindow : Window
                 if (dialogResult == ContentDialogResult.Primary)
                 {
                     TryOpenReleasePage(result.ReleaseUrl);
+                }
+                else if (dialogResult == ContentDialogResult.Secondary)
+                {
+                    _settingsService.UpdateLastSkippedVersion(result.Tag ?? result.LatestVersion.ToString());
                 }
             });
         }

@@ -195,6 +195,105 @@ public class AutoUpdateServiceTests : IDisposable
         result.ReleaseUrl.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task CheckForUpdatesAsync_ShouldRetryOnTransientHttpErrorAndSucceed()
+    {
+        // Arrange
+        var responses = new List<Func<Task<HttpResponseMessage>>>
+        {
+            () => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)),
+            () => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"tag_name":"v3.1.0","html_url":"https://example/releases/v3.1.0"}""", Encoding.UTF8, "application/json")
+            })
+        };
+        var handler = new SequenceHandler(responses);
+        using var httpClient = new HttpClient(handler);
+        var logging = new LoggingService(_logDir);
+        var service = new AutoUpdateService(logging, httpClient, new Version(3, 0, 0, 0));
+
+        // Act
+        AutoUpdateResult result = await service.CheckForUpdatesAsync(CancellationToken.None);
+
+        // Assert
+        result.HasUpdate.Should().BeTrue();
+        result.LatestVersion.Should().Be(new Version(3, 1, 0));
+        handler.CallCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_ShouldRetryOnHttpExceptionAndSucceed()
+    {
+        // Arrange
+        var responses = new List<Func<Task<HttpResponseMessage>>>
+        {
+            () => throw new HttpRequestException("transient network error"),
+            () => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"tag_name":"v3.1.0","html_url":"https://example/releases/v3.1.0"}""", Encoding.UTF8, "application/json")
+            })
+        };
+        var handler = new SequenceHandler(responses);
+        using var httpClient = new HttpClient(handler);
+        var logging = new LoggingService(_logDir);
+        var service = new AutoUpdateService(logging, httpClient, new Version(3, 0, 0, 0));
+
+        // Act
+        AutoUpdateResult result = await service.CheckForUpdatesAsync(CancellationToken.None);
+
+        // Assert
+        result.HasUpdate.Should().BeTrue();
+        result.LatestVersion.Should().Be(new Version(3, 1, 0));
+        handler.CallCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_ShouldGiveUpAfterMaxRetries()
+    {
+        // Arrange
+        var responses = new List<Func<Task<HttpResponseMessage>>>
+        {
+            () => throw new HttpRequestException("transient network error"),
+            () => throw new HttpRequestException("transient network error"),
+            () => throw new HttpRequestException("transient network error")
+        };
+        var handler = new SequenceHandler(responses);
+        using var httpClient = new HttpClient(handler);
+        var logging = new LoggingService(_logDir);
+        var service = new AutoUpdateService(logging, httpClient, new Version(3, 0, 0, 0));
+
+        // Act
+        AutoUpdateResult result = await service.CheckForUpdatesAsync(CancellationToken.None);
+
+        // Assert
+        result.HasUpdate.Should().BeFalse();
+        handler.CallCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_ShouldRespectCancellationAndAbortImmediately()
+    {
+        // Arrange
+        var responses = new List<Func<Task<HttpResponseMessage>>>
+        {
+            () => throw new HttpRequestException("transient network error")
+        };
+        var handler = new SequenceHandler(responses);
+        using var httpClient = new HttpClient(handler);
+        var logging = new LoggingService(_logDir);
+        var service = new AutoUpdateService(logging, httpClient, new Version(3, 0, 0, 0));
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Act
+        Func<Task> act = async () => await service.CheckForUpdatesAsync(cts.Token);
+
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        handler.CallCount.Should().Be(0);
+    }
+
     private sealed class FakeHandler : HttpMessageHandler
     {
         private readonly string _content;
@@ -222,6 +321,28 @@ public class AutoUpdateServiceTests : IDisposable
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             throw new HttpRequestException("network failed");
+        }
+    }
+
+    private sealed class SequenceHandler : HttpMessageHandler
+    {
+        private readonly Queue<Func<Task<HttpResponseMessage>>> _responses;
+
+        public int CallCount { get; private set; }
+
+        public SequenceHandler(IEnumerable<Func<Task<HttpResponseMessage>>> responses)
+        {
+            _responses = new Queue<Func<Task<HttpResponseMessage>>>(responses);
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (_responses.Count > 0)
+            {
+                return await _responses.Dequeue()();
+            }
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
         }
     }
 }

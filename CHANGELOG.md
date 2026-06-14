@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- 起動時自動チェック等において、特定のバージョンをスキップするための「スキップされたバージョン」保存機能 (`LastSkippedVersion`) を `AppSettings`/`SettingsService` に追加
+- 自動更新通知のダイアログに「このバージョンをスキップ」ボタンを追加し、手動チェックと自動チェックの切り分け・スキップ動作の永続化をサポート
+- `AutoUpdateService.CheckForUpdatesAsync` に、一時的なネットワーク障害に対応するための自動リトライ機能（最大3回、指数バックオフ）および個別リクエストのタイムアウト処理（5秒）を導入
 - ユーザー起点の安全な外部 launcher (`ReviewLauncherService`) を実装。通知またはアプリ UI から、設定された外部レビューアクションを安全に起動可能に
 - 安全な引数置換機構 (`LauncherArgumentBuilder`) を導入。プレースホルダー (`{owner}`, `{repo}`, `{prNumber}`, `{prUrl}`) を用いて、シェルインジェクションを完全に防ぎつつ安全に引数を構築
 - 設定ウィンドウに外部 launcher 用の設定項目 (Launcher Path, Launcher Args, Launcher Timeout) を追加
