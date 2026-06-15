@@ -723,11 +723,15 @@ public class McpSubscriptionServiceTests : IDisposable
             .Returns<ProcessStartInfo>(psi =>
             {
                 if (psi.ArgumentList.Contains("--help"))
+                {
                     return preflightProcess;
+                }
 
                 subscriptionCallCount++;
                 if (subscriptionCallCount == 1)
+                {
                     return failureProcess;
+                }
 
                 testCts.Cancel();
                 return successProcess;
@@ -758,7 +762,9 @@ public class McpSubscriptionServiceTests : IDisposable
             .Returns<ProcessStartInfo>(psi =>
             {
                 if (psi.ArgumentList.Contains("--help"))
+                {
                     return preflightProcess;
+                }
 
                 subscriptionCallCount++;
                 return CreateMockProcess(1, "", "persistent error");
