@@ -14,6 +14,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private readonly INotificationService _notificationService;
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
+    private readonly int _maxRetries;
     private readonly CancellationTokenSource _cts = new();
     private readonly HashSet<string> _seenEventIds = new();
     private readonly Queue<string> _eventIdQueue = new();
@@ -52,12 +53,14 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         SettingsService settingsService,
         INotificationService notificationService,
         LoggingService loggingService,
-        IProcessRunner? processRunner = null)
+        IProcessRunner? processRunner = null,
+        int maxRetries = 5)
     {
         _settingsService = settingsService;
         _notificationService = notificationService;
         _loggingService = loggingService;
         _processRunner = processRunner ?? new ProcessRunner();
+        _maxRetries = maxRetries;
     }
 
     public void Start()
@@ -286,6 +289,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         State = SubscriptionState.Running;
         ReportStatus("Subscribed.");
 
+        int retryCount = 0;
+        int retryDelayMs = 1000;
+
         while (!token.IsCancellationRequested)
         {
             _activeProcessCts = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -405,19 +411,40 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                         await LogAsync($"Subscriber finished execution. Route={result.Route}").ConfigureAwait(false);
                     }
                 }
+
+                retryCount = 0;
+                retryDelayMs = 1000;
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            catch (OperationCanceledException) when (token.IsCancellationRequested || _activeProcessCts?.IsCancellationRequested == true)
             {
-                // Loop cancellation requested, exit normally
+                // Loop or process cancellation (StopAsync/DisposeAsync) — do not retry
                 break;
             }
             catch (Exception ex)
             {
-                LastError = ex.Message;
-                State = SubscriptionState.Error;
-                ReportStatus($"Error: {ex.Message}");
-                await LogAsync($"Subscription loop error: {ex.Message}").ConfigureAwait(false);
-                break; // Stop loop on failure. Do not retry automatically.
+                retryCount++;
+                if (retryCount > _maxRetries)
+                {
+                    LastError = ex.Message;
+                    State = SubscriptionState.Error;
+                    ReportStatus($"Error: {ex.Message}");
+                    await LogAsync($"Subscription loop error (max retries exceeded): {ex.Message}").ConfigureAwait(false);
+                    break;
+                }
+
+                await LogAsync($"Subscription loop error (retry {retryCount}/{_maxRetries}): {ex.Message}").ConfigureAwait(false);
+                ReportStatus($"Retrying ({retryCount}/{_maxRetries})...");
+
+                try
+                {
+                    await Task.Delay(retryDelayMs, processToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                retryDelayMs = Math.Min(retryDelayMs * 2, 32000);
             }
             finally
             {

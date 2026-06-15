@@ -138,7 +138,7 @@ public class McpSubscriptionServiceTests : IDisposable
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
 
-        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
         var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
@@ -164,7 +164,7 @@ public class McpSubscriptionServiceTests : IDisposable
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
 
-        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
         var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
@@ -187,7 +187,7 @@ public class McpSubscriptionServiceTests : IDisposable
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
 
-        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
         var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
@@ -463,16 +463,16 @@ public class McpSubscriptionServiceTests : IDisposable
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : mockProcess.Object);
 
-        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
         var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
         var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
         await task;
 
-        // Assert
+        // Assert: OCE without loop/process cancellation is treated as an error and triggers retry/error path
         service.State.Should().Be(SubscriptionState.Error);
-        service.LastError.Should().Contain("was canceled");
+        service.LastError.Should().Contain("canceled");
     }
 
     [Fact]
@@ -698,6 +698,134 @@ public class McpSubscriptionServiceTests : IDisposable
         // Different ID: not seen
         var result3 = (bool)hasBeenSeenMethod.Invoke(service, new object[] { "evt_2" })!;
         result3.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Start_ShouldRetryOnTransientErrorAndRecoverOnSuccess()
+    {
+        // Arrange
+        string successJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = true,
+            FinalText = "Notification received",
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var failureProcess = CreateMockProcess(1, "", "transient error");
+        var successProcess = CreateMockProcess(0, successJson, "");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        int subscriptionCallCount = 0;
+        var testCts = new CancellationTokenSource();
+
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount == 1)
+                {
+                    return failureProcess;
+                }
+
+                testCts.Cancel();
+                return successProcess;
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 1);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert
+        subscriptionCallCount.Should().Be(2);
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Start_ShouldTransitionToErrorAfterMaxRetries()
+    {
+        // Arrange
+        var preflightProcess = CreateMockProcess(0, "help", "");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        int subscriptionCallCount = 0;
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                return CreateMockProcess(1, "", "persistent error");
+            });
+
+        // maxRetries: 1 → 1 initial + 1 retry = 2 total subscription calls
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 1);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
+        await task;
+
+        // Assert
+        subscriptionCallCount.Should().Be(2);
+        service.State.Should().Be(SubscriptionState.Error);
+        service.LastError.Should().Contain("non-zero code 1");
+        service.LastError.Should().Contain("persistent error");
+    }
+
+    [Fact]
+    public async Task StopAsync_ShouldCancelBackoffDelayPromptly()
+    {
+        // Arrange
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var mockRunner = new Mock<IProcessRunner>();
+        var retryingTcs = new TaskCompletionSource();
+
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                return CreateMockProcess(1, "", "transient error");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 5);
+        service.StatusTextChanged += (_, text) =>
+        {
+            if (text.StartsWith("Retrying"))
+            {
+                retryingTcs.TrySetResult();
+            }
+        };
+
+        service.Start();
+
+        // Wait until backoff starts (first failure → "Retrying" status)
+        await retryingTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Act: StopAsync should cancel the backoff delay (1000ms) and return promptly
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await service.StopAsync();
+        sw.Stop();
+
+        // Assert: completed well under the 1000ms backoff delay
+        sw.ElapsedMilliseconds.Should().BeLessThan(800);
+        service.State.Should().Be(SubscriptionState.Stopped);
     }
 
     [Fact]
