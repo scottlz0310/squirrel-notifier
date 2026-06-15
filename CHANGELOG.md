@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - `install.ps1` のパス解決を修正し、`publish/` 配下の自己完結型成果物のみを検索・登録するよう変更（`bin/` 直下の非自己完結型 EXE が誤って選択される問題を解消）
 - MCP 購読接続の一時的なエラー（サーバー未起動や認証切れによる `fetch failed` 等）発生時に、即座に `Error` 状態で停止していた問題を修正。指数バックオフ（初期 1 秒、最大 32 秒、最大 5 回）による自動リトライを導入し、一時的な障害からの自動回復を可能にした
+- リトライバックオフ待機中に `StopAsync` を呼び出しても遅延が終わるまで戻らない問題を修正。待機トークンを `processToken` に変更し、停止操作に即応答するよう改善
+- `OperationCanceledException` を無条件に正常停止として扱うため、停止操作と無関係な OCE でも `State` が `Running` のまま通知が届かなくなる問題を修正。`token`・`_activeProcessCts` のキャンセル時のみ正常停止、それ以外はリトライ/エラーへ流すよう条件を修正
 
 ## [0.1.0] - 2026-06-14
 

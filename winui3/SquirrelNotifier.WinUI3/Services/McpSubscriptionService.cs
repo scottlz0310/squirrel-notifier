@@ -415,9 +415,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 retryCount = 0;
                 retryDelayMs = 1000;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (token.IsCancellationRequested || _activeProcessCts?.IsCancellationRequested == true)
             {
-                // Cancelled (loop token or process kill via StopAsync) — do not retry
+                // Loop or process cancellation (StopAsync/DisposeAsync) — do not retry
                 break;
             }
             catch (Exception ex)
@@ -437,7 +437,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
                 try
                 {
-                    await Task.Delay(retryDelayMs, token).ConfigureAwait(false);
+                    await Task.Delay(retryDelayMs, processToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {

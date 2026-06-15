@@ -470,9 +470,9 @@ public class McpSubscriptionServiceTests : IDisposable
         var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
         await task;
 
-        // Assert: OperationCanceledException is treated as a stop signal, not an error
-        service.State.Should().Be(SubscriptionState.Running);
-        service.LastError.Should().BeEmpty();
+        // Assert: OCE without loop/process cancellation is treated as an error and triggers retry/error path
+        service.State.Should().Be(SubscriptionState.Error);
+        service.LastError.Should().Contain("canceled");
     }
 
     [Fact]
@@ -783,6 +783,49 @@ public class McpSubscriptionServiceTests : IDisposable
         service.State.Should().Be(SubscriptionState.Error);
         service.LastError.Should().Contain("non-zero code 1");
         service.LastError.Should().Contain("persistent error");
+    }
+
+    [Fact]
+    public async Task StopAsync_ShouldCancelBackoffDelayPromptly()
+    {
+        // Arrange
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var mockRunner = new Mock<IProcessRunner>();
+        var retryingTcs = new TaskCompletionSource();
+
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                return CreateMockProcess(1, "", "transient error");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 5);
+        service.StatusTextChanged += (_, text) =>
+        {
+            if (text.StartsWith("Retrying"))
+            {
+                retryingTcs.TrySetResult();
+            }
+        };
+
+        service.Start();
+
+        // Wait until backoff starts (first failure → "Retrying" status)
+        await retryingTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Act: StopAsync should cancel the backoff delay (1000ms) and return promptly
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await service.StopAsync();
+        sw.Stop();
+
+        // Assert: completed well under the 1000ms backoff delay
+        sw.ElapsedMilliseconds.Should().BeLessThan(800);
+        service.State.Should().Be(SubscriptionState.Stopped);
     }
 
     [Fact]
