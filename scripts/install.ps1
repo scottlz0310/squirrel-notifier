@@ -65,10 +65,11 @@ function Find-Executable {
         }
     )
 
-    # Search in build output directories
+    # Search only in publish subdirectories to avoid non-self-contained bin/ output
     foreach ($buildPath in ($buildPaths | Sort-Object Priority)) {
         if (Test-Path $buildPath.Base) {
             $exe = Get-ChildItem -Path $buildPath.Base -Filter "SquirrelNotifier.WinUI3.exe" -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.Directory.Name -eq "publish" } |
                 Sort-Object LastWriteTime -Descending |
                 Select-Object -First 1
 
