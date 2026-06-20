@@ -10,14 +10,18 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal sealed class McpSubscriptionService : IAsyncDisposable
 {
+    private const int _maxRecentEvents = 20;
+
     private readonly SettingsService _settingsService;
     private readonly INotificationService _notificationService;
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
+    private readonly ICacheService? _cacheService;
     private readonly int _maxRetries;
     private readonly CancellationTokenSource _cts = new();
     private readonly HashSet<string> _seenEventIds = new();
     private readonly Queue<string> _eventIdQueue = new();
+    private readonly Queue<CachedReviewEvent> _recentEvents = new();
     private readonly object _lock = new();
 
     private Task? _loopTask;
@@ -54,13 +58,15 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         INotificationService notificationService,
         LoggingService loggingService,
         IProcessRunner? processRunner = null,
-        int maxRetries = 5)
+        int maxRetries = 5,
+        ICacheService? cacheService = null)
     {
         _settingsService = settingsService;
         _notificationService = notificationService;
         _loggingService = loggingService;
         _processRunner = processRunner ?? new ProcessRunner();
         _maxRetries = maxRetries;
+        _cacheService = cacheService;
     }
 
     public void Start()
@@ -277,6 +283,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     {
         await LogAsync("Starting subscription service loop...").ConfigureAwait(false);
 
+        await RestoreCacheAsync().ConfigureAwait(false);
+
         // Preflight check
         bool preflightPassed = await PreflightCheckAsync(token).ConfigureAwait(false);
         if (!preflightPassed)
@@ -395,7 +403,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                                     try
                                     {
                                         _notificationService.NotifyReviewEvent(reviewEvent);
-                                        MarkAsSeen(reviewEvent.EventId);
+                                        MarkAsSeen(reviewEvent.EventId, reviewEvent);
+                                        await PersistCacheAsync().ConfigureAwait(false);
                                     }
                                     catch (Exception notifyEx)
                                     {
@@ -478,7 +487,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         }
     }
 
-    private void MarkAsSeen(string eventId)
+    private void MarkAsSeen(string eventId, ReviewEvent? reviewEvent = null)
     {
         if (string.IsNullOrEmpty(eventId))
         {
@@ -497,7 +506,81 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     _seenEventIds.Remove(oldId);
                 }
             }
+
+            if (reviewEvent != null)
+            {
+                _recentEvents.Enqueue(new CachedReviewEvent
+                {
+                    EventId = reviewEvent.EventId,
+                    Repository = reviewEvent.Repository,
+                    PrNumber = reviewEvent.PrNumber,
+                    PrUrl = reviewEvent.PrUrl,
+                    Reason = reviewEvent.Reason,
+                    Message = reviewEvent.Message,
+                    ReceivedTime = reviewEvent.ReceivedTime,
+                });
+
+                while (_recentEvents.Count > _maxRecentEvents)
+                {
+                    _recentEvents.Dequeue();
+                }
+            }
         }
+    }
+
+    private async Task RestoreCacheAsync()
+    {
+        if (_cacheService == null)
+        {
+            return;
+        }
+
+        try
+        {
+            NotificationCache cache = await _cacheService.LoadAsync().ConfigureAwait(false);
+
+            lock (_lock)
+            {
+                foreach (string id in cache.SeenEventIds)
+                {
+                    if (_seenEventIds.Add(id))
+                    {
+                        _eventIdQueue.Enqueue(id);
+                    }
+                }
+
+                foreach (CachedReviewEvent ev in cache.RecentEvents)
+                {
+                    _recentEvents.Enqueue(ev);
+                }
+            }
+
+            await LogAsync($"Cache restored: {cache.SeenEventIds.Count} seen IDs, {cache.RecentEvents.Count} recent events.").ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await LogAsync($"Warning: Failed to restore cache: {ex.Message}").ConfigureAwait(false);
+        }
+    }
+
+    private async Task PersistCacheAsync()
+    {
+        if (_cacheService == null)
+        {
+            return;
+        }
+
+        NotificationCache cache;
+        lock (_lock)
+        {
+            cache = new NotificationCache
+            {
+                SeenEventIds = new List<string>(_eventIdQueue),
+                RecentEvents = new List<CachedReviewEvent>(_recentEvents),
+            };
+        }
+
+        await _cacheService.SaveAsync(cache).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()

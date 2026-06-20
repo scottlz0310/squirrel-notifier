@@ -17,6 +17,7 @@ public partial class App : Application
     private readonly NotificationService _notificationService = new();
     private readonly LoggingService _loggingService = new();
     private readonly SettingsService _settingsService = new();
+    private readonly CacheService _cacheService = new();
     private readonly McpSubscriptionService _subscriptionService;
     private readonly AutoUpdateService _autoUpdateService;
     private readonly ReviewLauncherService _launcherService;
@@ -28,8 +29,8 @@ public partial class App : Application
         _notificationService.Initialize();
         _notificationService.OpenAppRequested += OnOpenAppRequested;
 
-        // Create subscription service with settings
-        _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService);
+        // Create subscription service with settings and cache
+        _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, cacheService: _cacheService);
         _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
     }
