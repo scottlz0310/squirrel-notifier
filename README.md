@@ -67,44 +67,52 @@ dotnet build winui3\SquirrelNotifier.WinUI3.sln -c Release -p:Platform=x64
 
 リリースページ（例: https://github.com/scottlz0310/squirrel-notifier/releases/latest ）に以下の x64 向け配布物を公開しています（0.1.0 以降）：
 
-- **MSI インストーラー**（`SquirrelNotifier-Setup-<version>-x64.msi`）: ウィザード形式のインストーラー。ダブルクリックで実行できます。
-- **セットアップ Zip**（`SquirrelNotifier-Setup-<version>-x64.zip`）: 実行ファイルと `install.ps1` / `uninstall.ps1` / `create-shortcuts.ps1` を同梱。展開後に `install.ps1` を実行してください。
+- **MSI インストーラー**（`SquirrelNotifier-Setup-<version>-x64.msi`）: ウィザード形式のインストーラー。ダブルクリックで実行できます。環境によってはインストール完了後に自動起動タスクが登録されない場合があります（その場合はセットアップ Zip の `install.cmd` から登録してください）。
+- **セットアップ Zip**（`SquirrelNotifier-Setup-<version>-x64.zip`）: 実行ファイルと `install.cmd` / `install.ps1` / `uninstall.cmd` / `uninstall.ps1` / `create-shortcuts.cmd` / `create-shortcuts.ps1` を同梱。
 
 #### タスクスケジューラ登録
-PowerShell でインストールスクリプトを実行して自動起動を設定できます:
+
+セットアップ Zip を展開したフォルダで `install.cmd` を実行してください（PowerShell の ExecutionPolicy に関わらず動作します）:
+
+```cmd
+REM トレイに最小化して自動起動を設定（推奨）
+install.cmd -StartMinimized
+
+REM 標準インストール（ログイン時にウィンドウ表示）
+install.cmd
+```
+
+PowerShell スクリプトを直接実行することもできます:
 
 ```powershell
-# 標準インストール（ログイン時にウィンドウ表示）
-.\scripts\install.ps1
-
 # トレイに最小化してインストール（推奨）
-.\scripts\install.ps1 -StartMinimized
+.\install.ps1 -StartMinimized
 
 # カスタムパスを指定してインストール
-.\scripts\install.ps1 -ExePath "C:\Path\To\SquirrelNotifier.WinUI3.exe" -StartMinimized
+.\install.ps1 -ExePath "C:\Path\To\SquirrelNotifier.WinUI3.exe" -StartMinimized
 ```
 
 インストールすると、次回のログインから自動的に起動します。
 
 #### ショートカット作成（必要に応じて）
-展開したセットアップ Zip に含まれる `create-shortcuts.ps1` を使って、スタートメニューやデスクトップにショートカットを作成できます:
+展開したセットアップ Zip に含まれる `create-shortcuts.cmd` を使って、スタートメニューやデスクトップにショートカットを作成できます:
 
-```powershell
-# スタートメニューにショートカットを作成
-.\scripts\create-shortcuts.ps1
+```cmd
+REM スタートメニューにショートカットを作成
+create-shortcuts.cmd
 
-# トレイ起動用ショートカットをスタートメニューとデスクトップに作成
-.\scripts\create-shortcuts.ps1 -Tray -Desktop
+REM トレイ起動用ショートカットをスタートメニューとデスクトップに作成
+create-shortcuts.cmd -Tray -Desktop
 ```
 
 ### アンインストール
 
-```powershell
-# タスクと設定を削除
-.\scripts\uninstall.ps1
+```cmd
+REM タスクと設定を削除
+uninstall.cmd
 
-# タスクのみ削除（設定は保持）
-.\scripts\uninstall.ps1 -KeepSettings
+REM タスクのみ削除（設定は保持）
+uninstall.cmd -KeepSettings
 ```
 
 ### 手動起動

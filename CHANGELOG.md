@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- MSI: `schtasks /SC ONLOGON` が非昇格環境（UAC 有効）で Access denied になる場合にインストールがロールバックされていた問題を修正。`RegisterScheduledTask` カスタムアクションを `Return="ignore"` に変更し、タスク登録失敗でもインストールを続行するようにした。タスク登録はインストール後にアプリ内 UI またはセットアップ Zip の `install.cmd` / `install.ps1` から行う（#79）
+- MSI: `[SystemFolder]` は 32-bit コンテキストで `SysWOW64` に解決されるため `[System64Folder]` に変更し 64-bit `schtasks.exe` を明示
+
+### Added
+- `scripts/install.cmd`・`scripts/uninstall.cmd`・`scripts/create-shortcuts.cmd` を追加。PowerShell の ExecutionPolicy に関わらずダブルクリックで実行可能な `.cmd` ラッパー（#79）
+- セットアップ Zip（`SquirrelNotifier-Setup-*.zip`）に `.cmd` ラッパーを同梱
+
+### Removed
+- リリース成果物から `SquirrelNotifier-WinUI3-*.zip`（バイナリのみ zip）を廃止。`SquirrelNotifier-Setup-*.zip`（バイナリ＋スクリプト同梱）に一本化
+
 ## [0.1.1] - 2026-06-21
 
 ### Fixed
