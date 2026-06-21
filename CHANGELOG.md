@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Documentation
+- README に `mcp-resource-subscriber` および `mcp-gateway` の前提ツール・セットアップ手順セクションを追加（#73）
+
 ## [0.1.0] - 2026-06-21
 
 ### Added
