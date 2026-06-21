@@ -8,6 +8,10 @@
       CI やローカルビルドでは -p:HarvestPath=<path> として渡す。
     -->
     <HarvestPath Condition="'$(HarvestPath)' == ''">$(MSBuildProjectDirectory)\..\..\publish\$(Platform)</HarvestPath>
+    <!-- MSBuild プロパティ → WiX プリプロセッサ変数へのマッピング -->
+    <DefineConstants>PackageVersion=$(PackageVersion)</DefineConstants>
+    <!-- WiX 7 OSMF EULA 同意 -->
+    <AcceptEula>wix7</AcceptEula>
   </PropertyGroup>
 
   <!-- publish 出力を INSTALLFOLDER に自動収集 -->
