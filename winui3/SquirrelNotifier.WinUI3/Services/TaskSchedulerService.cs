@@ -8,7 +8,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal sealed class TaskSchedulerService : ITaskSchedulerService
 {
-    private const string _taskName = "SquirrelNotifier";
+    private const string _taskName = "Squirrel Notifier";
     private readonly IProcessRunner _processRunner;
 
     public TaskSchedulerService()
@@ -48,10 +48,11 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
     public async Task RegisterAsync()
     {
         string exePath = GetExePath();
+        string userName = Environment.UserName;
         var psi = new ProcessStartInfo
         {
             FileName = "schtasks.exe",
-            Arguments = $"/Create /TN \"{_taskName}\" /TR \"\\\"{exePath}\\\" --tray\" /SC ONLOGON /RL LIMITED /F",
+            Arguments = $"/Create /TN \"{_taskName}\" /TR \"\\\"{exePath}\\\" --tray\" /SC ONLOGON /RU \"{userName}\" /IT /RL LIMITED /F",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -59,11 +60,12 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
         };
 
         using IProcessInstance proc = _processRunner.Start(psi);
+        Task<string> errorTask = proc.StandardError.ReadToEndAsync();
         await proc.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
 
         if (proc.ExitCode != 0)
         {
-            string error = await proc.StandardError.ReadToEndAsync().ConfigureAwait(false);
+            string error = await errorTask.ConfigureAwait(false);
             throw new InvalidOperationException($"タスクスケジューラへの登録に失敗しました: {error}");
         }
     }
@@ -81,15 +83,27 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
         };
 
         using IProcessInstance proc = _processRunner.Start(psi);
+        Task<string> errorTask = proc.StandardError.ReadToEndAsync();
         await proc.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+
+        if (proc.ExitCode != 0)
+        {
+            string error = await errorTask.ConfigureAwait(false);
+            throw new InvalidOperationException($"タスクスケジューラからの削除に失敗しました: {error}");
+        }
     }
 
     public async Task RepairAsync()
     {
-        await UnregisterAsync().ConfigureAwait(false);
+        TaskRegistrationStatus status = await GetStatusAsync().ConfigureAwait(false);
+        if (status == TaskRegistrationStatus.Registered)
+        {
+            await UnregisterAsync().ConfigureAwait(false);
+        }
+
         await RegisterAsync().ConfigureAwait(false);
     }
 
     private static string GetExePath()
-        => Path.Combine(AppContext.BaseDirectory, "SquirrelNotifier.WinUI3.exe");
+        => Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "SquirrelNotifier.WinUI3.exe");
 }

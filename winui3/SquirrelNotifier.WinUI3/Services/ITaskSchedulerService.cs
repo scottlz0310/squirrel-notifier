@@ -17,9 +17,9 @@ internal interface ITaskSchedulerService
 
 internal enum TaskRegistrationStatus
 {
-    /// <summary>タスクスケジューラに未登録。.</summary>
+    /// <summary>タスクスケジューラに未登録.</summary>
     NotRegistered,
 
-    /// <summary>タスクスケジューラに登録済み。.</summary>
+    /// <summary>タスクスケジューラに登録済み.</summary>
     Registered,
 }

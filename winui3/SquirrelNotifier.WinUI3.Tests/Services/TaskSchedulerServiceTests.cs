@@ -89,9 +89,11 @@ public class TaskSchedulerServiceTests
         capturedPsi.Should().NotBeNull();
         capturedPsi!.FileName.Should().Be("schtasks.exe");
         capturedPsi.Arguments.Should().Contain("/Create");
-        capturedPsi.Arguments.Should().Contain("SquirrelNotifier");
+        capturedPsi.Arguments.Should().Contain("Squirrel Notifier");
         capturedPsi.Arguments.Should().Contain("--tray");
         capturedPsi.Arguments.Should().Contain("ONLOGON");
+        capturedPsi.Arguments.Should().Contain("/RU");
+        capturedPsi.Arguments.Should().Contain("/IT");
     }
 
     [Fact]
@@ -113,10 +115,10 @@ public class TaskSchedulerServiceTests
     }
 
     [Fact]
-    public async Task UnregisterAsync_IgnoresExitCode()
+    public async Task UnregisterAsync_WhenExitCodeZero_Succeeds()
     {
         // Arrange
-        Mock<IProcessInstance> mockProcess = CreateMockProcess(1);
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0);
         ProcessStartInfo? capturedPsi = null;
 
         var mockRunner = new Mock<IProcessRunner>();
@@ -131,19 +133,41 @@ public class TaskSchedulerServiceTests
 
         // Assert
         capturedPsi!.Arguments.Should().Contain("/Delete");
-        capturedPsi.Arguments.Should().Contain("SquirrelNotifier");
+        capturedPsi.Arguments.Should().Contain("Squirrel Notifier");
     }
 
     [Fact]
-    public async Task RepairAsync_CallsUnregisterThenRegister()
+    public async Task UnregisterAsync_WhenExitCodeNonZero_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(1, "Access is denied.");
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new TaskSchedulerService(mockRunner.Object);
+
+        // Act
+        Func<Task> act = () => service.UnregisterAsync();
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*タスクスケジューラからの削除に失敗しました*");
+    }
+
+    [Fact]
+    public async Task RepairAsync_WhenRegistered_CallsGetStatusThenDeleteThenCreate()
     {
         // Arrange
         var callOrder = new System.Collections.Generic.List<string>();
 
+        Mock<IProcessInstance> queryMock = CreateMockProcess(0);
         Mock<IProcessInstance> deleteMock = CreateMockProcess(0);
         Mock<IProcessInstance> createMock = CreateMockProcess(0);
 
         var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Query"))))
+            .Callback<ProcessStartInfo>(_ => callOrder.Add("Query"))
+            .Returns(queryMock.Object);
         mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Delete"))))
             .Callback<ProcessStartInfo>(_ => callOrder.Add("Delete"))
             .Returns(deleteMock.Object);
@@ -157,6 +181,32 @@ public class TaskSchedulerServiceTests
         await service.RepairAsync();
 
         // Assert
-        callOrder.Should().Equal("Delete", "Create");
+        callOrder.Should().Equal("Query", "Delete", "Create");
+    }
+
+    [Fact]
+    public async Task RepairAsync_WhenNotRegistered_SkipsDeleteAndCallsCreate()
+    {
+        // Arrange
+        var callOrder = new System.Collections.Generic.List<string>();
+
+        Mock<IProcessInstance> queryMock = CreateMockProcess(1);
+        Mock<IProcessInstance> createMock = CreateMockProcess(0);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Query"))))
+            .Callback<ProcessStartInfo>(_ => callOrder.Add("Query"))
+            .Returns(queryMock.Object);
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Create"))))
+            .Callback<ProcessStartInfo>(_ => callOrder.Add("Create"))
+            .Returns(createMock.Object);
+
+        var service = new TaskSchedulerService(mockRunner.Object);
+
+        // Act
+        await service.RepairAsync();
+
+        // Assert
+        callOrder.Should().Equal("Query", "Create");
     }
 }
