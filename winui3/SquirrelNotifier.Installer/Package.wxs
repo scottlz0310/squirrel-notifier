@@ -56,7 +56,7 @@
       WixQuietExec カスタムアクションでサイレント実行する。
       /RU [%USERNAME] でログオン中ユーザーとして登録し /IT で対話セッション限定にする。
     -->
-    <SetProperty Id="RegisterScheduledTaskCmdLine"
+    <SetProperty Id="RegisterScheduledTask"
                  Value="&quot;[SystemFolder]schtasks.exe&quot; /Create /TN &quot;Squirrel Notifier&quot; /TR &quot;\&quot;[INSTALLFOLDER]SquirrelNotifier.WinUI3.exe\&quot; --tray&quot; /SC ONLOGON /RU &quot;[%USERNAME]&quot; /IT /RL LIMITED /F"
                  Before="RegisterScheduledTask"
                  Sequence="execute" />
@@ -68,7 +68,7 @@
                   Return="check" />
 
     <!-- Task Scheduler 削除 (アンインストール時) -->
-    <SetProperty Id="UnregisterScheduledTaskCmdLine"
+    <SetProperty Id="UnregisterScheduledTask"
                  Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;Squirrel Notifier&quot; /F"
                  Before="UnregisterScheduledTask"
                  Sequence="execute" />
