@@ -60,6 +60,9 @@
     <Content Include="Assets\squirrel-notifier.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Assets\squirrel-notifier-error.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <!-- dotnet publish で .pri が含まれず起動できなくなるため、ビルド出力の PRI を配布物に同梱する -->

@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- エラー状態（`SubscriptionState.Error`）時にトレイアイコンを警告マーク付きアイコン（`squirrel-notifier-error.ico`）に自動差し替えし、エラー内容をツールチップに表示するよう変更
+- エラー状態への初回遷移時にトレイバルーン通知（Windows 標準 `NIF_INFO` / `NIIF_WARNING`）でエラーメッセージを通知する機能を追加。エラーが解消されて再度エラー状態になった場合は再通知する
+- `TrayIconService` に `UpdateIcon(string iconFileName)`（アイコン差し替え）および `ShowBalloonTip(string title, string text)`（バルーン通知）メソッドを追加
 - 通知の重複排除キャッシュおよび直近イベント履歴をアプリ終了をまたいで永続化する機能を実装（`CacheService` / `ICacheService`）。起動時に `Cache restored` ログを出力し、前回セッションの既読イベント ID を自動復元するよう変更
 - `App.xaml.cs`: self-contained モードで `Microsoft.WindowsAppRuntime.Insights.Resource.dll` が見つからない場合でもクラッシュせず起動できるよう `AppNotificationManager.Default.Register()` に例外ハンドリングを追加
 

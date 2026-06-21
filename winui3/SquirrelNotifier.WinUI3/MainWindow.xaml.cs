@@ -35,6 +35,7 @@ internal sealed partial class MainWindow : Window
     private readonly INotificationService _notificationService;
     private readonly IReviewLauncherService _launcherService;
     private bool _isCheckingForUpdates;
+    private bool _hasShownErrorBalloon;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
 
@@ -254,6 +255,7 @@ internal sealed partial class MainWindow : Window
     private void OnStateChanged(object? sender, SubscriptionState state)
     {
         UpdateControls(state);
+        UpdateTrayIcon(state);
         _ = DispatcherQueue.TryEnqueue(() =>
         {
             if (state == SubscriptionState.Error && !string.IsNullOrEmpty(_service.LastError))
@@ -261,6 +263,27 @@ internal sealed partial class MainWindow : Window
                 StatusText.Text = $"Error: {_service.LastError}";
             }
         });
+    }
+
+    private void UpdateTrayIcon(SubscriptionState state)
+    {
+        if (state == SubscriptionState.Error)
+        {
+            _trayIconService.UpdateIcon("squirrel-notifier-error.ico");
+            _trayIconService.UpdateTooltip($"Squirrel Notifier - Error: {_service.LastError}");
+
+            if (!_hasShownErrorBalloon)
+            {
+                _hasShownErrorBalloon = true;
+                _trayIconService.ShowBalloonTip("Squirrel Notifier", $"接続エラー: {_service.LastError}");
+            }
+        }
+        else
+        {
+            _trayIconService.UpdateIcon("squirrel-notifier.ico");
+            _trayIconService.UpdateTooltip("Squirrel Notifier");
+            _hasShownErrorBalloon = false;
+        }
     }
 
     private void UpdateControls(SubscriptionState state)
