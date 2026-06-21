@@ -4,9 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-21
+
 ### Fixed
 - MSI: `schtasks /SC ONLOGON` が非昇格環境（UAC 有効）で Access denied になる場合にインストールがロールバックされていた問題を修正。`RegisterScheduledTask` カスタムアクションを `Return="ignore"` に変更し、タスク登録失敗でもインストールを続行するようにした。タスク登録はインストール後にアプリ内 UI またはセットアップ Zip の `install.cmd` / `install.ps1` から行う（#79）
-- MSI: `[SystemFolder]` は 32-bit コンテキストで `SysWOW64` に解決されるため `[System64Folder]` に変更し 64-bit `schtasks.exe` を明示
+- MSI: `[SystemFolder]` は 32-bit コンテキストで `SysWOW64` に解決されるため `[System64Folder]` に変更し 64-bit `schtasks.exe` を明示（Register・Unregister 両アクション）
 
 ### Added
 - `scripts/install.cmd`・`scripts/uninstall.cmd`・`scripts/create-shortcuts.cmd` を追加。PowerShell の ExecutionPolicy に関わらずダブルクリックで実行可能な `.cmd` ラッパー（#79）
@@ -257,7 +259,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - レート制限対応
 - リトライ機能
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/scottlz0310/squirrel-notifier/releases/tag/v0.1.0
 [3.1.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v3.0.0...v3.1.0
