@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Squirrel Notifier MSI インストーラー定義 (WiX 7)
+  - per-user インストール先: %LocalAppData%\Programs\SquirrelNotifier\
+  - スタートメニューショートカット
+  - タスクスケジューラ登録 (ONLOGON / カレントユーザー / 対話セッション限定 / 制限権限)
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="Squirrel Notifier"
+           Manufacturer="scottlz0310"
+           Version="$(PackageVersion)"
+           Language="1041"
+           Codepage="932"
+           UpgradeCode="F7E8D9C0-B1A2-4C3D-8E5F-9A7B6C4D3E2F"
+           Scope="perUser">
+
+    <SummaryInformation Description="Squirrel Notifier - MCP リソース更新通知アプリ" />
+
+    <MajorUpgrade DowngradeErrorMessage="新しいバージョンの Squirrel Notifier がすでにインストールされています。" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- インストール先: %LocalAppData%\Programs\SquirrelNotifier\ -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="SquirrelNotifier" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- スタートメニュー: %AppData%\Microsoft\Windows\Start Menu\Programs\Squirrel Notifier\ -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Squirrel Notifier" />
+    </StandardDirectory>
+
+    <!-- スタートメニューショートカット -->
+    <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder">
+      <Shortcut Id="ApplicationStartMenuShortcut"
+                Name="Squirrel Notifier"
+                Description="MCP リソース更新通知アプリ"
+                Target="[INSTALLFOLDER]SquirrelNotifier.WinUI3.exe"
+                Arguments="--tray"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\SquirrelNotifier"
+                     Name="installed"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+
+    <!--
+      Task Scheduler 登録 (インストール時・per-user)
+      WixQuietExec パターン: SetProperty でコマンドラインをプロパティにセットし
+      WixQuietExec カスタムアクションでサイレント実行する。
+      /RU [%USERNAME] でログオン中ユーザーとして登録し /IT で対話セッション限定にする。
+    -->
+    <SetProperty Id="RegisterScheduledTaskCmdLine"
+                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Create /TN &quot;Squirrel Notifier&quot; /TR &quot;\&quot;[INSTALLFOLDER]SquirrelNotifier.WinUI3.exe\&quot; --tray&quot; /SC ONLOGON /RU &quot;[%USERNAME]&quot; /IT /RL LIMITED /F"
+                 Before="RegisterScheduledTask"
+                 Sequence="execute" />
+    <CustomAction Id="RegisterScheduledTask"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="check" />
+
+    <!-- Task Scheduler 削除 (アンインストール時) -->
+    <SetProperty Id="UnregisterScheduledTaskCmdLine"
+                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;Squirrel Notifier&quot; /F"
+                 Before="UnregisterScheduledTask"
+                 Sequence="execute" />
+    <CustomAction Id="UnregisterScheduledTask"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RegisterScheduledTask" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="UnregisterScheduledTask" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+    <Feature Id="ProductFeature" Title="Squirrel Notifier" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_Minimal" />
+
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Files Include="$(var.HarvestPath)\**\*" />
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

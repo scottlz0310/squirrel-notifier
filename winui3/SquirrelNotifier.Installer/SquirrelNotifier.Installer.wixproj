@@ -1,0 +1,24 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+
+  <PropertyGroup>
+    <OutputName>SquirrelNotifier-Setup-$(Platform)</OutputName>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <!--
+      HarvestPath: 収集対象の publish 出力ディレクトリ。
+      CI やローカルビルドでは -p:HarvestPath=<path> として渡す。
+    -->
+    <HarvestPath Condition="'$(HarvestPath)' == ''">$(MSBuildProjectDirectory)\..\..\publish\$(Platform)</HarvestPath>
+    <!-- MSBuild プロパティ → WiX プリプロセッサ変数へのマッピング -->
+    <DefineConstants>PackageVersion=$(PackageVersion);HarvestPath=$(HarvestPath)</DefineConstants>
+    <!-- WiX 7 OSMF EULA 同意 -->
+    <AcceptEula>wix7</AcceptEula>
+    <!-- perUser + Files 要素の組み合わせで発生する ICE バリデーションエラーを抑制 -->
+    <SuppressIces>ICE03;ICE38;ICE64;ICE91</SuppressIces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" />
+    <PackageReference Include="WixToolset.Util.wixext" />
+  </ItemGroup>
+
+</Project>
