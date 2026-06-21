@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-21
+
 ### Added
 - WiX 7 SDK 形式 MSI インストーラー（`SquirrelNotifier.Installer`）を追加。`%LocalAppData%\Programs\SquirrelNotifier\` への per-user インストール、スタートメニューショートカット、インストール時のタスクスケジューラ自動登録・アンインストール時の自動削除に対応
 - `scripts/create-cert.ps1` を追加。ローカルでのテスト署名用に自己署名 CA 証明書とコード署名 PFX を生成するスクリプト（管理者権限必須、本番配布には商用証明書を使用すること）
@@ -14,26 +16,6 @@ All notable changes to this project will be documented in this file.
 - `TrayIconService` に `UpdateIcon(string iconFileName)`（アイコン差し替え）および `ShowBalloonTip(string title, string text)`（バルーン通知）メソッドを追加
 - 通知の重複排除キャッシュおよび直近イベント履歴をアプリ終了をまたいで永続化する機能を実装（`CacheService` / `ICacheService`）。起動時に `Cache restored` ログを出力し、前回セッションの既読イベント ID を自動復元するよう変更
 - `App.xaml.cs`: self-contained モードで `Microsoft.WindowsAppRuntime.Insights.Resource.dll` が見つからない場合でもクラッシュせず起動できるよう `AppNotificationManager.Default.Register()` に例外ハンドリングを追加
-
-### Fixed
-- `RestoreCacheAsync`: キャッシュ復元時に seen IDs / recent events の上限トリミングが行われず、100件制限が崩れる問題を修正
-- `CacheService.LoadAsync`: デシリアライズ結果の `SeenEventIds` / `RecentEvents` が null の場合に `RestoreCacheAsync` の `foreach` で例外が発生しキャッシュ全体が無視される問題を修正。null コレクションを空リストに正規化するよう変更
-- `CacheService.SaveAsync`: 例外を内部で握り潰していたためキャッシュ書き込み失敗の原因がトラブルシュートできなかった問題を修正。例外を上位に伝播し、`PersistCacheAsync` 側で警告ログ出力するよう設計を統一
-- `App.xaml.cs`: `CacheService` のフィールド初期化時に `Directory.CreateDirectory` 等の I/O 例外が発生するとアプリが起動前にクラッシュする問題を修正。`try/catch` に変更し失敗時はキャッシュなしで起動継続するよう変更
-- `App.xaml.cs`: `AppNotificationManager.Default.Register()` が失敗した状態で `_notificationService.Initialize()` を呼び出すと再び `COMException` が発生し起動クラッシュする可能性を修正。`Register()` 成功フラグで通知サービス初期化をスキップするよう変更
-
-### Changed
-- `.csproj` に `<WindowsPackageType>None</WindowsPackageType>` を追加（WinUI3 unpackaged self-contained アプリとして正しく起動するための標準設定）
-
-### Fixed
-- `install.ps1` のパス解決を修正し、`publish/` 配下の自己完結型成果物のみを検索・登録するよう変更（`bin/` 直下の非自己完結型 EXE が誤って選択される問題を解消）
-- MCP 購読接続の一時的なエラー（サーバー未起動や認証切れによる `fetch failed` 等）発生時に、即座に `Error` 状態で停止していた問題を修正。指数バックオフ（初期 1 秒、最大 32 秒、最大 5 回）による自動リトライを導入し、一時的な障害からの自動回復を可能にした
-- リトライバックオフ待機中に `StopAsync` を呼び出しても遅延が終わるまで戻らない問題を修正。待機トークンを `processToken` に変更し、停止操作に即応答するよう改善
-- `OperationCanceledException` を無条件に正常停止として扱うため、停止操作と無関係な OCE でも `State` が `Running` のまま通知が届かなくなる問題を修正。`token`・`_activeProcessCts` のキャンセル時のみ正常停止、それ以外はリトライ/エラーへ流すよう条件を修正
-
-## [0.1.0] - 2026-06-14
-
-### Added
 - 起動時自動チェック等において、特定のバージョンをスキップするための「スキップされたバージョン」保存機能 (`LastSkippedVersion`) を `AppSettings`/`SettingsService` に追加
 - 自動更新通知のダイアログに「このバージョンをスキップ」ボタンを追加し、手動チェックと自動チェックの切り分け・スキップ動作の永続化をサポート
 - `AutoUpdateService.CheckForUpdatesAsync` に、一時的なネットワーク障害に対応するための自動リトライ機能（最大3回、指数バックオフ）および個別リクエストのタイムアウト処理（5秒）を導入
@@ -52,7 +34,19 @@ All notable changes to this project will be documented in this file.
 ### Removed
 - 旧 WSL カーネル監視機能 (`KernelWatcherService` および関連 UI / ロジック) を完全に廃止
 
+### Fixed
+- `RestoreCacheAsync`: キャッシュ復元時に seen IDs / recent events の上限トリミングが行われず、100件制限が崩れる問題を修正
+- `CacheService.LoadAsync`: デシリアライズ結果の `SeenEventIds` / `RecentEvents` が null の場合に `RestoreCacheAsync` の `foreach` で例外が発生しキャッシュ全体が無視される問題を修正。null コレクションを空リストに正規化するよう変更
+- `CacheService.SaveAsync`: 例外を内部で握り潰していたためキャッシュ書き込み失敗の原因がトラブルシュートできなかった問題を修正。例外を上位に伝播し、`PersistCacheAsync` 側で警告ログ出力するよう設計を統一
+- `App.xaml.cs`: `CacheService` のフィールド初期化時に `Directory.CreateDirectory` 等の I/O 例外が発生するとアプリが起動前にクラッシュする問題を修正。`try/catch` に変更し失敗時はキャッシュなしで起動継続するよう変更
+- `App.xaml.cs`: `AppNotificationManager.Default.Register()` が失敗した状態で `_notificationService.Initialize()` を呼び出すと再び `COMException` が発生し起動クラッシュする可能性を修正。`Register()` 成功フラグで通知サービス初期化をスキップするよう変更
+- `install.ps1` のパス解決を修正し、`publish/` 配下の自己完結型成果物のみを検索・登録するよう変更（`bin/` 直下の非自己完結型 EXE が誤って選択される問題を解消）
+- MCP 購読接続の一時的なエラー（サーバー未起動や認証切れによる `fetch failed` 等）発生時に、即座に `Error` 状態で停止していた問題を修正。指数バックオフ（初期 1 秒、最大 32 秒、最大 5 回）による自動リトライを導入し、一時的な障害からの自動回復を可能にした
+- リトライバックオフ待機中に `StopAsync` を呼び出しても遅延が終わるまで戻らない問題を修正。待機トークンを `processToken` に変更し、停止操作に即応答するよう改善
+- `OperationCanceledException` を無条件に正常停止として扱うため、停止操作と無関係な OCE でも `State` が `Running` のまま通知が届かなくなる問題を修正。`token`・`_activeProcessCts` のキャンセル時のみ正常停止、それ以外はリトライ/エラーへ流すよう条件を修正
+
 ### Changed
+- `.csproj` に `<WindowsPackageType>None</WindowsPackageType>` を追加（WinUI3 unpackaged self-contained アプリとして正しく起動するための標準設定）
 - `ReviewEventParser.Parse` の戻り値を `List<ReviewEvent>` に変更し、`ReviewCandidate` 配列内の全新着イベントをパース・ループ処理するよう拡張
 - `ReviewCandidate` ペイロードの変更（`url` 等の欠落）に合わせ、`Owner`/`Repo`/`PrNumber` からの PR URL 自動構築と、`queuedAt` 等による `eventId` 自動生成を追加、および `sourceCommentId` の型を `long?` に修正しデシリアライズエラーを防止
 - 重複排除とトースト通知の安定動作を検証するユニットテストを `ReviewEventParserTests` 等に新設・追従
