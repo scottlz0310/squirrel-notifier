@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- アプリ内から Windows タスクスケジューラへの自動起動タスク登録・解除・修復が可能になった。設定パネルに「自動起動」トグルとタスク状態表示・修復ボタンを追加（`ITaskSchedulerService` / `TaskSchedulerService`）
 - エラー状態（`SubscriptionState.Error`）時にトレイアイコンを警告マーク付きアイコン（`squirrel-notifier-error.ico`）に自動で差し替え、エラー内容をツールチップに表示するように変更
 - エラー状態への初回遷移時にトレイバルーン通知（Windows 標準 `NIF_INFO` / `NIIF_WARNING`）でエラーメッセージを通知する機能を追加。エラーが解消されて再度エラー状態になった場合は再通知する
 - `TrayIconService` に `UpdateIcon(string iconFileName)`（アイコン差し替え）および `ShowBalloonTip(string title, string text)`（バルーン通知）メソッドを追加
