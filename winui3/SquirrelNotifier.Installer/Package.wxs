@@ -74,7 +74,7 @@
 
     <!-- Task Scheduler 削除 (アンインストール時) -->
     <SetProperty Id="UnregisterScheduledTask"
-                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;Squirrel Notifier&quot; /F"
+                 Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;Squirrel Notifier&quot; /F"
                  Before="UnregisterScheduledTask"
                  Sequence="execute" />
     <CustomAction Id="UnregisterScheduledTask"

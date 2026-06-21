@@ -1,2 +1,2 @@
 @echo off
-PowerShell -ExecutionPolicy Bypass -File "%~dp0create-shortcuts.ps1" %*
+%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0create-shortcuts.ps1" %*
