@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- WiX 7 SDK 形式 MSI インストーラー（`SquirrelNotifier.Installer`）を追加。`%LocalAppData%\Programs\SquirrelNotifier\` への per-user インストール、スタートメニューショートカット、インストール時のタスクスケジューラ自動登録・アンインストール時の自動削除に対応
+- `scripts/create-cert.ps1` を追加。ローカルでのテスト署名用に自己署名 CA 証明書とコード署名 PFX を生成するスクリプト（管理者権限必須、本番配布には商用証明書を使用すること）
+- リリース CI (`release.yml`) に WiX 7 インストールおよび MSI ビルドステップを追加。リリース成果物として `SquirrelNotifier-Setup-<version>-<platform>.msi` を追加
 - アプリ内から Windows タスクスケジューラへの自動起動タスク登録・解除・修復が可能になった。設定パネルに「自動起動」トグルとタスク状態表示・修復ボタンを追加（`ITaskSchedulerService` / `TaskSchedulerService`）
 - エラー状態（`SubscriptionState.Error`）時にトレイアイコンを警告マーク付きアイコン（`squirrel-notifier-error.ico`）に自動で差し替え、エラー内容をツールチップに表示するように変更
 - エラー状態への初回遷移時にトレイバルーン通知（Windows 標準 `NIF_INFO` / `NIIF_WARNING`）でエラーメッセージを通知する機能を追加。エラーが解消されて再度エラー状態になった場合は再通知する

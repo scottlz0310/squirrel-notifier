@@ -49,6 +49,9 @@ jobs:
         echo "VERSION=$version" >> $env:GITHUB_OUTPUT
         echo "Version: $version"
 
+    - name: Install WiX 7
+      run: dotnet tool install --global wix --version 7.0.0
+
     - name: Restore dependencies
       run: dotnet restore ${{ env.PROJECT_PATH }}
 
@@ -63,6 +66,27 @@ jobs:
           /p:Version=${{ steps.version.outputs.VERSION }} `
           /p:PublishSingleFile=false `
           /p:IncludeNativeLibrariesForSelfExtract=true
+
+    - name: Build MSI installer
+      id: msi
+      shell: pwsh
+      run: |
+        $version = "${{ steps.version.outputs.VERSION }}"
+        $platform = "${{ matrix.platform }}"
+        $harvestPath = (Resolve-Path "./publish/$platform").Path
+        $msiOutDir = (New-Item -ItemType Directory -Path "./msi/$platform" -Force).FullName
+        dotnet build winui3/SquirrelNotifier.Installer/SquirrelNotifier.Installer.wixproj `
+          --configuration Release `
+          /p:Platform=$platform `
+          /p:HarvestPath="$harvestPath" `
+          /p:PackageVersion=$version `
+          /p:OutputPath="$msiOutDir"
+        $msi = Get-ChildItem -Path $msiOutDir -Filter "*.msi" -Recurse | Select-Object -First 1
+        if (-not $msi) { throw "MSI ファイルが見つかりませんでした: $msiOutDir" }
+        $msiName = "SquirrelNotifier-Setup-$version-$platform.msi"
+        Copy-Item -Path $msi.FullName -Destination "./$msiName"
+        echo "MSI_NAME=$msiName" >> $env:GITHUB_OUTPUT
+        Write-Host "MSI: $msiName"
 
     - name: Create archive
       shell: pwsh
@@ -93,7 +117,8 @@ jobs:
       run: |
         $archives = @(
           "${{ steps.archive.outputs.ARCHIVE_NAME }}",
-          "${{ steps.installer.outputs.INSTALLER_ARCHIVE }}"
+          "${{ steps.installer.outputs.INSTALLER_ARCHIVE }}",
+          "${{ steps.msi.outputs.MSI_NAME }}"
         )
         $lines = foreach ($name in $archives) {
           $hash = Get-FileHash -Path "./$name" -Algorithm SHA256
@@ -108,6 +133,7 @@ jobs:
         files: |
           ${{ steps.archive.outputs.ARCHIVE_NAME }}
           ${{ steps.installer.outputs.INSTALLER_ARCHIVE }}
+          ${{ steps.msi.outputs.MSI_NAME }}
           checksums-${{ matrix.platform }}.txt
         draft: false
         prerelease: false
@@ -122,5 +148,6 @@ jobs:
         path: |
           ${{ steps.archive.outputs.ARCHIVE_NAME }}
           ${{ steps.installer.outputs.INSTALLER_ARCHIVE }}
+          ${{ steps.msi.outputs.MSI_NAME }}
           checksums-${{ matrix.platform }}.txt
         retention-days: 30

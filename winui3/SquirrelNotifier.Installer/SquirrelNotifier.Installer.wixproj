@@ -1,0 +1,27 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+
+  <PropertyGroup>
+    <OutputName>SquirrelNotifier-Setup-$(Platform)</OutputName>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <!--
+      HarvestPath: 収集対象の publish 出力ディレクトリ。
+      CI やローカルビルドでは -p:HarvestPath=<path> として渡す。
+    -->
+    <HarvestPath Condition="'$(HarvestPath)' == ''">$(MSBuildProjectDirectory)\..\..\publish\$(Platform)</HarvestPath>
+  </PropertyGroup>
+
+  <!-- publish 出力を INSTALLFOLDER に自動収集 -->
+  <ItemGroup>
+    <HarvestDirectory Include="$(HarvestPath)"
+      ComponentGroupName="ProductComponents"
+      DirectoryRefId="INSTALLFOLDER"
+      SuppressRootDirectory="true"
+      KeepEmptyFolders="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="7.0.0" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="7.0.0" />
+  </ItemGroup>
+
+</Project>
