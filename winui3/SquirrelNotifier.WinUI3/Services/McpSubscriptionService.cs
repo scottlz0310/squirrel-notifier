@@ -549,9 +549,20 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     }
                 }
 
+                while (_eventIdQueue.Count > 100)
+                {
+                    string oldId = _eventIdQueue.Dequeue();
+                    _seenEventIds.Remove(oldId);
+                }
+
                 foreach (CachedReviewEvent ev in cache.RecentEvents)
                 {
                     _recentEvents.Enqueue(ev);
+                }
+
+                while (_recentEvents.Count > _maxRecentEvents)
+                {
+                    _recentEvents.Dequeue();
                 }
             }
 
@@ -580,7 +591,14 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             };
         }
 
-        await _cacheService.SaveAsync(cache).ConfigureAwait(false);
+        try
+        {
+            await _cacheService.SaveAsync(cache).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await LogAsync($"[WARN] Cache save failed: {ex.Message}").ConfigureAwait(false);
+        }
     }
 
     public async ValueTask DisposeAsync()

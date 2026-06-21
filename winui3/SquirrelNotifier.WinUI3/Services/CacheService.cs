@@ -39,7 +39,10 @@ internal sealed class CacheService : ICacheService
             }
 
             string json = await File.ReadAllTextAsync(_cachePath).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<NotificationCache>(json) ?? new NotificationCache();
+            NotificationCache result = JsonSerializer.Deserialize<NotificationCache>(json) ?? new NotificationCache();
+            result.SeenEventIds ??= [];
+            result.RecentEvents ??= [];
+            return result;
         }
         catch
         {
@@ -51,17 +54,10 @@ internal sealed class CacheService : ICacheService
     {
         ArgumentNullException.ThrowIfNull(cache);
 
-        try
-        {
-            string json = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(_tempPath, json).ConfigureAwait(false);
+        string json = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(_tempPath, json).ConfigureAwait(false);
 
-            // アトミック置換: 書き込み完了後にのみ既存ファイルを上書き
-            File.Move(_tempPath, _cachePath, overwrite: true);
-        }
-        catch
-        {
-            // キャッシュ保存失敗は通知処理のクリティカルパスではないため抑制
-        }
+        // アトミック置換: 書き込み完了後にのみ既存ファイルを上書き
+        File.Move(_tempPath, _cachePath, overwrite: true);
     }
 }

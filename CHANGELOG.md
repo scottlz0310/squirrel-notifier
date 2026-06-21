@@ -8,6 +8,13 @@ All notable changes to this project will be documented in this file.
 - 通知の重複排除キャッシュおよび直近イベント履歴をアプリ終了をまたいで永続化する機能を実装（`CacheService` / `ICacheService`）。起動時に `Cache restored` ログを出力し、前回セッションの既読イベント ID を自動復元するよう変更
 - `App.xaml.cs`: self-contained モードで `Microsoft.WindowsAppRuntime.Insights.Resource.dll` が見つからない場合でもクラッシュせず起動できるよう `AppNotificationManager.Default.Register()` に例外ハンドリングを追加
 
+### Fixed
+- `RestoreCacheAsync`: キャッシュ復元時に seen IDs / recent events の上限トリミングが行われず、100件制限が崩れる問題を修正
+- `CacheService.LoadAsync`: デシリアライズ結果の `SeenEventIds` / `RecentEvents` が null の場合に `RestoreCacheAsync` の `foreach` で例外が発生しキャッシュ全体が無視される問題を修正。null コレクションを空リストに正規化するよう変更
+- `CacheService.SaveAsync`: 例外を内部で握り潰していたためキャッシュ書き込み失敗の原因がトラブルシュートできなかった問題を修正。例外を上位に伝播し、`PersistCacheAsync` 側で警告ログ出力するよう設計を統一
+- `App.xaml.cs`: `CacheService` のフィールド初期化時に `Directory.CreateDirectory` 等の I/O 例外が発生するとアプリが起動前にクラッシュする問題を修正。`try/catch` に変更し失敗時はキャッシュなしで起動継続するよう変更
+- `App.xaml.cs`: `AppNotificationManager.Default.Register()` が失敗した状態で `_notificationService.Initialize()` を呼び出すと再び `COMException` が発生し起動クラッシュする可能性を修正。`Register()` 成功フラグで通知サービス初期化をスキップするよう変更
+
 ### Changed
 - `.csproj` に `<WindowsPackageType>None</WindowsPackageType>` を追加（WinUI3 unpackaged self-contained アプリとして正しく起動するための標準設定）
 

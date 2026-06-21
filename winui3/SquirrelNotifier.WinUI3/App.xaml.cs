@@ -17,7 +17,7 @@ public partial class App : Application
     private readonly NotificationService _notificationService = new();
     private readonly LoggingService _loggingService = new();
     private readonly SettingsService _settingsService = new();
-    private readonly CacheService _cacheService = new();
+    private readonly CacheService? _cacheService;
     private readonly McpSubscriptionService _subscriptionService;
     private readonly AutoUpdateService _autoUpdateService;
     private readonly ReviewLauncherService _launcherService;
@@ -25,9 +25,21 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+
+        try
+        {
+            _cacheService = new CacheService();
+        }
+        catch (Exception ex)
+        {
+            _ = _loggingService.WriteAsync($"[WARN] CacheService の初期化に失敗。キャッシュなしで起動します: {ex.Message}");
+        }
+
+        bool notificationRegistered = false;
         try
         {
             AppNotificationManager.Default.Register();
+            notificationRegistered = true;
         }
         catch (System.Runtime.InteropServices.COMException ex) when (ex.Message.Contains("Insights.Resource.dll", StringComparison.Ordinal))
         {
@@ -35,10 +47,12 @@ public partial class App : Application
             _ = _loggingService.WriteAsync($"[WARN] AppNotificationManager.Register() 失敗（{ex.HResult:X8}）: {ex.Message}");
         }
 
-        _notificationService.Initialize();
-        _notificationService.OpenAppRequested += OnOpenAppRequested;
+        if (notificationRegistered)
+        {
+            _notificationService.Initialize();
+            _notificationService.OpenAppRequested += OnOpenAppRequested;
+        }
 
-        // Create subscription service with settings and cache
         _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, cacheService: _cacheService);
         _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
