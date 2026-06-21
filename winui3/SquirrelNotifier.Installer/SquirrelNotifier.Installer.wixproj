@@ -26,6 +26,7 @@
   <ItemGroup>
     <PackageReference Include="WixToolset.UI.wixext" />
     <PackageReference Include="WixToolset.Util.wixext" />
+    <PackageReference Include="WixToolset.Heat" />
   </ItemGroup>
 
 </Project>

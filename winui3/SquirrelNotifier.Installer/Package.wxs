@@ -60,7 +60,7 @@
                  Before="RegisterScheduledTask"
                  Sequence="execute" />
     <CustomAction Id="RegisterScheduledTask"
-                  BinaryRef="Wix7UtilCA_$(sys.BUILDARCHSHORT)"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
                   DllEntry="WixQuietExec"
                   Execute="deferred"
                   Impersonate="yes"
@@ -72,7 +72,7 @@
                  Before="UnregisterScheduledTask"
                  Sequence="execute" />
     <CustomAction Id="UnregisterScheduledTask"
-                  BinaryRef="Wix7UtilCA_$(sys.BUILDARCHSHORT)"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
                   DllEntry="WixQuietExec"
                   Execute="deferred"
                   Impersonate="yes"
