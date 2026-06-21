@@ -56,8 +56,13 @@
       WixQuietExec カスタムアクションでサイレント実行する。
       /RU [%USERNAME] でログオン中ユーザーとして登録し /IT で対話セッション限定にする。
     -->
+    <!--
+      /SC ONLOGON は非昇格プロセスからは Access denied になる環境があるため Return="ignore" にする (#79)。
+      インストール後はアプリ内 UI または Setup Zip の install.cmd / install.ps1 からタスク登録可能。
+      [System64Folder] を使い 64-bit schtasks.exe を明示する。
+    -->
     <SetProperty Id="RegisterScheduledTask"
-                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Create /TN &quot;Squirrel Notifier&quot; /TR &quot;\&quot;[INSTALLFOLDER]SquirrelNotifier.WinUI3.exe\&quot; --tray&quot; /SC ONLOGON /RU &quot;[%USERNAME]&quot; /IT /RL LIMITED /F"
+                 Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;Squirrel Notifier&quot; /TR &quot;\&quot;[INSTALLFOLDER]SquirrelNotifier.WinUI3.exe\&quot; --tray&quot; /SC ONLOGON /RU &quot;[%USERNAME]&quot; /IT /RL LIMITED /F"
                  Before="RegisterScheduledTask"
                  Sequence="execute" />
     <CustomAction Id="RegisterScheduledTask"
@@ -65,11 +70,11 @@
                   DllEntry="WixQuietExec"
                   Execute="deferred"
                   Impersonate="yes"
-                  Return="check" />
+                  Return="ignore" />
 
     <!-- Task Scheduler 削除 (アンインストール時) -->
     <SetProperty Id="UnregisterScheduledTask"
-                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;Squirrel Notifier&quot; /F"
+                 Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;Squirrel Notifier&quot; /F"
                  Before="UnregisterScheduledTask"
                  Sequence="execute" />
     <CustomAction Id="UnregisterScheduledTask"
