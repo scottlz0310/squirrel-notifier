@@ -53,6 +53,8 @@ internal sealed class TrayIconService : IDisposable
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
         public string SzInfoTitle;
         public uint DwInfoFlags;
+        public Guid GuidItem;
+        public nint HBalloonIcon;
     }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
@@ -135,8 +137,7 @@ internal sealed class TrayIconService : IDisposable
         }
 
         nint oldIcon = _hIcon;
-        _hIcon = newIcon;
-        _currentIconPath = iconPath;
+        string oldIconPath = _currentIconPath;
 
         var nid = new NOTIFYICONDATA
         {
@@ -144,13 +145,25 @@ internal sealed class TrayIconService : IDisposable
             HWnd = _hwnd,
             UID = 1,
             UFlags = _nifIcon,
-            HIcon = _hIcon,
+            HIcon = newIcon,
         };
 
         bool result = Shell_NotifyIcon(_nimModify, ref nid);
-        if (oldIcon != nint.Zero)
+        if (result)
         {
-            DestroyIcon(oldIcon);
+            _hIcon = newIcon;
+            _currentIconPath = iconPath;
+
+            // ファイルからロードした旧アイコンのみ破棄（LoadIcon の共有ハンドルは破棄しない）
+            if (oldIcon != nint.Zero && !string.IsNullOrEmpty(oldIconPath))
+            {
+                DestroyIcon(oldIcon);
+            }
+        }
+        else
+        {
+            // 失敗時は新アイコンを破棄して状態を維持
+            DestroyIcon(newIcon);
         }
 
         return result;

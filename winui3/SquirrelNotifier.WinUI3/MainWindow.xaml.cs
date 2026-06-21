@@ -255,9 +255,9 @@ internal sealed partial class MainWindow : Window
     private void OnStateChanged(object? sender, SubscriptionState state)
     {
         UpdateControls(state);
-        UpdateTrayIcon(state);
         _ = DispatcherQueue.TryEnqueue(() =>
         {
+            UpdateTrayIcon(state);
             if (state == SubscriptionState.Error && !string.IsNullOrEmpty(_service.LastError))
             {
                 StatusText.Text = $"Error: {_service.LastError}";
