@@ -34,8 +34,10 @@ internal sealed partial class MainWindow : Window
     private readonly bool _isInitializing = true;
     private readonly INotificationService _notificationService;
     private readonly IReviewLauncherService _launcherService;
+    private readonly ITaskSchedulerService _taskSchedulerService;
     private bool _isCheckingForUpdates;
     private bool _hasShownErrorBalloon;
+    private bool _isAutoStartToggling;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
 
@@ -74,6 +76,7 @@ internal sealed partial class MainWindow : Window
         AutoUpdateService autoUpdateService,
         INotificationService notificationService,
         IReviewLauncherService launcherService,
+        ITaskSchedulerService taskSchedulerService,
         bool showWindow = true)
     {
         InitializeComponent();
@@ -94,6 +97,7 @@ internal sealed partial class MainWindow : Window
         _autoUpdateService = autoUpdateService;
         _notificationService = notificationService;
         _launcherService = launcherService;
+        _taskSchedulerService = taskSchedulerService;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -114,6 +118,9 @@ internal sealed partial class MainWindow : Window
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
 
         _isInitializing = false;
+
+        // Check auto-start registration status
+        _ = RefreshAutoStartStatusAsync();
 
         // Setup tray icon
         _trayIconService = new TrayIconService(this);
@@ -666,5 +673,92 @@ internal sealed partial class MainWindow : Window
             };
             await errDialog.ShowAsync(ContentDialogPlacement.Popup);
         }
+    }
+
+    private async void OnAutoStartToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isAutoStartToggling)
+        {
+            return;
+        }
+
+        _isAutoStartToggling = true;
+        try
+        {
+            if (AutoStartToggle.IsOn)
+            {
+                await _taskSchedulerService.RegisterAsync().ConfigureAwait(true);
+            }
+            else
+            {
+                await _taskSchedulerService.UnregisterAsync().ConfigureAwait(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            ContentDialog dialog = new ContentDialog
+            {
+                Title = "自動起動の設定に失敗しました",
+                Content = ex.Message,
+                CloseButtonText = "閉じる",
+                XamlRoot = Content.XamlRoot,
+            };
+            await dialog.ShowAsync(ContentDialogPlacement.Popup);
+        }
+        finally
+        {
+            _isAutoStartToggling = false;
+        }
+
+        await RefreshAutoStartStatusAsync().ConfigureAwait(true);
+    }
+
+    private async void OnRepairAutoStartClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _taskSchedulerService.RepairAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ContentDialog dialog = new ContentDialog
+            {
+                Title = "タスク修復に失敗しました",
+                Content = ex.Message,
+                CloseButtonText = "閉じる",
+                XamlRoot = Content.XamlRoot,
+            };
+            await dialog.ShowAsync(ContentDialogPlacement.Popup);
+        }
+
+        await RefreshAutoStartStatusAsync().ConfigureAwait(true);
+    }
+
+    private async Task RefreshAutoStartStatusAsync()
+    {
+        TaskRegistrationStatus status = await _taskSchedulerService.GetStatusAsync().ConfigureAwait(true);
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            _isAutoStartToggling = true;
+            try
+            {
+                if (status == TaskRegistrationStatus.Registered)
+                {
+                    AutoStartToggle.IsOn = true;
+                    AutoStartStatusText.Text = "登録済み";
+                    RepairAutoStartButton.IsEnabled = true;
+                }
+                else
+                {
+                    AutoStartToggle.IsOn = false;
+                    AutoStartStatusText.Text = "未登録";
+                    RepairAutoStartButton.IsEnabled = false;
+                }
+            }
+            finally
+            {
+                _isAutoStartToggling = false;
+            }
+        });
     }
 }

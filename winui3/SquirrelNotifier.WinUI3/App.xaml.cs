@@ -21,6 +21,7 @@ public partial class App : Application
     private readonly McpSubscriptionService _subscriptionService;
     private readonly AutoUpdateService _autoUpdateService;
     private readonly ReviewLauncherService _launcherService;
+    private readonly TaskSchedulerService _taskSchedulerService = new();
 
     public App()
     {
@@ -64,7 +65,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, showWindow);
         _window.Closed += OnWindowClosed;
 
         // Activate window if it should be shown
