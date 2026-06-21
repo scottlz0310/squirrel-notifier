@@ -4,8 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-21
+
+### Fixed
+- MSI インストール時に `WixQuietExec` が `CustomActionData` を取得できず「Setup Wizard ended prematurely」でロールバックされる問題を修正。`SetProperty Id` をカスタムアクション名と同一にする必要があるため `RegisterScheduledTaskCmdLine` → `RegisterScheduledTask`、`UnregisterScheduledTaskCmdLine` → `UnregisterScheduledTask` に変更（#74, PR #75）
+
 ### Documentation
-- README に `mcp-resource-subscriber` および `mcp-gateway` の前提ツール・セットアップ手順セクションを追加（#73）
+- README に `mcp-resource-subscriber` および `mcp-gateway` の前提ツール・セットアップ手順セクションを追加（#73, PR #76）
 
 ## [0.1.0] - 2026-06-21
 
