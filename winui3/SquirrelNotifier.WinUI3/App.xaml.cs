@@ -17,6 +17,7 @@ public partial class App : Application
     private readonly NotificationService _notificationService = new();
     private readonly LoggingService _loggingService = new();
     private readonly SettingsService _settingsService = new();
+    private readonly CacheService? _cacheService;
     private readonly McpSubscriptionService _subscriptionService;
     private readonly AutoUpdateService _autoUpdateService;
     private readonly ReviewLauncherService _launcherService;
@@ -24,12 +25,35 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
-        AppNotificationManager.Default.Register();
-        _notificationService.Initialize();
-        _notificationService.OpenAppRequested += OnOpenAppRequested;
 
-        // Create subscription service with settings
-        _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService);
+        try
+        {
+            _cacheService = new CacheService();
+        }
+        catch (Exception ex)
+        {
+            _ = _loggingService.WriteAsync($"[WARN] CacheService の初期化に失敗。キャッシュなしで起動します: {ex.Message}");
+        }
+
+        bool notificationRegistered = false;
+        try
+        {
+            AppNotificationManager.Default.Register();
+            notificationRegistered = true;
+        }
+        catch (System.Runtime.InteropServices.COMException ex) when (ex.Message.Contains("Insights.Resource.dll", StringComparison.Ordinal))
+        {
+            // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題
+            _ = _loggingService.WriteAsync($"[WARN] AppNotificationManager.Register() 失敗（{ex.HResult:X8}）: {ex.Message}");
+        }
+
+        if (notificationRegistered)
+        {
+            _notificationService.Initialize();
+            _notificationService.OpenAppRequested += OnOpenAppRequested;
+        }
+
+        _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, cacheService: _cacheService);
         _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
     }

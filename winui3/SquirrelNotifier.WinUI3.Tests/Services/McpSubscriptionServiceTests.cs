@@ -11,6 +11,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Moq;
+using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
 
@@ -689,7 +690,7 @@ public class McpSubscriptionServiceTests : IDisposable
         result1.Should().BeFalse();
 
         // Mark as seen
-        markAsSeenMethod!.Invoke(service, new object[] { "evt_1" });
+        markAsSeenMethod!.Invoke(service, new object[] { "evt_1", null! });
 
         // Second check: seen
         var result2 = (bool)hasBeenSeenMethod.Invoke(service, new object[] { "evt_1" })!;
@@ -842,11 +843,111 @@ public class McpSubscriptionServiceTests : IDisposable
         // Add 101 items
         for (int i = 0; i < 101; i++)
         {
-            markAsSeenMethod!.Invoke(service, new object[] { $"evt_{i}" });
+            markAsSeenMethod!.Invoke(service, new object[] { $"evt_{i}", null! });
         }
 
         // The first item should be evicted now, so it should not be detected as seen
         var result = (bool)hasBeenSeenMethod!.Invoke(service, new object[] { "evt_0" })!;
         result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CacheService_ShouldRestoreSeenIdsOnStart()
+    {
+        // Arrange: キャッシュに evt_cached を保存
+        var mockCacheService = new Mock<ICacheService>();
+        mockCacheService.Setup(c => c.LoadAsync()).ReturnsAsync(new NotificationCache
+        {
+            SeenEventIds = new List<string> { "evt_cached" },
+            RecentEvents = new List<CachedReviewEvent>(),
+        });
+        mockCacheService.Setup(c => c.SaveAsync(It.IsAny<NotificationCache>())).Returns(Task.CompletedTask);
+
+        string eventJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = true,
+            FinalText = @"{""eventId"":""evt_cached"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}",
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var subscriptionProcess = CreateMockProcess(0, eventJson, "");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        var testCts = new CancellationTokenSource();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                testCts.Cancel();
+                return subscriptionProcess;
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, cacheService: mockCacheService.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert: 既にキャッシュにあった evt_cached は通知されない
+        _mockNotificationService.Verify(n => n.NotifyReviewEvent(It.IsAny<ReviewEvent>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CacheService_ShouldSaveAfterNewNotification()
+    {
+        // Arrange
+        var mockCacheService = new Mock<ICacheService>();
+        mockCacheService.Setup(c => c.LoadAsync()).ReturnsAsync(new NotificationCache());
+        mockCacheService.Setup(c => c.SaveAsync(It.IsAny<NotificationCache>())).Returns(Task.CompletedTask);
+
+        string eventJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = true,
+            FinalText = @"{""eventId"":""evt_new"",""repository"":""owner/repo"",""prNumber"":2,""prUrl"":""https://github.com/owner/repo/pull/2"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}",
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var subscriptionProcess = CreateMockProcess(0, eventJson, "");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        var testCts = new CancellationTokenSource();
+
+        // 2回目のStart呼び出し（再購読）でキャンセルする
+        // 1回目のStart呼び出し時点でキャンセルすると processToken が即キャンセルされ
+        // ReadToEndAsync がOCEを投げてPersistCacheAsyncに到達しないため
+        int subscriptionCallCount = 0;
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return subscriptionProcess;
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, cacheService: mockCacheService.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert: 新規通知後にキャッシュが保存される
+        mockCacheService.Verify(c => c.SaveAsync(It.Is<NotificationCache>(nc => nc.SeenEventIds.Contains("evt_new"))), Times.Once);
     }
 }
