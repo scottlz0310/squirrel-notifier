@@ -92,4 +92,10 @@
 
   </Package>
 
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Files Include="$(var.HarvestPath)\**\*" />
+    </ComponentGroup>
+  </Fragment>
+
 </Wix>
