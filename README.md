@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![codecov](https://codecov.io/gh/YOUR_USERNAME/squirrel-notifier/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USERNAME/squirrel-notifier)
 
-Squirrel Notifierは、mcp-gateway を経由して MCP resource update（レビュー更新イベントなど）を監視し、更新があった場合に通知を行う常駐型軽量アプリケーションです（安定版: 3.1.0）。
+Squirrel Notifierは、mcp-gateway を経由して MCP resource update（レビュー更新イベントなど）を監視し、更新があった場合に通知を行う常駐型軽量アプリケーションです（安定版: 0.1.0）。
 
 ## 機能
 
@@ -44,7 +44,7 @@ dotnet build winui3\SquirrelNotifier.WinUI3.sln -c Release -p:Platform=x64
 ### インストール（自動起動設定）
 
 #### 配布物
-- リリースページ（例: https://github.com/scottlz0310/squirrel-notifier/releases/latest ）に x64 向けのセットアップ Zip（`SquirrelNotifier-Setup-<version>-x64.zip`）を公開しています。展開すると実行ファイルと `install.ps1` / `uninstall.ps1` / `create-shortcuts.ps1` が同梱されています（3.1.0 でインストーラーを追加）。
+- リリースページ（例: https://github.com/scottlz0310/squirrel-notifier/releases/latest ）に x64 向けのセットアップ Zip（`SquirrelNotifier-Setup-<version>-x64.zip`）および MSI インストーラー（`SquirrelNotifier-Setup-<version>-x64.msi`）を公開しています。展開すると実行ファイルと `install.ps1` / `uninstall.ps1` / `create-shortcuts.ps1` が同梱されています（0.1.0 で MSI インストーラーを追加）。
 
 #### タスクスケジューラ登録
 PowerShell でインストールスクリプトを実行して自動起動を設定できます:
