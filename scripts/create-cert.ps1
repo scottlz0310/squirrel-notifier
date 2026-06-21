@@ -9,7 +9,7 @@
     4. コード署名証明書を PFX ファイルとしてエクスポート
 
     生成した PFX を使って MSI に署名する例:
-        signtool.exe sign /fd SHA256 /p7 <PfxPassword> /f <PfxPath> SquirrelNotifier-Setup-x64.msi
+        signtool.exe sign /fd SHA256 /p <PfxPassword> /f <PfxPath> SquirrelNotifier-Setup-x64.msi
 
     本スクリプトはローカル開発・テスト目的専用です。
     本番環境への配布には商用コード署名証明書を使用してください。
@@ -133,6 +133,8 @@ $pfxPwd = ConvertTo-SecureString -String $PfxPassword -Force -AsPlainText
 Export-PfxCertificate -Cert $signCert -FilePath $signCertPath -Password $pfxPwd -ChainOption BuildChain -Force | Out-Null
 Write-Host "  PFX をエクスポートしました: $signCertPath" -ForegroundColor Green
 
+$caThumbprint = $caCert.Thumbprint
+
 # 一時証明書をストアから削除（CA は Root に登録済み、Sign は CurrentUser\My から削除）
 Remove-Item -Path "Cert:\CurrentUser\My\$($caCert.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue
 Remove-Item -Path "Cert:\CurrentUser\My\$($signCert.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue
@@ -145,9 +147,13 @@ Write-Host ""
 Write-Host "生成ファイル:" -ForegroundColor Cyan
 Write-Host "  CA 証明書 (信頼済み): $caCertPath"
 Write-Host "  署名用 PFX:           $signCertPath"
-Write-Host "  PFX パスワード:       $PfxPassword"
+Write-Host "  PFX パスワード:       <-PfxPassword で指定した値>"
 Write-Host ""
 Write-Host "MSI への署名コマンド例:" -ForegroundColor Cyan
-Write-Host "  signtool.exe sign /fd SHA256 /f `"$signCertPath`" /p `"$PfxPassword`" /t http://timestamp.digicert.com SquirrelNotifier-Setup-x64.msi"
+Write-Host "  signtool.exe sign /fd SHA256 /f `"$signCertPath`" /p <PfxPassword> /t http://timestamp.digicert.com SquirrelNotifier-Setup-x64.msi"
+Write-Host ""
+Write-Host "テスト用 CA 証明書のクリーンアップ（検証完了後に実行・管理者権限必須）:" -ForegroundColor Cyan
+Write-Host "  Remove-Item -Path `"Cert:\LocalMachine\Root\$caThumbprint`" -DeleteKey"
+Write-Host "  CA サムプリント: $caThumbprint"
 Write-Host ""
 Write-Host "注意: 本証明書はテスト目的専用です。本番配布には商用証明書を使用してください。" -ForegroundColor Yellow

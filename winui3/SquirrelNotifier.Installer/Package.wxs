@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Squirrel Notifier MSI installer definition (WiX 7)
-  - Per-user install: %LocalAppData%\Programs\SquirrelNotifier\
-  - Start Menu shortcut
-  - Task Scheduler registration (ONLOGON / current user / interactive / limited)
+  Squirrel Notifier MSI インストーラー定義 (WiX 7)
+  - per-user インストール先: %LocalAppData%\Programs\SquirrelNotifier\
+  - スタートメニューショートカット
+  - タスクスケジューラ登録 (ONLOGON / カレントユーザー / 対話セッション限定 / 制限権限)
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
@@ -55,10 +55,10 @@
       /RU [%USERNAME] でログオン中ユーザーとして登録し /IT で対話セッション限定にする。
     -->
     <util:ExecCmd Id="RegisterScheduledTask"
-                  Command="&quot;[SystemFolder]schtasks.exe&quot; /Create /TN &quot;Squirrel Notifier&quot; /TR &quot;&apos;&apos;&apos;[INSTALLFOLDER]SquirrelNotifier.WinUI3.exe&apos;&apos;&apos; --tray&quot; /SC ONLOGON /RU &quot;[%USERNAME]&quot; /IT /RL LIMITED /F"
+                  Command="&quot;[SystemFolder]schtasks.exe&quot; /Create /TN &quot;Squirrel Notifier&quot; /TR &quot;\&quot;[INSTALLFOLDER]SquirrelNotifier.WinUI3.exe\&quot; --tray&quot; /SC ONLOGON /RU &quot;[%USERNAME]&quot; /IT /RL LIMITED /F"
                   Execute="deferred"
                   Impersonate="yes"
-                  Return="ignore" />
+                  Return="check" />
 
     <!-- Task Scheduler 削除 (アンインストール時) -->
     <util:ExecCmd Id="UnregisterScheduledTask"
@@ -69,7 +69,7 @@
 
     <InstallExecuteSequence>
       <Custom Action="RegisterScheduledTask" After="InstallFiles">NOT Installed</Custom>
-      <Custom Action="UnregisterScheduledTask" Before="RemoveFiles">REMOVE~="ALL"</Custom>
+      <Custom Action="UnregisterScheduledTask" Before="RemoveFiles">REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
     </InstallExecuteSequence>
 
     <Feature Id="ProductFeature" Title="Squirrel Notifier" Level="1">
