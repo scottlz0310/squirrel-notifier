@@ -25,7 +25,16 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
-        AppNotificationManager.Default.Register();
+        try
+        {
+            AppNotificationManager.Default.Register();
+        }
+        catch (System.Runtime.InteropServices.COMException ex) when (ex.Message.Contains("Insights.Resource.dll", StringComparison.Ordinal))
+        {
+            // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題
+            _ = _loggingService.WriteAsync($"[WARN] AppNotificationManager.Register() 失敗（{ex.HResult:X8}）: {ex.Message}");
+        }
+
         _notificationService.Initialize();
         _notificationService.OpenAppRequested += OnOpenAppRequested;
 

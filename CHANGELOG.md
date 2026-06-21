@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- 通知の重複排除キャッシュおよび直近イベント履歴をアプリ終了をまたいで永続化する機能を実装（`CacheService` / `ICacheService`）。起動時に `Cache restored` ログを出力し、前回セッションの既読イベント ID を自動復元するよう変更
+- `App.xaml.cs`: self-contained モードで `Microsoft.WindowsAppRuntime.Insights.Resource.dll` が見つからない場合でもクラッシュせず起動できるよう `AppNotificationManager.Default.Register()` に例外ハンドリングを追加
+
+### Changed
+- `.csproj` に `<WindowsPackageType>None</WindowsPackageType>` を追加（WinUI3 unpackaged self-contained アプリとして正しく起動するための標準設定）
+
 ### Fixed
 - `install.ps1` のパス解決を修正し、`publish/` 配下の自己完結型成果物のみを検索・登録するよう変更（`bin/` 直下の非自己完結型 EXE が誤って選択される問題を解消）
 - MCP 購読接続の一時的なエラー（サーバー未起動や認証切れによる `fetch failed` 等）発生時に、即座に `Error` 状態で停止していた問題を修正。指数バックオフ（初期 1 秒、最大 32 秒、最大 5 回）による自動リトライを導入し、一時的な障害からの自動回復を可能にした
