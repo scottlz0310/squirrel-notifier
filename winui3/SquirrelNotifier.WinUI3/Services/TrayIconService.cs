@@ -19,6 +19,8 @@ internal sealed class TrayIconService : IDisposable
     private const int _nifMessage = 0x00000001;
     private const int _nifIcon = 0x00000002;
     private const int _nifTip = 0x00000004;
+    private const int _nifInfo = 0x00000010;
+    private const int _niifWarning = 0x00000002;
     private const int _wmLButtonUp = 0x0202;
     private const int _wmRButtonUp = 0x0205;
 
@@ -26,6 +28,7 @@ internal sealed class TrayIconService : IDisposable
     private readonly uint _callbackMessage = _wmTrayIcon;
     private bool _isAdded;
     private nint _hIcon;
+    private string _currentIconPath = string.Empty;
 
     public event EventHandler? LeftClick;
 
@@ -42,6 +45,16 @@ internal sealed class TrayIconService : IDisposable
         public nint HIcon;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
         public string SzTip;
+        public uint DwState;
+        public uint DwStateMask;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+        public string SzInfo;
+        public uint UTimeout;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+        public string SzInfoTitle;
+        public uint DwInfoFlags;
+        public Guid GuidItem;
+        public nint HBalloonIcon;
     }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
@@ -79,6 +92,7 @@ internal sealed class TrayIconService : IDisposable
         if (File.Exists(iconPath))
         {
             _hIcon = LoadImage(nint.Zero, iconPath, _imageIcon, 16, 16, _lrLoadFromFile);
+            _currentIconPath = iconPath;
         }
 
         // Fallback to default application icon if custom icon fails to load
@@ -101,6 +115,79 @@ internal sealed class TrayIconService : IDisposable
 
         _isAdded = Shell_NotifyIcon(_nimAdd, ref nid);
         return _isAdded;
+    }
+
+    public bool UpdateIcon(string iconFileName)
+    {
+        if (!_isAdded)
+        {
+            return false;
+        }
+
+        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", iconFileName);
+        if (!File.Exists(iconPath) || iconPath == _currentIconPath)
+        {
+            return false;
+        }
+
+        nint newIcon = LoadImage(nint.Zero, iconPath, _imageIcon, 16, 16, _lrLoadFromFile);
+        if (newIcon == nint.Zero)
+        {
+            return false;
+        }
+
+        nint oldIcon = _hIcon;
+        string oldIconPath = _currentIconPath;
+
+        var nid = new NOTIFYICONDATA
+        {
+            CbSize = Marshal.SizeOf<NOTIFYICONDATA>(),
+            HWnd = _hwnd,
+            UID = 1,
+            UFlags = _nifIcon,
+            HIcon = newIcon,
+        };
+
+        bool result = Shell_NotifyIcon(_nimModify, ref nid);
+        if (result)
+        {
+            _hIcon = newIcon;
+            _currentIconPath = iconPath;
+
+            // ファイルからロードした旧アイコンのみ破棄（LoadIcon の共有ハンドルは破棄しない）
+            if (oldIcon != nint.Zero && !string.IsNullOrEmpty(oldIconPath))
+            {
+                DestroyIcon(oldIcon);
+            }
+        }
+        else
+        {
+            // 失敗時は新アイコンを破棄して状態を維持
+            DestroyIcon(newIcon);
+        }
+
+        return result;
+    }
+
+    public bool ShowBalloonTip(string title, string text)
+    {
+        if (!_isAdded)
+        {
+            return false;
+        }
+
+        var nid = new NOTIFYICONDATA
+        {
+            CbSize = Marshal.SizeOf<NOTIFYICONDATA>(),
+            HWnd = _hwnd,
+            UID = 1,
+            UFlags = _nifInfo,
+            SzInfoTitle = title,
+            SzInfo = text,
+            DwInfoFlags = _niifWarning,
+        };
+
+        return Shell_NotifyIcon(_nimModify, ref nid);
     }
 
     public bool UpdateTooltip(string tooltip)
