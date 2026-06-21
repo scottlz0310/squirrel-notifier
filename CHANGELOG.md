@@ -4,8 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-21
+
+### Fixed
+- MSI インストール時に `WixQuietExec` が `CustomActionData` を取得できず「Setup Wizard ended prematurely」でロールバックされる問題を修正。`SetProperty Id` をカスタムアクション名と同一にする必要があるため `RegisterScheduledTaskCmdLine` → `RegisterScheduledTask`、`UnregisterScheduledTaskCmdLine` → `UnregisterScheduledTask` に変更（#74, PR #75）
+
 ### Documentation
-- README に `mcp-resource-subscriber` および `mcp-gateway` の前提ツール・セットアップ手順セクションを追加（#73）
+- README に `mcp-resource-subscriber` および `mcp-gateway` の前提ツール・セットアップ手順セクションを追加（#73, PR #76）
 
 ## [0.1.0] - 2026-06-21
 
@@ -241,7 +246,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - レート制限対応
 - リトライ機能
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/scottlz0310/squirrel-notifier/releases/tag/v0.1.0
 [3.1.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/scottlz0310/WSL-kernel-watcher/compare/v2.1.1...v3.0.0
