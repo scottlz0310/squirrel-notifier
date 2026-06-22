@@ -19,8 +19,9 @@ public class SettingsServiceTests : IDisposable
         string? oldPath = Environment.GetEnvironmentVariable("PATH");
         try
         {
+            // PATH を空にして PATH 検索を無効化し、pnpmBinDir: string.Empty で pnpm プローブも無効化する
             Environment.SetEnvironmentVariable("PATH", string.Empty);
-            _settingsService = new SettingsService(_settingsDirectory);
+            _settingsService = new SettingsService(_settingsDirectory, pnpmBinDir: string.Empty);
         }
         finally
         {
@@ -70,18 +71,9 @@ public class SettingsServiceTests : IDisposable
 
         try
         {
-            // PATH が空でも pnpmBinDir から発見できる
-            string? oldPath = Environment.GetEnvironmentVariable("PATH");
-            try
-            {
-                Environment.SetEnvironmentVariable("PATH", string.Empty);
-                string result = SettingsService.ResolveCommandPath("my-tool", pnpmBinDir: tempDir);
-                result.Should().Be(Path.GetFullPath(fakeExe));
-            }
-            finally
-            {
-                Environment.SetEnvironmentVariable("PATH", oldPath);
-            }
+            // pathEnv を直接渡すことで global PATH を操作せずに検証
+            string result = SettingsService.ResolveCommandPath("my-tool", pnpmBinDir: tempDir, pathEnv: string.Empty);
+            result.Should().Be(Path.GetFullPath(fakeExe));
         }
         finally
         {
@@ -104,17 +96,9 @@ public class SettingsServiceTests : IDisposable
 
         try
         {
-            string? oldPath = Environment.GetEnvironmentVariable("PATH");
-            try
-            {
-                Environment.SetEnvironmentVariable("PATH", pathDir);
-                string result = SettingsService.ResolveCommandPath("my-tool", pnpmBinDir: pnpmDir);
-                result.Should().Be(Path.GetFullPath(pathExe));
-            }
-            finally
-            {
-                Environment.SetEnvironmentVariable("PATH", oldPath);
-            }
+            // pathEnv を直接渡すことで global PATH を操作せずに検証
+            string result = SettingsService.ResolveCommandPath("my-tool", pnpmBinDir: pnpmDir, pathEnv: pathDir);
+            result.Should().Be(Path.GetFullPath(pathExe));
         }
         finally
         {

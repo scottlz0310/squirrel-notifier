@@ -20,7 +20,7 @@ internal sealed class SettingsService
     public SettingsService()
         : this(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"),
-            GetPnpmGlobalBinDir())
+            pnpmBinDir: null)
     {
     }
 
@@ -39,7 +39,10 @@ internal sealed class SettingsService
 
         if (_settings.SubscriberCommandPath == "mcp-resource-subscriber")
         {
-            string resolved = ResolveCommandPath(_settings.SubscriberCommandPath, pnpmBinDir);
+            // Lazy pnpm probe: only runs when the default command name needs resolution.
+            // Tests pass pnpmBinDir: string.Empty to skip the probe entirely.
+            string? binDir = pnpmBinDir ?? GetPnpmGlobalBinDir();
+            string resolved = ResolveCommandPath(_settings.SubscriberCommandPath, binDir);
             if (resolved != "mcp-resource-subscriber")
             {
                 _settings.SubscriberCommandPath = resolved;
@@ -48,7 +51,7 @@ internal sealed class SettingsService
         }
     }
 
-    internal static string ResolveCommandPath(string command, string? pnpmBinDir = null)
+    internal static string ResolveCommandPath(string command, string? pnpmBinDir = null, string? pathEnv = null)
     {
         if (File.Exists(command))
         {
@@ -59,7 +62,7 @@ internal sealed class SettingsService
             ? [".exe", ".cmd", ".bat", ".ps1"]
             : [];
 
-        string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+        pathEnv ??= Environment.GetEnvironmentVariable("PATH");
         if (!string.IsNullOrEmpty(pathEnv))
         {
             char separator = OperatingSystem.IsWindows() ? ';' : ':';
@@ -85,7 +88,7 @@ internal sealed class SettingsService
         return command;
     }
 
-    // Runs `pnpm bin -g` to locate the global bin directory; returns null on any failure.
+    // Runs `pnpm bin -g` to locate the global bin directory; returns null on any failure or timeout.
     internal static string? GetPnpmGlobalBinDir()
     {
         try
@@ -104,9 +107,15 @@ internal sealed class SettingsService
                 return null;
             }
 
-            string output = proc.StandardOutput.ReadToEnd().Trim();
-            proc.WaitForExit(3000);
+            Task<string> readTask = proc.StandardOutput.ReadToEndAsync();
+            if (!readTask.Wait(3000))
+            {
+                proc.Kill();
+                return null;
+            }
 
+            proc.WaitForExit(1000);
+            string output = readTask.Result.Trim();
             return proc.ExitCode == 0 && Directory.Exists(output) ? output : null;
         }
         catch

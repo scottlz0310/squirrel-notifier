@@ -43,9 +43,10 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
         string exePath = EscapePs(GetExePath());
         string command =
             $"$a = New-ScheduledTaskAction -Execute '{exePath}' -Argument '--tray'; " +
-            $"$t = New-ScheduledTaskTrigger -AtLogOn; " +
-            $"$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0; " +
-            $"Register-ScheduledTask -TaskName '{EscapePs(_taskName)}' -Action $a -Trigger $t -Settings $s -RunLevel Limited -Force";
+            $"$t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME; " +
+            $"$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable:$false -DontStopOnIdleEnd; " +
+            $"$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited; " +
+            $"Register-ScheduledTask -TaskName '{EscapePs(_taskName)}' -Action $a -Trigger $t -Settings $s -Principal $p -Force";
 
         ProcessStartInfo psi = BuildPsi(command);
 

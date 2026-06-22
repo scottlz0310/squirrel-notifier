@@ -93,7 +93,11 @@ public class TaskSchedulerServiceTests
         command.Should().Contain("Squirrel Notifier");
         command.Should().Contain("--tray");
         command.Should().Contain("AtLogOn");
+        command.Should().Contain("AllowStartIfOnBatteries");
+        command.Should().Contain("DontStopIfGoingOnBatteries");
+        command.Should().Contain("New-ScheduledTaskPrincipal");
         command.Should().Contain("Limited");
+        command.Should().Contain("$env:USERNAME");
     }
 
     [Fact]
