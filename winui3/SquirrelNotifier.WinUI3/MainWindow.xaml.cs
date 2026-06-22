@@ -687,10 +687,41 @@ internal sealed partial class MainWindow : Window
         {
             if (AutoStartToggle.IsOn)
             {
+                string exePath = TaskSchedulerService.GetExePath();
+                ContentDialog confirmDialog = new ContentDialog
+                {
+                    Title = "自動起動を設定します",
+                    Content = $"以下の内容でタスクスケジューラへ登録します\n\n　タスク名: Squirrel Notifier\n　実行ファイル: {exePath}\n　引数: --tray\n　トリガー: ログオン時（現在のユーザー）",
+                    PrimaryButtonText = "はい",
+                    CloseButtonText = "いいえ",
+                    XamlRoot = Content.XamlRoot,
+                };
+                ContentDialogResult confirmed = await confirmDialog.ShowAsync(ContentDialogPlacement.Popup);
+                if (confirmed != ContentDialogResult.Primary)
+                {
+                    AutoStartToggle.IsOn = false;
+                    return;
+                }
+
                 await _taskSchedulerService.RegisterAsync().ConfigureAwait(true);
             }
             else
             {
+                ContentDialog confirmDialog = new ContentDialog
+                {
+                    Title = "自動起動を解除します",
+                    Content = "自動起動タスクを削除します。よろしいですか？",
+                    PrimaryButtonText = "はい",
+                    CloseButtonText = "いいえ",
+                    XamlRoot = Content.XamlRoot,
+                };
+                ContentDialogResult confirmed = await confirmDialog.ShowAsync(ContentDialogPlacement.Popup);
+                if (confirmed != ContentDialogResult.Primary)
+                {
+                    AutoStartToggle.IsOn = true;
+                    return;
+                }
+
                 await _taskSchedulerService.UnregisterAsync().ConfigureAwait(true);
             }
         }

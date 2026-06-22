@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Settings の「自動起動」トグルで `schtasks.exe /SC ONLOGON` が UAC 有効環境で Access denied になる問題を修正。`Register-ScheduledTask` / `Unregister-ScheduledTask` PowerShell コマンドレット（CIM API 経由）に切り替え、非昇格プロセスでも登録・削除できるようにした（#86）
+
+### Changed
+- 「自動起動」トグルのオン・オフ時に確認ダイアログを表示するようにした。「いいえ」を選択するとトグルが元の状態に戻り、操作を中断できる（#86）
+- `mcp-resource-subscriber` コマンドの自動検索に `pnpm bin -g` によるグローバル bin ディレクトリのフォールバックを追加。PATH に含まれない環境でも自動解決できるようになった（#88）
+- `SettingsService.ResolveCommandPath` に重複していた `McpSubscriptionService` 内の同名メソッドを統合（#88）
+
 ## [0.1.2] - 2026-06-21
 
 ### Fixed

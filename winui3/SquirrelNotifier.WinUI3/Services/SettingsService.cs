@@ -2,6 +2,7 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -17,11 +18,13 @@ internal sealed class SettingsService
     public event EventHandler? SettingsChanged;
 
     public SettingsService()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"))
+        : this(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"),
+            pnpmBinDir: null)
     {
     }
 
-    internal SettingsService(string settingsDirectory)
+    internal SettingsService(string settingsDirectory, string? pnpmBinDir = null)
     {
         if (string.IsNullOrWhiteSpace(settingsDirectory))
         {
@@ -36,7 +39,10 @@ internal sealed class SettingsService
 
         if (_settings.SubscriberCommandPath == "mcp-resource-subscriber")
         {
-            string resolved = ResolveCommandPath(_settings.SubscriberCommandPath);
+            // Lazy pnpm probe: only runs when the default command name needs resolution.
+            // Tests pass pnpmBinDir: string.Empty to skip the probe entirely.
+            string? binDir = pnpmBinDir ?? GetPnpmGlobalBinDir();
+            string resolved = ResolveCommandPath(_settings.SubscriberCommandPath, binDir);
             if (resolved != "mcp-resource-subscriber")
             {
                 _settings.SubscriberCommandPath = resolved;
@@ -45,43 +51,97 @@ internal sealed class SettingsService
         }
     }
 
-    internal static string ResolveCommandPath(string command)
+    internal static string ResolveCommandPath(string command, string? pnpmBinDir = null, string? pathEnv = null)
     {
         if (File.Exists(command))
         {
             return Path.GetFullPath(command);
         }
 
-        if (OperatingSystem.IsWindows())
+        string[] extensions = OperatingSystem.IsWindows()
+            ? [".exe", ".cmd", ".bat", ".ps1"]
+            : [];
+
+        pathEnv ??= Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(pathEnv))
         {
-            string? pathEnv = Environment.GetEnvironmentVariable("PATH");
-            if (!string.IsNullOrEmpty(pathEnv))
+            char separator = OperatingSystem.IsWindows() ? ';' : ':';
+            foreach (string dir in pathEnv.Split(separator, StringSplitOptions.RemoveEmptyEntries))
             {
-                string[] paths = pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries);
-                string[] extensions = new[] { ".exe", ".cmd", ".bat", ".ps1" };
-
-                foreach (string path in paths)
+                string? found = FindInDirectory(dir, command, extensions);
+                if (found is not null)
                 {
-                    string fullPath = Path.Combine(path, command);
-
-                    foreach (string ext in extensions)
-                    {
-                        string extPath = fullPath + ext;
-                        if (File.Exists(extPath))
-                        {
-                            return Path.GetFullPath(extPath);
-                        }
-                    }
-
-                    if (File.Exists(fullPath))
-                    {
-                        return Path.GetFullPath(fullPath);
-                    }
+                    return found;
                 }
             }
         }
 
+        if (!string.IsNullOrEmpty(pnpmBinDir))
+        {
+            string? found = FindInDirectory(pnpmBinDir, command, extensions);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
         return command;
+    }
+
+    // Runs `pnpm bin -g` to locate the global bin directory; returns null on any failure or timeout.
+    internal static string? GetPnpmGlobalBinDir()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "pnpm",
+                Arguments = "bin -g",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true,
+            };
+            using Process? proc = Process.Start(psi);
+            if (proc is null)
+            {
+                return null;
+            }
+
+            Task<string> readTask = proc.StandardOutput.ReadToEndAsync();
+            if (!readTask.Wait(3000))
+            {
+                proc.Kill();
+                return null;
+            }
+
+            proc.WaitForExit(1000);
+            string output = readTask.Result.Trim();
+            return proc.ExitCode == 0 && Directory.Exists(output) ? output : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? FindInDirectory(string dir, string command, string[] extensions)
+    {
+        string fullPath = Path.Combine(dir, command);
+        foreach (string ext in extensions)
+        {
+            string extPath = fullPath + ext;
+            if (File.Exists(extPath))
+            {
+                return Path.GetFullPath(extPath);
+            }
+        }
+
+        if (File.Exists(fullPath))
+        {
+            return Path.GetFullPath(fullPath);
+        }
+
+        return null;
     }
 
     private AppSettings LoadSettings()

@@ -190,6 +190,9 @@ PATCHES/
 docker-compose.override.yml
 out/
 
+# MSI build artifacts
+msi/
+
 # .NET build artifacts
 bin/
 obj/

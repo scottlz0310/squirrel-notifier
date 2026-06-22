@@ -87,13 +87,17 @@ public class TaskSchedulerServiceTests
 
         // Assert
         capturedPsi.Should().NotBeNull();
-        capturedPsi!.FileName.Should().Be("schtasks.exe");
-        capturedPsi.Arguments.Should().Contain("/Create");
-        capturedPsi.Arguments.Should().Contain("Squirrel Notifier");
-        capturedPsi.Arguments.Should().Contain("--tray");
-        capturedPsi.Arguments.Should().Contain("ONLOGON");
-        capturedPsi.Arguments.Should().Contain("/RU");
-        capturedPsi.Arguments.Should().Contain("/IT");
+        capturedPsi!.FileName.Should().Be("powershell.exe");
+        string command = capturedPsi.ArgumentList[3];
+        command.Should().Contain("Register-ScheduledTask");
+        command.Should().Contain("Squirrel Notifier");
+        command.Should().Contain("--tray");
+        command.Should().Contain("AtLogOn");
+        command.Should().Contain("AllowStartIfOnBatteries");
+        command.Should().Contain("DontStopIfGoingOnBatteries");
+        command.Should().Contain("New-ScheduledTaskPrincipal");
+        command.Should().Contain("Limited");
+        command.Should().Contain("$env:USERNAME");
     }
 
     [Fact]
@@ -132,8 +136,10 @@ public class TaskSchedulerServiceTests
         await service.UnregisterAsync();
 
         // Assert
-        capturedPsi!.Arguments.Should().Contain("/Delete");
-        capturedPsi.Arguments.Should().Contain("Squirrel Notifier");
+        capturedPsi!.FileName.Should().Be("powershell.exe");
+        string command = capturedPsi.ArgumentList[3];
+        command.Should().Contain("Unregister-ScheduledTask");
+        command.Should().Contain("Squirrel Notifier");
     }
 
     [Fact]
@@ -165,13 +171,13 @@ public class TaskSchedulerServiceTests
         Mock<IProcessInstance> createMock = CreateMockProcess(0);
 
         var mockRunner = new Mock<IProcessRunner>();
-        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Query"))))
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => PsCommand(p).Contains("Get-ScheduledTask"))))
             .Callback<ProcessStartInfo>(_ => callOrder.Add("Query"))
             .Returns(queryMock.Object);
-        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Delete"))))
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => PsCommand(p).Contains("Unregister-ScheduledTask"))))
             .Callback<ProcessStartInfo>(_ => callOrder.Add("Delete"))
             .Returns(deleteMock.Object);
-        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Create"))))
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => PsCommand(p).Contains("Register-ScheduledTask"))))
             .Callback<ProcessStartInfo>(_ => callOrder.Add("Create"))
             .Returns(createMock.Object);
 
@@ -194,10 +200,10 @@ public class TaskSchedulerServiceTests
         Mock<IProcessInstance> createMock = CreateMockProcess(0);
 
         var mockRunner = new Mock<IProcessRunner>();
-        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Query"))))
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => PsCommand(p).Contains("Get-ScheduledTask"))))
             .Callback<ProcessStartInfo>(_ => callOrder.Add("Query"))
             .Returns(queryMock.Object);
-        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.Arguments.Contains("/Create"))))
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => PsCommand(p).Contains("Register-ScheduledTask"))))
             .Callback<ProcessStartInfo>(_ => callOrder.Add("Create"))
             .Returns(createMock.Object);
 
@@ -209,4 +215,7 @@ public class TaskSchedulerServiceTests
         // Assert
         callOrder.Should().Equal("Query", "Create");
     }
+
+    private static string PsCommand(ProcessStartInfo psi)
+        => psi.ArgumentList.Count >= 4 ? psi.ArgumentList[3] : string.Empty;
 }

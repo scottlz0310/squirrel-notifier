@@ -23,15 +23,8 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
 
     public async Task<TaskRegistrationStatus> GetStatusAsync()
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "schtasks.exe",
-            Arguments = $"/Query /TN \"{_taskName}\"",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
+        string command = $"if (Get-ScheduledTask -TaskName '{EscapePs(_taskName)}' -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}";
+        ProcessStartInfo psi = BuildPsi(command);
 
         try
         {
@@ -47,17 +40,15 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
 
     public async Task RegisterAsync()
     {
-        string exePath = GetExePath();
-        string userName = Environment.UserName;
-        var psi = new ProcessStartInfo
-        {
-            FileName = "schtasks.exe",
-            Arguments = $"/Create /TN \"{_taskName}\" /TR \"\\\"{exePath}\\\" --tray\" /SC ONLOGON /RU \"{userName}\" /IT /RL LIMITED /F",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
+        string exePath = EscapePs(GetExePath());
+        string command =
+            $"$a = New-ScheduledTaskAction -Execute '{exePath}' -Argument '--tray'; " +
+            $"$t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME; " +
+            $"$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable:$false -DontStopOnIdleEnd; " +
+            $"$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited; " +
+            $"Register-ScheduledTask -TaskName '{EscapePs(_taskName)}' -Action $a -Trigger $t -Settings $s -Principal $p -Force";
+
+        ProcessStartInfo psi = BuildPsi(command);
 
         using IProcessInstance proc = _processRunner.Start(psi);
         Task<string> errorTask = proc.StandardError.ReadToEndAsync();
@@ -72,15 +63,8 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
 
     public async Task UnregisterAsync()
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "schtasks.exe",
-            Arguments = $"/Delete /TN \"{_taskName}\" /F",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
+        string command = $"Unregister-ScheduledTask -TaskName '{EscapePs(_taskName)}' -Confirm:$false";
+        ProcessStartInfo psi = BuildPsi(command);
 
         using IProcessInstance proc = _processRunner.Start(psi);
         Task<string> errorTask = proc.StandardError.ReadToEndAsync();
@@ -104,6 +88,26 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
         await RegisterAsync().ConfigureAwait(false);
     }
 
-    private static string GetExePath()
+    internal static string GetExePath()
         => Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "SquirrelNotifier.WinUI3.exe");
+
+    private static ProcessStartInfo BuildPsi(string command)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-Command");
+        psi.ArgumentList.Add(command);
+        return psi;
+    }
+
+    // PowerShell single-quoted string escaping: ' → ''
+    private static string EscapePs(string value) => value.Replace("'", "''", StringComparison.Ordinal);
 }

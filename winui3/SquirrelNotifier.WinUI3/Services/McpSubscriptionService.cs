@@ -195,45 +195,6 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         return result;
     }
 
-    private static string ResolveCommandPath(string command)
-    {
-        if (File.Exists(command))
-        {
-            return Path.GetFullPath(command);
-        }
-
-        if (OperatingSystem.IsWindows())
-        {
-            string? pathEnv = Environment.GetEnvironmentVariable("PATH");
-            if (!string.IsNullOrEmpty(pathEnv))
-            {
-                string[] paths = pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries);
-                string[] extensions = new[] { ".exe", ".cmd", ".bat", ".ps1" };
-
-                foreach (string path in paths)
-                {
-                    string fullPath = Path.Combine(path, command);
-
-                    foreach (string ext in extensions)
-                    {
-                        string extPath = fullPath + ext;
-                        if (File.Exists(extPath))
-                        {
-                            return Path.GetFullPath(extPath);
-                        }
-                    }
-
-                    if (File.Exists(fullPath))
-                    {
-                        return Path.GetFullPath(fullPath);
-                    }
-                }
-            }
-        }
-
-        return command;
-    }
-
     public async Task<bool> PreflightCheckAsync(CancellationToken token)
     {
         _activeProcessCts = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -244,7 +205,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             AppSettings settings = _settingsService.Settings;
             ProcessStartInfo psi = new ProcessStartInfo
             {
-                FileName = ResolveCommandPath(settings.SubscriberCommandPath),
+                FileName = SettingsService.ResolveCommandPath(settings.SubscriberCommandPath),
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
@@ -310,7 +271,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 AppSettings settings = _settingsService.Settings;
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
-                    FileName = ResolveCommandPath(settings.SubscriberCommandPath),
+                    FileName = SettingsService.ResolveCommandPath(settings.SubscriberCommandPath),
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
