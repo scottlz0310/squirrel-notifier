@@ -149,7 +149,7 @@ internal sealed partial class MainWindow : Window
     private void OnGoToSettingsClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
         SettingsExpander.IsExpanded = true;
-        AutoStartToggle.Focus(FocusState.Programmatic);
+        _ = DispatcherQueue.TryEnqueue(() => AutoStartToggle.Focus(FocusState.Programmatic));
     }
 
     private nint NewWndProc(nint hWnd, uint msg, nint wParam, nint lParam)
