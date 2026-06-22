@@ -963,16 +963,8 @@ public class McpSubscriptionServiceTests : IDisposable
     [InlineData(null, "不明なエラーが発生しました。", "[UNKNOWN_ERROR]")]
     public void ErrorMessageMapping_ShouldReturnFriendlyMessageAndTag(string? input, string expectedFriendly, string expectedTag)
     {
-        // Arrange
-        var getFriendlyMethod = typeof(McpSubscriptionService).GetMethod("GetFriendlyErrorMessage", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        var getTagMethod = typeof(McpSubscriptionService).GetMethod("GetErrorTag", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        getFriendlyMethod.Should().NotBeNull();
-        getTagMethod.Should().NotBeNull();
-
         // Act
-        var friendlyResult = (string)getFriendlyMethod!.Invoke(null, new object?[] { input })!;
-        var tagResult = (string)getTagMethod!.Invoke(null, new object?[] { input })!;
+        var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(input!);
 
         // Assert
         friendlyResult.Should().Be(expectedFriendly);

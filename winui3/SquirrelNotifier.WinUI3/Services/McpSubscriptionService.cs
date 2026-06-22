@@ -393,8 +393,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             catch (Exception ex)
             {
                 retryCount++;
-                string friendlyMessage = GetFriendlyErrorMessage(ex.Message);
-                string tag = GetErrorTag(ex.Message);
+                (string friendlyMessage, string tag) = GetErrorInfo(ex.Message);
 
                 if (retryCount > _maxRetries)
                 {
@@ -599,64 +598,33 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         _activeProcessCts?.Dispose();
     }
 
-    private static string GetFriendlyErrorMessage(string rawError)
+    internal static (string FriendlyMessage, string ErrorTag) GetErrorInfo(string rawError)
     {
         if (string.IsNullOrEmpty(rawError))
         {
-            return "不明なエラーが発生しました。";
+            return ("不明なエラーが発生しました。", "[UNKNOWN_ERROR]");
         }
 
         if (rawError.Contains("fetch failed", StringComparison.OrdinalIgnoreCase) ||
             rawError.Contains("ECONNREFUSED", StringComparison.OrdinalIgnoreCase))
         {
-            return "mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。";
+            return ("mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。", "[CONN_REFUSED]");
         }
 
         if (rawError.Contains("404 page not found", StringComparison.OrdinalIgnoreCase) ||
             rawError.Contains("Error POSTing to endpoint: 404", StringComparison.OrdinalIgnoreCase))
         {
-            return "指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。";
+            return ("指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]");
         }
 
         if (rawError.Contains("401", StringComparison.OrdinalIgnoreCase) ||
             rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Forbidden", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("auth", StringComparison.OrdinalIgnoreCase))
+            rawError.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))
         {
-            return "mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。";
+            return ("mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]");
         }
 
-        return $"予期しないエラーが発生しました: {rawError}";
-    }
-
-    private static string GetErrorTag(string rawError)
-    {
-        if (string.IsNullOrEmpty(rawError))
-        {
-            return "[UNKNOWN_ERROR]";
-        }
-
-        if (rawError.Contains("fetch failed", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("ECONNREFUSED", StringComparison.OrdinalIgnoreCase))
-        {
-            return "[CONN_REFUSED]";
-        }
-
-        if (rawError.Contains("404 page not found", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Error POSTing to endpoint: 404", StringComparison.OrdinalIgnoreCase))
-        {
-            return "[HTTP_404]";
-        }
-
-        if (rawError.Contains("401", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Forbidden", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("auth", StringComparison.OrdinalIgnoreCase))
-        {
-            return "[AUTH_ERROR]";
-        }
-
-        return "[GENERAL_ERROR]";
+        return ($"予期しないエラーが発生しました: {rawError}", "[GENERAL_ERROR]");
     }
 }
 
