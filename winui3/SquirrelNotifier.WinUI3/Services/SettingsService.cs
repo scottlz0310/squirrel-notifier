@@ -2,6 +2,7 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -17,11 +18,13 @@ internal sealed class SettingsService
     public event EventHandler? SettingsChanged;
 
     public SettingsService()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"))
+        : this(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"),
+            GetPnpmGlobalBinDir())
     {
     }
 
-    internal SettingsService(string settingsDirectory)
+    internal SettingsService(string settingsDirectory, string? pnpmBinDir = null)
     {
         if (string.IsNullOrWhiteSpace(settingsDirectory))
         {
@@ -36,7 +39,7 @@ internal sealed class SettingsService
 
         if (_settings.SubscriberCommandPath == "mcp-resource-subscriber")
         {
-            string resolved = ResolveCommandPath(_settings.SubscriberCommandPath);
+            string resolved = ResolveCommandPath(_settings.SubscriberCommandPath, pnpmBinDir);
             if (resolved != "mcp-resource-subscriber")
             {
                 _settings.SubscriberCommandPath = resolved;
@@ -45,43 +48,91 @@ internal sealed class SettingsService
         }
     }
 
-    internal static string ResolveCommandPath(string command)
+    internal static string ResolveCommandPath(string command, string? pnpmBinDir = null)
     {
         if (File.Exists(command))
         {
             return Path.GetFullPath(command);
         }
 
-        if (OperatingSystem.IsWindows())
+        string[] extensions = OperatingSystem.IsWindows()
+            ? [".exe", ".cmd", ".bat", ".ps1"]
+            : [];
+
+        string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(pathEnv))
         {
-            string? pathEnv = Environment.GetEnvironmentVariable("PATH");
-            if (!string.IsNullOrEmpty(pathEnv))
+            char separator = OperatingSystem.IsWindows() ? ';' : ':';
+            foreach (string dir in pathEnv.Split(separator, StringSplitOptions.RemoveEmptyEntries))
             {
-                string[] paths = pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries);
-                string[] extensions = new[] { ".exe", ".cmd", ".bat", ".ps1" };
-
-                foreach (string path in paths)
+                string? found = FindInDirectory(dir, command, extensions);
+                if (found is not null)
                 {
-                    string fullPath = Path.Combine(path, command);
-
-                    foreach (string ext in extensions)
-                    {
-                        string extPath = fullPath + ext;
-                        if (File.Exists(extPath))
-                        {
-                            return Path.GetFullPath(extPath);
-                        }
-                    }
-
-                    if (File.Exists(fullPath))
-                    {
-                        return Path.GetFullPath(fullPath);
-                    }
+                    return found;
                 }
             }
         }
 
+        if (!string.IsNullOrEmpty(pnpmBinDir))
+        {
+            string? found = FindInDirectory(pnpmBinDir, command, extensions);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
         return command;
+    }
+
+    // Runs `pnpm bin -g` to locate the global bin directory; returns null on any failure.
+    internal static string? GetPnpmGlobalBinDir()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "pnpm",
+                Arguments = "bin -g",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true,
+            };
+            using Process? proc = Process.Start(psi);
+            if (proc is null)
+            {
+                return null;
+            }
+
+            string output = proc.StandardOutput.ReadToEnd().Trim();
+            proc.WaitForExit(3000);
+
+            return proc.ExitCode == 0 && Directory.Exists(output) ? output : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? FindInDirectory(string dir, string command, string[] extensions)
+    {
+        string fullPath = Path.Combine(dir, command);
+        foreach (string ext in extensions)
+        {
+            string extPath = fullPath + ext;
+            if (File.Exists(extPath))
+            {
+                return Path.GetFullPath(extPath);
+            }
+        }
+
+        if (File.Exists(fullPath))
+        {
+            return Path.GetFullPath(fullPath);
+        }
+
+        return null;
     }
 
     private AppSettings LoadSettings()

@@ -44,11 +44,83 @@ public class SettingsServiceTests : IDisposable
         AppSettings settings = _settingsService.Settings;
 
         // Assert
+        // pnpmBinDir=null なので pnpm プローブなし → PATH も空 → デフォルト名のまま
         settings.SubscriberCommandPath.Should().Be("mcp-resource-subscriber");
         settings.SubscriberArguments.Should().BeEmpty();
         settings.GatewayUrl.Should().Be("http://localhost:3000");
         settings.ResourceUri.Should().Be("queue://review/queue");
         settings.NotificationTimeoutMs.Should().Be(60000);
+    }
+
+    [Fact]
+    public void ResolveCommandPath_ShouldReturnCommandName_WhenNotFound()
+    {
+        string result = SettingsService.ResolveCommandPath("nonexistent-tool-xyz", pnpmBinDir: null);
+        result.Should().Be("nonexistent-tool-xyz");
+    }
+
+    [Fact]
+    public void ResolveCommandPath_ShouldFindExecutable_InPnpmBinDir()
+    {
+        // Arrange: 一時ディレクトリに偽の実行ファイルを作成
+        string tempDir = Path.Combine(Path.GetTempPath(), $"pnpm_test_{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempDir);
+        string fakeExe = Path.Combine(tempDir, "my-tool.cmd");
+        File.WriteAllText(fakeExe, "@echo off");
+
+        try
+        {
+            // PATH が空でも pnpmBinDir から発見できる
+            string? oldPath = Environment.GetEnvironmentVariable("PATH");
+            try
+            {
+                Environment.SetEnvironmentVariable("PATH", string.Empty);
+                string result = SettingsService.ResolveCommandPath("my-tool", pnpmBinDir: tempDir);
+                result.Should().Be(Path.GetFullPath(fakeExe));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", oldPath);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void ResolveCommandPath_ShouldPreferPath_OverPnpmBinDir()
+    {
+        // Arrange: PATH 用と pnpm 用に別々の偽ファイルを作成
+        string pathDir = Path.Combine(Path.GetTempPath(), $"path_test_{Guid.NewGuid()}");
+        string pnpmDir = Path.Combine(Path.GetTempPath(), $"pnpm_test_{Guid.NewGuid()}");
+        Directory.CreateDirectory(pathDir);
+        Directory.CreateDirectory(pnpmDir);
+        string pathExe = Path.Combine(pathDir, "my-tool.cmd");
+        string pnpmExe = Path.Combine(pnpmDir, "my-tool.cmd");
+        File.WriteAllText(pathExe, "@echo off");
+        File.WriteAllText(pnpmExe, "@echo off");
+
+        try
+        {
+            string? oldPath = Environment.GetEnvironmentVariable("PATH");
+            try
+            {
+                Environment.SetEnvironmentVariable("PATH", pathDir);
+                string result = SettingsService.ResolveCommandPath("my-tool", pnpmBinDir: pnpmDir);
+                result.Should().Be(Path.GetFullPath(pathExe));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", oldPath);
+            }
+        }
+        finally
+        {
+            Directory.Delete(pathDir, true);
+            Directory.Delete(pnpmDir, true);
+        }
     }
 
     [Fact]
