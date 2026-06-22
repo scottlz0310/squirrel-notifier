@@ -146,6 +146,12 @@ internal sealed partial class MainWindow : Window
         }
     }
 
+    private void OnGoToSettingsClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        SettingsExpander.IsExpanded = true;
+        _ = DispatcherQueue.TryEnqueue(() => AutoStartToggle.Focus(FocusState.Programmatic));
+    }
+
     private nint NewWndProc(nint hWnd, uint msg, nint wParam, nint lParam)
     {
         // Process tray icon messages
@@ -276,17 +282,20 @@ internal sealed partial class MainWindow : Window
     {
         if (state == SubscriptionState.Error)
         {
+            _ = _loggingService.WriteAsync($"[UI] Updating tray icon to error state. Error: {_service.LastError}");
             _trayIconService.UpdateIcon("squirrel-notifier-error.ico");
             _trayIconService.UpdateTooltip($"Squirrel Notifier - Error: {_service.LastError}");
 
             if (!_hasShownErrorBalloon)
             {
                 _hasShownErrorBalloon = true;
+                _ = _loggingService.WriteAsync("[UI] Showing connection error balloon notification.");
                 _trayIconService.ShowBalloonTip("Squirrel Notifier", $"接続エラー: {_service.LastError}");
             }
         }
         else
         {
+            _ = _loggingService.WriteAsync($"[UI] Updating tray icon to normal state. State: {state}");
             _trayIconService.UpdateIcon("squirrel-notifier.ico");
             _trayIconService.UpdateTooltip("Squirrel Notifier");
             _hasShownErrorBalloon = false;
@@ -778,12 +787,14 @@ internal sealed partial class MainWindow : Window
                     AutoStartToggle.IsOn = true;
                     AutoStartStatusText.Text = "登録済み";
                     RepairAutoStartButton.IsEnabled = true;
+                    OnboardingInfoBar.IsOpen = false;
                 }
                 else
                 {
                     AutoStartToggle.IsOn = false;
                     AutoStartStatusText.Text = "未登録";
                     RepairAutoStartButton.IsEnabled = false;
+                    OnboardingInfoBar.IsOpen = true;
                 }
             }
             finally

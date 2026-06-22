@@ -1,10 +1,15 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- 自動起動（タスクスケジューラ）が未登録の場合に、メインウィンドウ上部に設定画面への誘導を促すオンボーディング案内（InfoBar）を表示する機能を追加（#83）
+
 ### Fixed
+- mcp-gateway のエンドポイントが 404 を返した際や、接続エラーが発生した際のエラーメッセージをパースし、設定画面への確認を促す分かりやすいメッセージに変換するよう改善。また、ログに `[CONN_REFUSED]`、`[HTTP_404]`、`[AUTH_ERROR]` などのエラータグを出力するようにした（#85）
+- `--tray`（トレイ）モードで起動した際、WinUI 3 (Windows App SDK) の仕様で `Window.Activate` を呼ばないとメッセージループが開始せずプロセスが即時終了してしまう問題を修正（#84）
 - Settings の「自動起動」トグルで `schtasks.exe /SC ONLOGON` が UAC 有効環境で Access denied になる問題を修正。`Register-ScheduledTask` / `Unregister-ScheduledTask` PowerShell コマンドレット（CIM API 経由）に切り替え、非昇格プロセスでも登録・削除できるようにした（#86）
 
 ### Changed

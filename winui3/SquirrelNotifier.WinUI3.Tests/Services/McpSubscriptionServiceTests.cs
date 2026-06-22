@@ -950,4 +950,24 @@ public class McpSubscriptionServiceTests : IDisposable
         // Assert: 新規通知後にキャッシュが保存される
         mockCacheService.Verify(c => c.SaveAsync(It.Is<NotificationCache>(nc => nc.SeenEventIds.Contains("evt_new"))), Times.Once);
     }
+
+    [Theory]
+    [InlineData("fetch failed", "mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。", "[CONN_REFUSED]")]
+    [InlineData("connect ECONNREFUSED 127.0.0.1:8080", "mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。", "[CONN_REFUSED]")]
+    [InlineData("404 page not found", "指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]")]
+    [InlineData("Error POSTing to endpoint: 404", "指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]")]
+    [InlineData("Unauthorized access", "mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]")]
+    [InlineData("401 Unauthorized", "mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]")]
+    [InlineData("something went wrong", "予期しないエラーが発生しました: something went wrong", "[GENERAL_ERROR]")]
+    [InlineData("", "不明なエラーが発生しました。", "[UNKNOWN_ERROR]")]
+    [InlineData(null, "不明なエラーが発生しました。", "[UNKNOWN_ERROR]")]
+    public void ErrorMessageMapping_ShouldReturnFriendlyMessageAndTag(string? input, string expectedFriendly, string expectedTag)
+    {
+        // Act
+        var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(input!);
+
+        // Assert
+        friendlyResult.Should().Be(expectedFriendly);
+        tagResult.Should().Be(expectedTag);
+    }
 }
