@@ -16,9 +16,21 @@
                        FontWeight="SemiBold"/>
             <TextBlock x:Name="StatusText"
                        Text="Stopped"/>
+            <InfoBar x:Name="OnboardingInfoBar"
+                     Title="自動起動が未設定です"
+                     Message="設定の「自動起動」を有効にすると、ログイン時にバックグラウンドで動作を開始します。"
+                     Severity="Warning"
+                     IsOpen="False"
+                     IsClosable="True"
+                     Margin="0,4,0,0">
+                <InfoBar.ActionButton>
+                    <Button Content="設定へ移動" Click="OnGoToSettingsClick"/>
+                </InfoBar.ActionButton>
+            </InfoBar>
         </StackPanel>
 
         <Expander Grid.Row="1"
+                  x:Name="SettingsExpander"
                   Header="Settings"
                   HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Stretch">

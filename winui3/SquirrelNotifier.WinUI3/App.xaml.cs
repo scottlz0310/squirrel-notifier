@@ -68,10 +68,11 @@ public partial class App : Application
         _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, showWindow);
         _window.Closed += OnWindowClosed;
 
-        // Activate window if it should be shown
-        if (showWindow)
+        _window.Activate();
+
+        if (!showWindow)
         {
-            _window.Activate();
+            _window.HideWindowToTray();
         }
 
         _subscriptionService.Start();
