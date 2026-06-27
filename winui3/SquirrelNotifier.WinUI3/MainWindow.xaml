@@ -53,7 +53,10 @@
                     </Grid>
 
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Resource URI:" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="3" Grid.Column="1" x:Name="ResourceUriBox" TextChanged="OnSettingChanged"/>
+                    <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                        <TextBox Grid.Column="0" x:Name="ResourceUriBox" TextChanged="OnSettingChanged"/>
+                        <Button Grid.Column="1" Content="URI を選択" Click="OnSelectResourceUriClick"/>
+                    </Grid>
 
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Timeout (ms):" VerticalAlignment="Center"/>
                     <NumberBox Grid.Row="4" Grid.Column="1" x:Name="TimeoutBox" Minimum="1" Maximum="300000" ValueChanged="OnTimeoutChanged"/>

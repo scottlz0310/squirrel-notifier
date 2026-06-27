@@ -451,6 +451,30 @@ internal sealed partial class MainWindow : Window
         await dialog.ShowAsync(ContentDialogPlacement.Popup);
     }
 
+    private static readonly string[] _knownResourceUris =
+    [
+        "queue://review/queue",
+        "queue://review/re-review-requests",
+    ];
+
+    private async void OnSelectResourceUriClick(object sender, RoutedEventArgs e)
+    {
+        var listView = new ListView { ItemsSource = _knownResourceUris, SelectedIndex = 0, MaxHeight = 160 };
+        var selectDialog = new ContentDialog
+        {
+            Title = "Resource URI を選択",
+            Content = listView,
+            PrimaryButtonText = "選択",
+            CloseButtonText = "キャンセル",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
+        if (result == ContentDialogResult.Primary && listView.SelectedItem is string selectedUri)
+        {
+            ResourceUriBox.Text = selectedUri;
+        }
+    }
+
     private void OnTimeoutChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         if (_isInitializing)
