@@ -17,6 +17,12 @@ on:
         type: boolean
         default: false
 
+# 手動入力は run 本文へ直接展開せず env 経由で渡し、利用前に x.y.z 形式を検証する
+# （command injection 防止）。
+env:
+  VERSION: ${{ inputs.version }}
+  APPLY: ${{ inputs.apply }}
+
 jobs:
   reapply:
     runs-on: ubuntu-latest
@@ -26,14 +32,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Validate inputs
+        shell: pwsh
+        run: |
+          if ($env:VERSION -notmatch '^\d+\.\d+\.\d+$') {
+            throw "version は x.y.z 形式で指定してください: '$env:VERSION'"
+          }
+          Write-Host "version: $env:VERSION / apply: $env:APPLY"
+
       - name: Compose release notes from CHANGELOG
         shell: pwsh
-        run: ./scripts/extract-release-notes.ps1 -Version "${{ inputs.version }}"
+        run: ./scripts/extract-release-notes.ps1 -Version $env:VERSION
 
       - name: Publish preview to job summary
         shell: pwsh
         run: |
-          "# Release notes preview: v${{ inputs.version }} (apply=${{ inputs.apply }})" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          "# Release notes preview: v$($env:VERSION) (apply=$($env:APPLY))" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           Get-Content -LiteralPath release-notes.md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
@@ -49,5 +63,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "v${{ inputs.version }}" --notes-file release-notes.md
-          Write-Host "公開 release v${{ inputs.version }} の本文を更新しました"
+          gh release edit "v$($env:VERSION)" --notes-file release-notes.md
+          Write-Host "公開 release v$($env:VERSION) の本文を更新しました"
