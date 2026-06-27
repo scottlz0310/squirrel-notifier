@@ -462,6 +462,13 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
+        if (!Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? gatewayUri) ||
+            (gatewayUri.Scheme != Uri.UriSchemeHttp && gatewayUri.Scheme != Uri.UriSchemeHttps))
+        {
+            await ShowAlertDialogAsync("Gateway URL が不正です", "有効な http または https の URL を入力してください。");
+            return;
+        }
+
         try
         {
             using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
@@ -470,7 +477,7 @@ internal sealed partial class MainWindow : Window
                 System.Text.Encoding.UTF8,
                 "application/json");
 
-            HttpResponseMessage response = await httpClient.PostAsync(new Uri(gatewayUrl), requestBody);
+            HttpResponseMessage response = await httpClient.PostAsync(gatewayUri, requestBody);
             response.EnsureSuccessStatusCode();
 
             string json = await response.Content.ReadAsStringAsync();
