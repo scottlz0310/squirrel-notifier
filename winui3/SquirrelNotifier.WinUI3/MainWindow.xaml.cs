@@ -392,8 +392,16 @@ internal sealed partial class MainWindow : Window
             process.StartInfo.ArgumentList.Add("--format");
             process.StartInfo.ArgumentList.Add("{{.Ports}}");
             process.Start();
-            string output = await process.StandardOutput.ReadToEndAsync();
+            Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
+            string output = await stdoutTask;
+            string stderr = await stderrTask;
+            if (process.ExitCode != 0 && string.IsNullOrWhiteSpace(output))
+            {
+                await ShowAlertDialogAsync("Docker エラー", $"Docker コマンドが失敗しました。\n{stderr.Trim()}");
+                return;
+            }
 
             string[] lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (lines.Length == 0)
