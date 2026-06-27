@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-27
+
 ### Added
 - 自動起動（タスクスケジューラ）が未登録の場合に、メインウィンドウ上部に設定画面への誘導を促すオンボーディング案内（InfoBar）を表示する機能を追加（#83）
 
@@ -272,7 +274,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - レート制限対応
 - リトライ機能
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/scottlz0310/squirrel-notifier/releases/tag/v0.1.0
