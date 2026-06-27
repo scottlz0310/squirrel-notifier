@@ -235,3 +235,6 @@ winui3/SquirrelNotifier.WinUI3.Tests/coverage*.xml
 # Auto-generated entries from templates
 *.manifest
 .pyrightcache/
+
+# Generated release notes (CI で生成される一時ファイル)
+release-notes.md

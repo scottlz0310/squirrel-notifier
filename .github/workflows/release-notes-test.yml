@@ -1,0 +1,36 @@
+name: Release Notes Tests
+
+# extract-release-notes.ps1 の回帰テスト（Pester）。
+# 公開 release 本文を生成する主要経路のため、版系列境界・前版選択を CI で固定する。
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/extract-release-notes.ps1'
+      - 'scripts/extract-release-notes.Tests.ps1'
+      - '.github/workflows/release-notes-test.yml'
+  workflow_dispatch:
+
+jobs:
+  pester:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Ensure Pester v5
+        shell: pwsh
+        run: |
+          $p = Get-Module -ListAvailable Pester | Where-Object { $_.Version.Major -ge 5 }
+          if (-not $p) {
+            Install-Module Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser
+          }
+
+      - name: Run Pester
+        shell: pwsh
+        run: |
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path = './scripts/extract-release-notes.Tests.ps1'
+          $cfg.Run.Exit = $true
+          $cfg.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $cfg
