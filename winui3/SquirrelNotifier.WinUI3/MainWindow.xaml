@@ -47,7 +47,10 @@
                     <TextBox Grid.Row="1" Grid.Column="1" x:Name="ArgumentsBox" TextChanged="OnSettingChanged"/>
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Gateway URL:" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="GatewayUrlBox" TextChanged="OnSettingChanged"/>
+                    <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                        <TextBox Grid.Column="0" x:Name="GatewayUrlBox" TextChanged="OnSettingChanged"/>
+                        <Button Grid.Column="1" Content="コンテナから自動設定" Click="OnAutoDetectGatewayUrlClick"/>
+                    </Grid>
 
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Resource URI:" VerticalAlignment="Center"/>
                     <TextBox Grid.Row="3" Grid.Column="1" x:Name="ResourceUriBox" TextChanged="OnSettingChanged"/>

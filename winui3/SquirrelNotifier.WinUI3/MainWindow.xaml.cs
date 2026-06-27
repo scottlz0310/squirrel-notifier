@@ -372,6 +372,85 @@ internal sealed partial class MainWindow : Window
         SaveCurrentSettings();
     }
 
+    private async void OnAutoDetectGatewayUrlClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            process.StartInfo.ArgumentList.Add("ps");
+            process.StartInfo.ArgumentList.Add("--filter");
+            process.StartInfo.ArgumentList.Add("name=mcp-gateway");
+            process.StartInfo.ArgumentList.Add("--format");
+            process.StartInfo.ArgumentList.Add("{{.Ports}}");
+            process.Start();
+            Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            string output = await stdoutTask;
+            string stderr = await stderrTask;
+            if (process.ExitCode != 0 && string.IsNullOrWhiteSpace(output))
+            {
+                await ShowAlertDialogAsync("Docker エラー", $"Docker コマンドが失敗しました。\n{stderr.Trim()}");
+                return;
+            }
+
+            IReadOnlyList<string> candidates = DockerPortParser.ParseGatewayUrls(output);
+            if (candidates.Count == 0)
+            {
+                await ShowAlertDialogAsync(
+                    "コンテナが見つかりませんでした",
+                    "コンテナ名に 'mcp-gateway' が含まれているか、コンテナが起動しているか確認してください。");
+                return;
+            }
+
+            if (candidates.Count == 1)
+            {
+                GatewayUrlBox.Text = candidates[0];
+                return;
+            }
+
+            var listView = new ListView { ItemsSource = candidates, SelectedIndex = 0, MaxHeight = 160 };
+            var selectDialog = new ContentDialog
+            {
+                Title = "Gateway URL を選択",
+                Content = listView,
+                PrimaryButtonText = "選択",
+                CloseButtonText = "キャンセル",
+                DefaultButton = ContentDialogButton.Primary,
+            };
+            ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
+            if (result == ContentDialogResult.Primary && listView.SelectedItem is string selectedUrl)
+            {
+                GatewayUrlBox.Text = selectedUrl;
+            }
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            await ShowAlertDialogAsync(
+                "Docker が見つかりませんでした",
+                "Docker がインストールされていないか PATH に含まれていません。Gateway URL を手動で入力してください。");
+        }
+    }
+
+    private async Task ShowAlertDialogAsync(string title, string message)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = message,
+            CloseButtonText = "OK",
+        };
+        await dialog.ShowAsync(ContentDialogPlacement.Popup);
+    }
+
     private void OnTimeoutChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         if (_isInitializing)
