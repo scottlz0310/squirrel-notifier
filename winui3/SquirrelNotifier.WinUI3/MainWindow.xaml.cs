@@ -5,7 +5,9 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -449,6 +451,86 @@ internal sealed partial class MainWindow : Window
             CloseButtonText = "OK",
         };
         await dialog.ShowAsync(ContentDialogPlacement.Popup);
+    }
+
+    private async void OnFetchResourceUrisClick(object sender, RoutedEventArgs e)
+    {
+        string gatewayUrl = GatewayUrlBox.Text.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(gatewayUrl))
+        {
+            await ShowAlertDialogAsync("Gateway URL が未設定です", "先に Gateway URL を設定してください。");
+            return;
+        }
+
+        try
+        {
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var requestBody = new StringContent(
+                """{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}""",
+                System.Text.Encoding.UTF8,
+                "application/json");
+
+            HttpResponseMessage response = await httpClient.PostAsync(new Uri(gatewayUrl), requestBody);
+            response.EnsureSuccessStatusCode();
+
+            string json = await response.Content.ReadAsStringAsync();
+
+            using JsonDocument doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("result", out JsonElement result) ||
+                !result.TryGetProperty("resources", out JsonElement resources))
+            {
+                await ShowAlertDialogAsync("取得失敗", "レスポンスから URI 一覧を取得できませんでした。");
+                return;
+            }
+
+            var uris = new List<string>();
+            foreach (JsonElement resource in resources.EnumerateArray())
+            {
+                if (resource.TryGetProperty("uri", out JsonElement uriElement))
+                {
+                    string? uri = uriElement.GetString();
+                    if (!string.IsNullOrEmpty(uri))
+                    {
+                        uris.Add(uri);
+                    }
+                }
+            }
+
+            if (uris.Count == 0)
+            {
+                await ShowAlertDialogAsync("URI が見つかりませんでした", "mcp-gateway に利用可能なリソース URI が存在しません。");
+                return;
+            }
+
+            if (uris.Count == 1)
+            {
+                ResourceUriBox.Text = uris[0];
+                return;
+            }
+
+            var listView = new ListView { ItemsSource = uris, SelectedIndex = 0, MaxHeight = 160 };
+            var selectDialog = new ContentDialog
+            {
+                Title = "Resource URI を選択",
+                Content = listView,
+                PrimaryButtonText = "選択",
+                CloseButtonText = "キャンセル",
+                DefaultButton = ContentDialogButton.Primary,
+            };
+            ContentDialogResult dialogResult = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
+            if (dialogResult == ContentDialogResult.Primary && listView.SelectedItem is string selectedUri)
+            {
+                ResourceUriBox.Text = selectedUri;
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            await ShowAlertDialogAsync("接続失敗", $"mcp-gateway に接続できませんでした。Gateway URL の設定を確認してください。\n{ex.Message}");
+        }
+        catch (TaskCanceledException)
+        {
+            await ShowAlertDialogAsync("タイムアウト", "mcp-gateway への接続がタイムアウトしました。Gateway URL の設定を確認してください。");
+        }
     }
 
     private void OnTimeoutChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
