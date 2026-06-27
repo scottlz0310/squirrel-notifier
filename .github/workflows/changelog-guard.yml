@@ -1,0 +1,34 @@
+name: Changelog Guard
+
+# csproj の <Version> に対応する CHANGELOG 節が存在することを PR で検証する。
+# 原稿無しでタグが切られる事故を未然に防ぐ。
+
+on:
+  pull_request:
+    paths:
+      - 'winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj'
+      - 'CHANGELOG.md'
+      - '.github/workflows/changelog-guard.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify CHANGELOG has a section for the csproj version
+        shell: pwsh
+        run: |
+          $csproj = "winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj"
+          $xml = [xml](Get-Content -LiteralPath $csproj -Raw)
+          $node = $xml.SelectSingleNode("//Version")
+          if (-not $node) { throw "csproj から <Version> を取得できません" }
+          $version = $node.InnerText.Trim()
+          Write-Host "csproj version: $version"
+          $escaped = [regex]::Escape($version)
+          $found = Get-Content -LiteralPath "CHANGELOG.md" | Select-String -Pattern "^##\s*\[$escaped\]" -Quiet
+          if (-not $found) {
+            throw "CHANGELOG.md に [$version] の節がありません。リリース準備 PR では CHANGELOG を更新してください。"
+          }
+          Write-Host "OK: CHANGELOG に [$version] の節があります"
