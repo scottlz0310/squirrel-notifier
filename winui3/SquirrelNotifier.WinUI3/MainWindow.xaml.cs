@@ -6,7 +6,6 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
 using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -403,31 +402,12 @@ internal sealed partial class MainWindow : Window
                 return;
             }
 
-            string[] lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (lines.Length == 0)
+            IReadOnlyList<string> candidates = DockerPortParser.ParseGatewayUrls(output);
+            if (candidates.Count == 0)
             {
                 await ShowAlertDialogAsync(
                     "コンテナが見つかりませんでした",
                     "コンテナ名に 'mcp-gateway' が含まれているか、コンテナが起動しているか確認してください。");
-                return;
-            }
-
-            var portRegex = new Regex(@":(\d+)->\d+/tcp");
-            var candidates = new List<string>();
-            foreach (string line in lines)
-            {
-                Match match = portRegex.Match(line);
-                if (match.Success)
-                {
-                    candidates.Add($"http://localhost:{match.Groups[1].Value}");
-                }
-            }
-
-            if (candidates.Count == 0)
-            {
-                await ShowAlertDialogAsync(
-                    "ポートマッピングが取得できませんでした",
-                    "コンテナが起動していないか、ポートが公開されていない可能性があります。");
                 return;
             }
 
