@@ -60,4 +60,41 @@ public class DockerPortParserTests
 
         result.Should().ContainSingle().Which.Should().Be("http://localhost:8080/mcp/custom-service");
     }
+
+    [Theory]
+    [InlineData("0.0.0.0:8080->8080/tcp", "http://localhost:8080")]
+    [InlineData(":::3000->3000/tcp", "http://localhost:3000")]
+    public void ParseGatewayBaseUrls_SinglePort_ReturnsBaseWithoutRoute(string dockerPsOutput, string expected)
+    {
+        IReadOnlyList<string> result = DockerPortParser.ParseGatewayBaseUrls(dockerPsOutput);
+
+        result.Should().ContainSingle().Which.Should().Be(expected);
+    }
+
+    [Fact]
+    public void ParseGatewayBaseUrls_MultipleContainerLines_ReturnsAllBaseUrls()
+    {
+        string dockerPsOutput = "0.0.0.0:8080->8080/tcp\n0.0.0.0:8081->8080/tcp";
+
+        IReadOnlyList<string> result = DockerPortParser.ParseGatewayBaseUrls(dockerPsOutput);
+
+        result.Should().HaveCount(2);
+        result.Should().Contain("http://localhost:8080");
+        result.Should().Contain("http://localhost:8081");
+    }
+
+    [Theory]
+    [InlineData("http://localhost:8080", "/mcp/thread-owl", "http://localhost:8080/mcp/thread-owl")]
+    [InlineData("http://localhost:8080", "mcp/thread-owl", "http://localhost:8080/mcp/thread-owl")] // 先頭スラッシュ補完
+    [InlineData("http://localhost:8080", "/mcp/thread-owl/", "http://localhost:8080/mcp/thread-owl")] // 末尾スラッシュ除去
+    [InlineData("http://localhost:8080/", "/mcp/thread-owl", "http://localhost:8080/mcp/thread-owl")] // base 末尾スラッシュ除去
+    [InlineData("http://localhost:8080", "  /mcp/thread-owl  ", "http://localhost:8080/mcp/thread-owl")] // 前後空白除去
+    [InlineData("http://localhost:8080", "", "http://localhost:8080")] // 空 route は base のみ
+    [InlineData("http://localhost:8080", "   ", "http://localhost:8080")] // 空白のみ route は base のみ
+    [InlineData("http://localhost:8080", "/", "http://localhost:8080")] // ルートのみ route は base のみ
+    [InlineData("http://localhost:8080", null, "http://localhost:8080")] // null route は base のみ
+    public void CombineRoute_NormalizesAndCombines(string baseUrl, string? route, string expected)
+    {
+        DockerPortParser.CombineRoute(baseUrl, route).Should().Be(expected);
+    }
 }

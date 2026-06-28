@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Gateway URL の「コンテナから自動設定」で、検出したポートに加えて MCP route パス（既定 `/mcp/thread-owl`）を選択・入力できるダイアログを追加。`docker ps` から取得した `http://localhost:PORT` に route を結合して設定するため、gateway root（`/`）に繋いで `resources/list` が 404 になる問題を回避できる。Gateway URL 入力欄にも route を含むプレースホルダーを表示（#102）
+
 ## [0.1.3] - 2026-06-27
 
 ### Added
