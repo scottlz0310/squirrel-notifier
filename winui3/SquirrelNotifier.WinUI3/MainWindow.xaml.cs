@@ -437,6 +437,7 @@ internal sealed partial class MainWindow : Window
                 PrimaryButtonText = "設定",
                 CloseButtonText = "キャンセル",
                 DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = Content.XamlRoot,
             };
             ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
             if (result == ContentDialogResult.Primary && portCombo.SelectedItem is string selectedBase)
