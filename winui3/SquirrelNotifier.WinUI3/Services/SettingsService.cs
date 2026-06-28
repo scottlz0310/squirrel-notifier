@@ -54,16 +54,9 @@ internal sealed class SettingsService
 
             if (pathCustomized || argsCustomized)
             {
-                if (pathCustomized)
-                {
-                    _settings.ReviewerLauncherCommandPath = _settings.LauncherCommandPath;
-                    _settings.LauncherCommandPath = legacyDefaultLauncherPath;
-                }
-
-                if (argsCustomized)
-                {
-                    _settings.ReviewerLauncherArguments = _settings.LauncherArguments;
-                }
+                // どちらかがカスタマイズされていれば path/args を組として reviewer スロットへ移行する
+                _settings.ReviewerLauncherCommandPath = _settings.LauncherCommandPath;
+                _settings.ReviewerLauncherArguments = _settings.LauncherArguments;
             }
 
             _settings.LauncherSlotsMigrated = true;

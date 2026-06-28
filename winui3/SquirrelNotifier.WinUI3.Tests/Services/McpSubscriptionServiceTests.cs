@@ -1048,6 +1048,102 @@ public class McpSubscriptionServiceTests : IDisposable
         service.State.Should().Be(SubscriptionState.Stopped);
     }
 
+    [Fact]
+    public async Task NotifyReviewEvent_WhenExceptionThrown_ShouldRedeliverOnNextSubscription()
+    {
+        // Arrange: 通知サービスが例外を投げる場合、seen cache から削除されて再配信で通知される
+        string eventPayload = @"{""eventId"":""evt_redeliver"",""repository"":""owner/repo"",""prNumber"":10,""prUrl"":""https://github.com/owner/repo/pull/10"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}";
+        string eventJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = true,
+            FinalText = eventPayload,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        int subscriptionCallCount = 0;
+        var testCts = new CancellationTokenSource();
+        int notifyCallCount = 0;
+
+        _mockNotificationService.Setup(n => n.NotifyReviewEvent(It.IsAny<ReviewEvent>()))
+            .Callback<ReviewEvent>(_ =>
+            {
+                notifyCallCount++;
+                if (notifyCallCount == 1)
+                {
+                    throw new InvalidOperationException("Simulated notification failure");
+                }
+            });
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 3)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(0, eventJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert: 1回目は失敗・ロールバック、2回目の再配信で通知が届く
+        notifyCallCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task PersistCacheAsync_ConcurrentSaves_ShouldPreserveLatestSnapshot()
+    {
+        // Arrange: 並行保存で最新 snapshot が保存されることを検証
+        var saveOrder = new System.Collections.Concurrent.ConcurrentQueue<List<string>>();
+        var mockCacheService = new Mock<ICacheService>();
+        mockCacheService.Setup(c => c.LoadAsync()).ReturnsAsync(new NotificationCache());
+        mockCacheService.Setup(c => c.SaveAsync(It.IsAny<NotificationCache>()))
+            .Callback<NotificationCache>(nc => saveOrder.Enqueue(new List<string>(nc.SeenEventIds)))
+            .Returns(Task.CompletedTask);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, cacheService: mockCacheService.Object);
+
+        var tryMarkMethod = typeof(McpSubscriptionService).GetMethod("TryMarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var persistMethod = typeof(McpSubscriptionService).GetMethod("PersistCacheAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // RestoreCacheAsync を先に呼んで初期化する
+        var restoreMethod = typeof(McpSubscriptionService).GetMethod("RestoreCacheAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        await (Task)restoreMethod!.Invoke(service, null)!;
+
+        // evt_A と evt_B を登録してから並行保存する
+        tryMarkMethod!.Invoke(service, new object[] { "evt_A", null! });
+        tryMarkMethod!.Invoke(service, new object[] { "evt_B", null! });
+
+        var task1 = (Task)persistMethod!.Invoke(service, null)!;
+        var task2 = (Task)persistMethod!.Invoke(service, null)!;
+        await Task.WhenAll(task1, task2);
+
+        // Assert: 最終的に保存された snapshot は両方の event ID を含む
+        saveOrder.Should().NotBeEmpty();
+        List<string>? last = null;
+        while (saveOrder.TryDequeue(out var item))
+        {
+            last = item;
+        }
+
+        last.Should().Contain("evt_A").And.Contain("evt_B");
+    }
+
     [Theory]
     [InlineData("fetch failed", "mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。", "[CONN_REFUSED]")]
     [InlineData("connect ECONNREFUSED 127.0.0.1:8080", "mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。", "[CONN_REFUSED]")]

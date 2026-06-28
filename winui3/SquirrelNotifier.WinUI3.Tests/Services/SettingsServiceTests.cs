@@ -284,7 +284,8 @@ public class SettingsServiceTests : IDisposable
             // Act
             var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
 
-            // Assert: カスタム arguments が reviewer スロットに移行される
+            // Assert: path/args を組として reviewer スロットに移行される
+            service.Settings.ReviewerLauncherCommandPath.Should().Be("review-raven");
             service.Settings.ReviewerLauncherArguments.Should().Be("custom-arg --repo {owner}/{repo}");
             service.Settings.LauncherSlotsMigrated.Should().BeTrue();
         }
@@ -314,8 +315,40 @@ public class SettingsServiceTests : IDisposable
             // Act
             var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
 
-            // Assert: カスタム path が reviewer スロットに移行される
+            // Assert: path/args を組として reviewer スロットに移行される
             service.Settings.ReviewerLauncherCommandPath.Should().Be("my-custom-review-tool");
+            service.Settings.ReviewerLauncherArguments.Should().Be("review --interactive --repo {owner}/{repo} --pr {prNumber}");
+            service.Settings.LauncherSlotsMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void LauncherSlotsMigration_ShouldMigrateBothCustomPathAndArgs()
+    {
+        // Arrange: LauncherCommandPath と LauncherArguments の両方をカスタマイズ
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "settings.json");
+        File.WriteAllText(settingsPath, """
+            {
+                "LauncherCommandPath": "my-custom-tool",
+                "LauncherArguments": "my-custom-arg --repo {owner}/{repo}",
+                "LauncherSlotsMigrated": false
+            }
+            """);
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert: path/args を組として reviewer スロットに移行される
+            service.Settings.ReviewerLauncherCommandPath.Should().Be("my-custom-tool");
+            service.Settings.ReviewerLauncherArguments.Should().Be("my-custom-arg --repo {owner}/{repo}");
             service.Settings.LauncherSlotsMigrated.Should().BeTrue();
         }
         finally

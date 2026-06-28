@@ -408,6 +408,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                                     }
                                     catch (Exception notifyEx)
                                     {
+                                        // 通知失敗時は claim を解除して再配信で再試行できるようにする
+                                        UndoMarkAsSeen(reviewEvent.EventId);
                                         await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
                                     }
                                 }
@@ -569,6 +571,32 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         }
     }
 
+    private void UndoMarkAsSeen(string eventId)
+    {
+        if (string.IsNullOrEmpty(eventId))
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            _seenEventIds.Remove(eventId);
+            Queue<string> newQueue = new(_eventIdQueue.Where(id => id != eventId));
+            _eventIdQueue.Clear();
+            foreach (string id in newQueue)
+            {
+                _eventIdQueue.Enqueue(id);
+            }
+
+            Queue<CachedReviewEvent> newEvents = new(_recentEvents.Where(e => e.EventId != eventId));
+            _recentEvents.Clear();
+            foreach (CachedReviewEvent e in newEvents)
+            {
+                _recentEvents.Enqueue(e);
+            }
+        }
+    }
+
     private async Task PersistCacheAsync()
     {
         if (_cacheService == null)
@@ -576,19 +604,19 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             return;
         }
 
-        NotificationCache cache;
-        lock (_lock)
-        {
-            cache = new NotificationCache
-            {
-                SeenEventIds = new List<string>(_eventIdQueue),
-                RecentEvents = new List<CachedReviewEvent>(_recentEvents),
-            };
-        }
-
         await _cacheSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
+            NotificationCache cache;
+            lock (_lock)
+            {
+                cache = new NotificationCache
+                {
+                    SeenEventIds = new List<string>(_eventIdQueue),
+                    RecentEvents = new List<CachedReviewEvent>(_recentEvents),
+                };
+            }
+
             await _cacheService.SaveAsync(cache).ConfigureAwait(false);
         }
         catch (Exception ex)
