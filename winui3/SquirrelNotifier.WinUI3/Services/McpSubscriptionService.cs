@@ -2,6 +2,7 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using SquirrelNotifier.WinUI3.Models;
@@ -23,9 +24,11 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private readonly Queue<string> _eventIdQueue = new();
     private readonly Queue<CachedReviewEvent> _recentEvents = new();
     private readonly object _lock = new();
+    private readonly ConcurrentDictionary<string, IProcessInstance> _activeProcesses = new();
 
     private Task? _loopTask;
     private CancellationTokenSource? _activeProcessCts;
+    private CancellationTokenSource? _stopCts;
     private IProcessInstance? _activeProcess;
     private SubscriptionState _state = SubscriptionState.Stopped;
     private string _lastError = string.Empty;
@@ -78,20 +81,37 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
         LastError = string.Empty;
         State = SubscriptionState.Starting;
-        _loopTask = Task.Run(() => RunSubscriptionLoopAsync(_cts.Token));
+        _stopCts?.Dispose();
+        _stopCts = new CancellationTokenSource();
+        _loopTask = Task.Run(() => RunSubscriptionLoopAsync(_stopCts.Token));
     }
 
     public async Task StopAsync()
     {
         State = SubscriptionState.Stopping;
 
-        // Cancel process first to stop immediately
+        // Cancel the subscription loop (including backoff delays)
+        _stopCts?.Cancel();
+
+        // Cancel all active processes immediately
         _activeProcessCts?.Cancel();
         if (_activeProcess != null)
         {
             try
             {
                 _activeProcess.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        foreach (IProcessInstance process in _activeProcesses.Values)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
             }
             catch
             {
@@ -258,13 +278,33 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         State = SubscriptionState.Running;
         ReportStatus("Subscribed.");
 
+        AppSettings settings = _settingsService.Settings;
+        List<string> uris = settings.ResourceUris.Count > 0
+            ? settings.ResourceUris
+            : new List<string> { settings.ResourceUri };
+
+        if (uris.Count == 1)
+        {
+            await RunSingleUriLoopAsync(uris[0], token).ConfigureAwait(false);
+        }
+        else
+        {
+            await LogAsync($"Starting parallel subscription for {uris.Count} URIs.").ConfigureAwait(false);
+            Task[] tasks = uris.Select(uri => RunSingleUriLoopAsync(uri, token)).ToArray();
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunSingleUriLoopAsync(string resourceUri, CancellationToken token)
+    {
         int retryCount = 0;
         int retryDelayMs = 1000;
 
         while (!token.IsCancellationRequested)
         {
-            _activeProcessCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            CancellationToken processToken = _activeProcessCts.Token;
+            using var loopCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            CancellationToken processToken = loopCts.Token;
+            string processKey = $"{resourceUri}:{Environment.TickCount64}";
 
             try
             {
@@ -299,28 +339,31 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 psi.ArgumentList.Add(settings.GatewayUrl);
 
                 psi.ArgumentList.Add("--uri");
-                psi.ArgumentList.Add(settings.ResourceUri);
+                psi.ArgumentList.Add(resourceUri);
 
                 psi.ArgumentList.Add("--timeout-ms");
                 psi.ArgumentList.Add(settings.NotificationTimeoutMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
                 psi.ArgumentList.Add("--json");
 
-                await LogAsync($"Launching subscriber for resource: {settings.ResourceUri}").ConfigureAwait(false);
+                await LogAsync($"Launching subscriber for resource: {resourceUri}").ConfigureAwait(false);
 
-                using (_activeProcess = _processRunner.Start(psi))
+                IProcessInstance process = _processRunner.Start(psi);
+                _activeProcesses[processKey] = process;
+
+                try
                 {
-                    Task<string> stdoutTask = _activeProcess.StandardOutput.ReadToEndAsync(processToken);
-                    Task<string> stderrTask = _activeProcess.StandardError.ReadToEndAsync(processToken);
+                    Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync(processToken);
+                    Task<string> stderrTask = process.StandardError.ReadToEndAsync(processToken);
 
-                    await _activeProcess.WaitForExitAsync(processToken).ConfigureAwait(false);
+                    await process.WaitForExitAsync(processToken).ConfigureAwait(false);
 
                     string stdout = await stdoutTask.ConfigureAwait(false);
                     string stderr = await stderrTask.ConfigureAwait(false);
 
-                    if (_activeProcess.ExitCode != 0)
+                    if (process.ExitCode != 0)
                     {
-                        throw new InvalidOperationException($"Subscriber process exited with non-zero code {_activeProcess.ExitCode}. Stderr: {stderr.Trim()}");
+                        throw new InvalidOperationException($"Subscriber process exited with non-zero code {process.ExitCode}. Stderr: {stderr.Trim()}");
                     }
 
                     if (string.IsNullOrWhiteSpace(stdout))
@@ -377,17 +420,21 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     }
                     else
                     {
-                        // Some other state, e.g. normal exit but not a notification
                         await LogAsync($"Subscriber finished execution. Route={result.Route}").ConfigureAwait(false);
                     }
+                }
+                finally
+                {
+                    _activeProcesses.TryRemove(processKey, out _);
+                    process.Dispose();
                 }
 
                 retryCount = 0;
                 retryDelayMs = 1000;
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested || _activeProcessCts?.IsCancellationRequested == true)
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                // Loop or process cancellation (StopAsync/DisposeAsync) — do not retry
+                // Loop cancellation (StopAsync/DisposeAsync) — do not retry
                 break;
             }
             catch (Exception ex)
@@ -400,16 +447,16 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     LastError = friendlyMessage;
                     State = SubscriptionState.Error;
                     ReportStatus($"Error: {friendlyMessage}");
-                    await LogAsync($"Subscription loop error (max retries exceeded) {tag}: {ex.Message}").ConfigureAwait(false);
+                    await LogAsync($"[{resourceUri}] Subscription loop error (max retries exceeded) {tag}: {ex.Message}").ConfigureAwait(false);
                     break;
                 }
 
-                await LogAsync($"Subscription loop error (retry {retryCount}/{_maxRetries}) {tag}: {ex.Message}").ConfigureAwait(false);
+                await LogAsync($"[{resourceUri}] Subscription loop error (retry {retryCount}/{_maxRetries}) {tag}: {ex.Message}").ConfigureAwait(false);
                 ReportStatus($"Retrying ({retryCount}/{_maxRetries})...");
 
                 try
                 {
-                    await Task.Delay(retryDelayMs, processToken).ConfigureAwait(false);
+                    await Task.Delay(retryDelayMs, token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -417,12 +464,6 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 }
 
                 retryDelayMs = Math.Min(retryDelayMs * 2, 32000);
-            }
-            finally
-            {
-                _activeProcess = null;
-                _activeProcessCts?.Dispose();
-                _activeProcessCts = null;
             }
         }
     }
@@ -567,7 +608,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _cts.Cancel();
+        _stopCts?.Cancel();
         _activeProcessCts?.Cancel();
+
         if (_activeProcess != null)
         {
             try
@@ -582,6 +625,22 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             _activeProcess.Dispose();
         }
 
+        foreach (IProcessInstance process in _activeProcesses.Values)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // ignore
+            }
+
+            process.Dispose();
+        }
+
+        _activeProcesses.Clear();
+
         if (_loopTask != null)
         {
             try
@@ -595,6 +654,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         }
 
         _cts.Dispose();
+        _stopCts?.Dispose();
         _activeProcessCts?.Dispose();
     }
 

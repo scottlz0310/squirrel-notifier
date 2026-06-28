@@ -65,8 +65,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         await LogAsync($"User requested review execution for PR: {reviewEvent.Repository}#{reviewEvent.PrNumber}").ConfigureAwait(false);
 
         AppSettings settings = _settingsService.Settings;
-        string commandPath = settings.LauncherCommandPath;
-        string argumentsTemplate = settings.LauncherArguments;
+
+        // re-review-requests URI は常に reviewer スロット、queue URI は LauncherRole で切り替え
+        bool useReviewer = reviewEvent.Source.Contains("re-review-requests", StringComparison.OrdinalIgnoreCase)
+            || settings.LauncherRole == "reviewer";
+        string commandPath = useReviewer ? settings.ReviewerLauncherCommandPath : settings.ReviewedLauncherCommandPath;
+        string argumentsTemplate = useReviewer ? settings.ReviewerLauncherArguments : settings.ReviewedLauncherArguments;
         int timeoutMs = settings.LauncherTimeoutMs;
 
         _activeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

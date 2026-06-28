@@ -37,6 +37,24 @@ internal sealed class SettingsService
 
         _settings = LoadSettings();
 
+        // 旧単一 ResourceUri を ResourceUris リストに移行する
+        if (_settings.ResourceUris.Count == 0)
+        {
+            _settings.ResourceUris.Add(_settings.ResourceUri);
+            SaveSettings();
+        }
+
+        // 旧単一スロット設定をユーザーがカスタマイズしていた場合、reviewer スロットに移行する
+        const string legacyDefaultLauncherPath = "review-raven";
+        if (_settings.LauncherCommandPath != legacyDefaultLauncherPath
+            && _settings.ReviewerLauncherCommandPath == "claude")
+        {
+            _settings.ReviewerLauncherCommandPath = _settings.LauncherCommandPath;
+            _settings.ReviewerLauncherArguments = _settings.LauncherArguments;
+            _settings.LauncherCommandPath = legacyDefaultLauncherPath;
+            SaveSettings();
+        }
+
         if (_settings.SubscriberCommandPath == "mcp-resource-subscriber")
         {
             // Lazy pnpm probe: only runs when the default command name needs resolution.
@@ -193,10 +211,13 @@ internal sealed class SettingsService
         string commandPath,
         string arguments,
         string gatewayUrl,
-        string resourceUri,
+        IReadOnlyList<string> resourceUris,
         int timeoutMs,
-        string launcherCommandPath,
-        string launcherArguments,
+        string reviewerLauncherCommandPath,
+        string reviewerLauncherArguments,
+        string reviewedLauncherCommandPath,
+        string reviewedLauncherArguments,
+        string launcherRole,
         int launcherTimeoutMs)
     {
         if (string.IsNullOrWhiteSpace(commandPath))
@@ -209,9 +230,10 @@ internal sealed class SettingsService
             throw new ArgumentException("Gateway URL must be a valid http/https absolute URL", nameof(gatewayUrl));
         }
 
-        if (string.IsNullOrWhiteSpace(resourceUri))
+        ArgumentNullException.ThrowIfNull(resourceUris);
+        if (resourceUris.Count == 0 || resourceUris.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("Resource URI cannot be empty", nameof(resourceUri));
+            throw new ArgumentException("Resource URIs must contain at least one non-empty URI", nameof(resourceUris));
         }
 
         if (timeoutMs <= 0 || timeoutMs > 300000)
@@ -219,9 +241,19 @@ internal sealed class SettingsService
             throw new ArgumentOutOfRangeException(nameof(timeoutMs), "Timeout must be between 1 and 300000 ms");
         }
 
-        if (string.IsNullOrWhiteSpace(launcherCommandPath))
+        if (string.IsNullOrWhiteSpace(reviewerLauncherCommandPath))
         {
-            throw new ArgumentException("Launcher command path cannot be empty", nameof(launcherCommandPath));
+            throw new ArgumentException("Reviewer launcher command path cannot be empty", nameof(reviewerLauncherCommandPath));
+        }
+
+        if (string.IsNullOrWhiteSpace(reviewedLauncherCommandPath))
+        {
+            throw new ArgumentException("Reviewed launcher command path cannot be empty", nameof(reviewedLauncherCommandPath));
+        }
+
+        if (launcherRole != "reviewer" && launcherRole != "reviewed")
+        {
+            throw new ArgumentException("Launcher role must be 'reviewer' or 'reviewed'", nameof(launcherRole));
         }
 
         if (launcherTimeoutMs <= 0 || launcherTimeoutMs > 300000)
@@ -232,10 +264,14 @@ internal sealed class SettingsService
         _settings.SubscriberCommandPath = commandPath;
         _settings.SubscriberArguments = arguments;
         _settings.GatewayUrl = gatewayUrl;
-        _settings.ResourceUri = resourceUri;
+        _settings.ResourceUris = new List<string>(resourceUris);
+        _settings.ResourceUri = resourceUris[0];
         _settings.NotificationTimeoutMs = timeoutMs;
-        _settings.LauncherCommandPath = launcherCommandPath;
-        _settings.LauncherArguments = launcherArguments;
+        _settings.ReviewerLauncherCommandPath = reviewerLauncherCommandPath;
+        _settings.ReviewerLauncherArguments = reviewerLauncherArguments;
+        _settings.ReviewedLauncherCommandPath = reviewedLauncherCommandPath;
+        _settings.ReviewedLauncherArguments = reviewedLauncherArguments;
+        _settings.LauncherRole = launcherRole;
         _settings.LauncherTimeoutMs = launcherTimeoutMs;
         SaveSettings();
     }
@@ -249,13 +285,30 @@ internal sealed class AppSettings
 
     public string GatewayUrl { get; set; } = "http://localhost:3000";
 
+    // 旧フィールド（後方互換; 新設定は ResourceUris を使用）
     public string ResourceUri { get; set; } = "queue://review/queue";
+
+    public List<string> ResourceUris { get; set; } = new();
 
     public int NotificationTimeoutMs { get; set; } = 60000;
 
+    // 旧フィールド（後方互換のため残す; UI からは削除済み）
     public string LauncherCommandPath { get; set; } = "review-raven";
 
     public string LauncherArguments { get; set; } = "review --interactive --repo {owner}/{repo} --pr {prNumber}";
+
+    // reviewer-side スロット
+    public string ReviewerLauncherCommandPath { get; set; } = "claude";
+
+    public string ReviewerLauncherArguments { get; set; } = "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+
+    // reviewed-side スロット
+    public string ReviewedLauncherCommandPath { get; set; } = "claude";
+
+    public string ReviewedLauncherArguments { get; set; } = "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+
+    // queue://review/queue に対して使うロール ("reviewer" | "reviewed")
+    public string LauncherRole { get; set; } = "reviewer";
 
     public int LauncherTimeoutMs { get; set; } = 300000;
 

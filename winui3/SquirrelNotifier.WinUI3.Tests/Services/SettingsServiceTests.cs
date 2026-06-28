@@ -107,36 +107,76 @@ public class SettingsServiceTests : IDisposable
         }
     }
 
+    private static readonly IReadOnlyList<string> _defaultUris = new[] { "queue://custom" };
+
+    private void UpdateSettingsDefault(
+        string cmd = "custom-cmd",
+        string args = "--arg",
+        string url = "https://example.com/gw",
+        IReadOnlyList<string>? uris = null,
+        int timeout = 120000,
+        string reviewerCmd = "reviewer-cmd",
+        string reviewerArgs = "--reviewer-arg",
+        string reviewedCmd = "reviewed-cmd",
+        string reviewedArgs = "--reviewed-arg",
+        string role = "reviewer",
+        int launcherTimeout = 150000)
+    {
+        _settingsService.UpdateSettings(cmd, args, url, uris ?? _defaultUris, timeout, reviewerCmd, reviewerArgs, reviewedCmd, reviewedArgs, role, launcherTimeout);
+    }
+
     [Fact]
     public void UpdateSettings_ShouldUpdateSettings()
     {
         // Act
-        _settingsService.UpdateSettings("custom-cmd", "--arg", "https://example.com/gw", "queue://custom", 120000, "launcher-cmd", "--launcher-arg", 150000);
+        UpdateSettingsDefault(uris: new[] { "queue://custom", "queue://custom2" });
 
         // Assert
         _settingsService.Settings.SubscriberCommandPath.Should().Be("custom-cmd");
         _settingsService.Settings.SubscriberArguments.Should().Be("--arg");
         _settingsService.Settings.GatewayUrl.Should().Be("https://example.com/gw");
         _settingsService.Settings.ResourceUri.Should().Be("queue://custom");
+        _settingsService.Settings.ResourceUris.Should().BeEquivalentTo(new[] { "queue://custom", "queue://custom2" });
         _settingsService.Settings.NotificationTimeoutMs.Should().Be(120000);
-        _settingsService.Settings.LauncherCommandPath.Should().Be("launcher-cmd");
-        _settingsService.Settings.LauncherArguments.Should().Be("--launcher-arg");
+        _settingsService.Settings.ReviewerLauncherCommandPath.Should().Be("reviewer-cmd");
+        _settingsService.Settings.ReviewerLauncherArguments.Should().Be("--reviewer-arg");
+        _settingsService.Settings.ReviewedLauncherCommandPath.Should().Be("reviewed-cmd");
+        _settingsService.Settings.ReviewedLauncherArguments.Should().Be("--reviewed-arg");
+        _settingsService.Settings.LauncherRole.Should().Be("reviewer");
         _settingsService.Settings.LauncherTimeoutMs.Should().Be(150000);
     }
 
-    [Theory]
-    [InlineData("", "--arg", "http://localhost:3000", "queue://custom", 60000, "launcher-cmd", 60000)] // Empty command path
-    [InlineData("cmd", "--arg", "invalid-url", "queue://custom", 60000, "launcher-cmd", 60000)] // Invalid URL
-    [InlineData("cmd", "--arg", "ftp://localhost:3000", "queue://custom", 60000, "launcher-cmd", 60000)] // Non-http/https URL
-    [InlineData("cmd", "--arg", "http://localhost:3000", "", 60000, "launcher-cmd", 60000)] // Empty resource URI
-    [InlineData("cmd", "--arg", "http://localhost:3000", "queue://custom", 60000, "", 60000)] // Empty launcher path
-    public void UpdateSettings_ShouldThrowArgumentExceptionForInvalidInputs(
-        string cmd, string args, string url, string uri, int timeout, string launcherCmd, int launcherTimeout)
-    {
-        // Act & Assert
-        Action act = () => _settingsService.UpdateSettings(cmd, args, url, uri, timeout, launcherCmd, "--launcher-arg", launcherTimeout);
-        act.Should().Throw<ArgumentException>();
-    }
+    [Fact]
+    public void UpdateSettings_ShouldThrowForEmptyCommandPath()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(cmd: "")).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForInvalidGatewayUrl()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(url: "invalid-url")).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForNonHttpGatewayUrl()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(url: "ftp://localhost:3000")).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForEmptyResourceUris()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(uris: Array.Empty<string>())).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForBlankResourceUri()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(uris: new[] { "  " })).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForEmptyReviewerCommandPath()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(reviewerCmd: "")).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForEmptyReviewedCommandPath()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(reviewedCmd: "")).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForInvalidRole()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(role: "invalid")).Should().Throw<ArgumentException>();
 
     [Theory]
     [InlineData(0)]
@@ -144,12 +184,8 @@ public class SettingsServiceTests : IDisposable
     [InlineData(300001)]
     public void UpdateSettings_ShouldThrowArgumentOutOfRangeExceptionForInvalidTimeout(int invalidTimeout)
     {
-        // Act & Assert
-        Action act1 = () => _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", invalidTimeout, "launcher-cmd", "--launcher-arg", 60000);
-        act1.Should().Throw<ArgumentOutOfRangeException>();
-
-        Action act2 = () => _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", 60000, "launcher-cmd", "--launcher-arg", invalidTimeout);
-        act2.Should().Throw<ArgumentOutOfRangeException>();
+        FluentActions.Invoking(() => UpdateSettingsDefault(timeout: invalidTimeout)).Should().Throw<ArgumentOutOfRangeException>();
+        FluentActions.Invoking(() => UpdateSettingsDefault(launcherTimeout: invalidTimeout)).Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]
@@ -203,7 +239,7 @@ public class SettingsServiceTests : IDisposable
         _settingsService.SettingsChanged += (_, _) => eventRaised = true;
 
         // Act
-        _settingsService.UpdateSettings("cmd", "--arg", "http://localhost:3000", "queue://custom", 60000, "launcher-cmd", "--launcher-arg", 60000);
+        UpdateSettingsDefault();
 
         // Assert
         eventRaised.Should().BeTrue();

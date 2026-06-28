@@ -205,7 +205,7 @@ public class McpSubscriptionServiceTests : IDisposable
     public async Task Start_ShouldPassArgumentsAndSecretsCorrectly()
     {
         // Arrange
-        _settingsService.UpdateSettings("my-cmd", "--foo bar", "http://gateway:80", "queue://res", 30000, "review-raven", "", 300000);
+        _settingsService.UpdateSettings("my-cmd", "--foo bar", "http://gateway:80", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", "super-secret-token");
 
         var preflightProcess = CreateMockProcess(0, "help", "");
@@ -361,7 +361,7 @@ public class McpSubscriptionServiceTests : IDisposable
     public async Task Start_ShouldSkipTokenAndArgumentsWhenEmpty()
     {
         // Arrange
-        _settingsService.UpdateSettings("my-cmd", "", "http://gateway:80", "queue://res", 30000, "review-raven", "", 300000);
+        _settingsService.UpdateSettings("my-cmd", "", "http://gateway:80", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", null);
 
         var preflightProcess = CreateMockProcess(0, "help", "");
@@ -553,7 +553,7 @@ public class McpSubscriptionServiceTests : IDisposable
         await File.WriteAllTextAsync(testCmd, "@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\nexit /b 1\r\n", Encoding.ASCII);
 
         var settingsService = new SettingsService(tempDir);
-        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", "queue://res", 30000, "review-raven", "", 300000);
+        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
 
         var runner = new ProcessRunner();
         await using var service = new McpSubscriptionService(settingsService, _notificationService, _loggingService, runner);
@@ -949,6 +949,110 @@ public class McpSubscriptionServiceTests : IDisposable
 
         // Assert: 新規通知後にキャッシュが保存される
         mockCacheService.Verify(c => c.SaveAsync(It.Is<NotificationCache>(nc => nc.SeenEventIds.Contains("evt_new"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task Start_WithMultipleResourceUris_ShouldLaunchProcessForEachUri()
+    {
+        // Arrange: 2つの URI を設定
+        _settingsService.UpdateSettings(
+            "my-cmd", "", "http://gateway:80",
+            new[] { "queue://uri-one", "queue://uri-two" },
+            30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var launchedUris = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var bothStartedTcs = new TaskCompletionSource();
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                int uriIndex = new List<string>(psi.ArgumentList).IndexOf("--uri");
+                if (uriIndex >= 0 && uriIndex + 1 < psi.ArgumentList.Count)
+                {
+                    launchedUris.Add(psi.ArgumentList[uriIndex + 1]);
+                    if (launchedUris.Count >= 2)
+                    {
+                        bothStartedTcs.TrySetResult();
+                    }
+                }
+
+                var mock = new Mock<IProcessInstance>();
+                mock.SetupGet(p => p.ExitCode).Returns(0);
+                mock.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Array.Empty<byte>())));
+                mock.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Array.Empty<byte>())));
+                mock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                    .Returns<CancellationToken>(ct => Task.Delay(Timeout.Infinite, ct));
+                return mock.Object;
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+
+        // Act
+        service.Start();
+        await bothStartedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync();
+
+        // Assert: 両方の URI に対してプロセスが起動された
+        launchedUris.Should().Contain("queue://uri-one");
+        launchedUris.Should().Contain("queue://uri-two");
+    }
+
+    [Fact]
+    public async Task StopAsync_WithMultipleResourceUris_ShouldStopAllLoopsPromptly()
+    {
+        // Arrange: 2つの URI を設定し、両ループがバックオフ待機中に StopAsync を呼ぶ
+        _settingsService.UpdateSettings(
+            "my-cmd", "", "http://gateway:80",
+            new[] { "queue://uri-one", "queue://uri-two" },
+            30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        int retryingCount = 0;
+        var bothRetryingTcs = new TaskCompletionSource();
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                return CreateMockProcess(1, "", "transient error");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 5);
+        service.StatusTextChanged += (_, text) =>
+        {
+            if (text.StartsWith("Retrying"))
+            {
+                int count = Interlocked.Increment(ref retryingCount);
+                if (count >= 2)
+                {
+                    bothRetryingTcs.TrySetResult();
+                }
+            }
+        };
+
+        service.Start();
+        await bothRetryingTcs.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Act: 両ループがバックオフ待機中に StopAsync を呼ぶ
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await service.StopAsync();
+        sw.Stop();
+
+        // Assert: 1000ms のバックオフ遅延より十分早く完了する
+        sw.ElapsedMilliseconds.Should().BeLessThan(800);
+        service.State.Should().Be(SubscriptionState.Stopped);
     }
 
     [Theory]

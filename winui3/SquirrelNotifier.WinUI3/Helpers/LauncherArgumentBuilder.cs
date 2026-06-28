@@ -53,6 +53,11 @@ internal static class LauncherArgumentBuilder
             throw new ArgumentException("Invalid repository name.", nameof(reviewEvent));
         }
 
+        if (!string.IsNullOrEmpty(reviewEvent.Reason) && !_safeNameRegex.IsMatch(reviewEvent.Reason))
+        {
+            throw new ArgumentException("Invalid reason value.", nameof(reviewEvent));
+        }
+
         // Validate PR Url
         if (!UrlValidator.IsSafeGitHubUrl(reviewEvent.PrUrl, reviewEvent.Repository, reviewEvent.PrNumber))
         {
@@ -66,7 +71,8 @@ internal static class LauncherArgumentBuilder
                 .Replace("{owner}", owner, StringComparison.Ordinal)
                 .Replace("{repo}", repo, StringComparison.Ordinal)
                 .Replace("{prNumber}", reviewEvent.PrNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
-                .Replace("{prUrl}", reviewEvent.PrUrl, StringComparison.Ordinal);
+                .Replace("{prUrl}", reviewEvent.PrUrl, StringComparison.Ordinal)
+                .Replace("{reason}", reviewEvent.Reason, StringComparison.Ordinal);
             result.Add(replaced);
         }
 
