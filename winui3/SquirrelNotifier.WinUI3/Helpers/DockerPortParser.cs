@@ -13,10 +13,8 @@ internal static class DockerPortParser
 
     private static readonly Regex _portMappingRegex = new(@":(\d+)->\d+/tcp", RegexOptions.Compiled);
 
-    /// <summary>
-    /// docker ps のポートマッピングから route を含まない base URL（http://localhost:PORT）の一覧を返す。
-    /// route は呼び出し側で <see cref="CombineRoute"/> を用いて付与する。
-    /// </summary>
+    // docker ps のポートマッピングから route を含まない base URL（http://localhost:PORT）の一覧を返す。
+    // route は呼び出し側で CombineRoute を用いて付与する。
     internal static IReadOnlyList<string> ParseGatewayBaseUrls(string dockerPsOutput)
     {
         var candidates = new List<string>();
@@ -32,10 +30,8 @@ internal static class DockerPortParser
         return candidates;
     }
 
-    /// <summary>
-    /// base URL に MCP route パスを正規化して結合する。
-    /// route が空の場合は base をそのまま返す。先頭スラッシュの補完・余分なスラッシュの除去を行う。
-    /// </summary>
+    // base URL に MCP route パスを正規化して結合する。
+    // route が空の場合は base をそのまま返す。先頭スラッシュの補完・余分なスラッシュの除去を行う。
     internal static string CombineRoute(string baseUrl, string route)
     {
         string trimmedBase = baseUrl.TrimEnd('/');
@@ -54,9 +50,7 @@ internal static class DockerPortParser
         return trimmedRoute.Length == 0 ? trimmedBase : trimmedBase + trimmedRoute;
     }
 
-    /// <summary>
-    /// docker ps のポートマッピングから route を付与した Gateway URL の一覧を返す。
-    /// </summary>
+    // docker ps のポートマッピングから route を付与した Gateway URL の一覧を返す。
     internal static IReadOnlyList<string> ParseGatewayUrls(string dockerPsOutput, string mcpRoute = DefaultMcpRoute)
     {
         var result = new List<string>();

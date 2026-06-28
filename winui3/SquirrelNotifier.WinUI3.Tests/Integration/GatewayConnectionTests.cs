@@ -15,12 +15,10 @@ namespace SquirrelNotifier.WinUI3.Tests.Integration;
 // MCP endpoint に到達する（route が 404 にならない）ことを検証する。
 public class GatewayConnectionTests
 {
-    private const string GatewayUrlEnvVar = "MCP_GATEWAY_URL";
-
     [Fact]
     public async Task ResourcesList_AtConfiguredGatewayUrl_DoesNotReturn404()
     {
-        string? gatewayUrl = Environment.GetEnvironmentVariable(GatewayUrlEnvVar);
+        string? gatewayUrl = Environment.GetEnvironmentVariable("MCP_GATEWAY_URL");
         if (string.IsNullOrWhiteSpace(gatewayUrl))
         {
             // 環境変数が未設定の場合はスキップ（CI 既定）。
