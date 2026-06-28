@@ -402,8 +402,8 @@ internal sealed partial class MainWindow : Window
                 return;
             }
 
-            IReadOnlyList<string> candidates = DockerPortParser.ParseGatewayUrls(output);
-            if (candidates.Count == 0)
+            IReadOnlyList<string> baseUrls = DockerPortParser.ParseGatewayBaseUrls(output);
+            if (baseUrls.Count == 0)
             {
                 await ShowAlertDialogAsync(
                     "コンテナが見つかりませんでした",
@@ -411,25 +411,37 @@ internal sealed partial class MainWindow : Window
                 return;
             }
 
-            if (candidates.Count == 1)
+            // mcp-gateway は route（例: /mcp/thread-owl）配下に MCP endpoint を割り当てるため、
+            // 検出した base URL（host:port）に加えて route パスを選択・入力できるようにする。
+            var portCombo = new ComboBox
             {
-                GatewayUrlBox.Text = candidates[0];
-                return;
-            }
+                ItemsSource = baseUrls,
+                SelectedIndex = 0,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            var routeBox = new TextBox
+            {
+                Text = DockerPortParser.DefaultMcpRoute,
+                PlaceholderText = DockerPortParser.DefaultMcpRoute,
+            };
+            var panel = new StackPanel { Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = "ポート（コンテナ）:" });
+            panel.Children.Add(portCombo);
+            panel.Children.Add(new TextBlock { Text = "MCP route パス:" });
+            panel.Children.Add(routeBox);
 
-            var listView = new ListView { ItemsSource = candidates, SelectedIndex = 0, MaxHeight = 160 };
             var selectDialog = new ContentDialog
             {
-                Title = "Gateway URL を選択",
-                Content = listView,
-                PrimaryButtonText = "選択",
+                Title = "Gateway URL を設定",
+                Content = panel,
+                PrimaryButtonText = "設定",
                 CloseButtonText = "キャンセル",
                 DefaultButton = ContentDialogButton.Primary,
             };
             ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
-            if (result == ContentDialogResult.Primary && listView.SelectedItem is string selectedUrl)
+            if (result == ContentDialogResult.Primary && portCombo.SelectedItem is string selectedBase)
             {
-                GatewayUrlBox.Text = selectedUrl;
+                GatewayUrlBox.Text = DockerPortParser.CombineRoute(selectedBase, routeBox.Text);
             }
         }
         catch (System.ComponentModel.Win32Exception)

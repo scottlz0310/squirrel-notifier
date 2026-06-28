@@ -48,7 +48,8 @@
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Gateway URL:" VerticalAlignment="Center"/>
                     <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="4">
-                        <TextBox Grid.Column="0" x:Name="GatewayUrlBox" TextChanged="OnSettingChanged"/>
+                        <TextBox Grid.Column="0" x:Name="GatewayUrlBox" TextChanged="OnSettingChanged"
+                                 PlaceholderText="http://localhost:8080/mcp/thread-owl"/>
                         <Button Grid.Column="1" Content="コンテナから自動設定" Click="OnAutoDetectGatewayUrlClick"/>
                     </Grid>
 
