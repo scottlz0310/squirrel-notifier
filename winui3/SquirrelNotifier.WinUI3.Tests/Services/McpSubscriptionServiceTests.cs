@@ -1105,6 +1105,62 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NotifyReviewEvent_WhenExceptionThrown_ShouldPersistUndoSoRestartDoesNotDeduplicate()
+    {
+        // Arrange: 通知失敗 → UndoMarkAsSeen → PersistCacheAsync の順で、
+        // 再起動後も event が seen として残らないことを検証する
+        var savedCaches = new System.Collections.Generic.List<NotificationCache>();
+        var mockCacheService = new Mock<ICacheService>();
+        mockCacheService.Setup(c => c.LoadAsync()).ReturnsAsync(new NotificationCache());
+        mockCacheService.Setup(c => c.SaveAsync(It.IsAny<NotificationCache>()))
+            .Callback<NotificationCache>(nc => savedCaches.Add(new NotificationCache
+            {
+                SeenEventIds = new List<string>(nc.SeenEventIds),
+                RecentEvents = new List<CachedReviewEvent>(nc.RecentEvents),
+            }))
+            .Returns(Task.CompletedTask);
+
+        string evtA = @"{""eventId"":""evt_fail"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""msg""}";
+        string evtAJson = JsonSerializer.Serialize(new SubscriptionResult { Route = "subscription", NotificationReceived = true, FinalText = evtA });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var testCts = new CancellationTokenSource();
+        int callCount = 0;
+
+        _mockNotificationService.Setup(n => n.NotifyReviewEvent(It.IsAny<ReviewEvent>()))
+            .Throws(new InvalidOperationException("notify failed"));
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                if (++callCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(0, evtAJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, cacheService: mockCacheService.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert: 最後に保存された cache には evt_fail が含まれていない（undo が永続化された）
+        savedCaches.Should().NotBeEmpty();
+        NotificationCache lastCache = savedCaches[^1];
+        lastCache.SeenEventIds.Should().NotContain("evt_fail");
+    }
+
+    [Fact]
     public async Task PersistCacheAsync_ConcurrentSaves_ShouldPreserveLatestSnapshot()
     {
         // Arrange: 並行保存で最新 snapshot が保存されることを検証

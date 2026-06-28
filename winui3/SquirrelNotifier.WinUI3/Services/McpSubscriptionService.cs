@@ -408,8 +408,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                                     }
                                     catch (Exception notifyEx)
                                     {
-                                        // 通知失敗時は claim を解除して再配信で再試行できるようにする
+                                        // 通知失敗時は claim を解除し、ディスクにも反映して再起動後の duplicate 扱いを防ぐ
                                         UndoMarkAsSeen(reviewEvent.EventId);
+                                        await PersistCacheAsync().ConfigureAwait(false);
                                         await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
                                     }
                                 }
