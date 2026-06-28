@@ -490,6 +490,56 @@ internal sealed partial class MainWindow : Window
         }
     }
 
+    private async void OnFetchResourceUriFromMcpClick(object sender, RoutedEventArgs e)
+    {
+        string gatewayUrl = GatewayUrlBox.Text;
+        if (!Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? endpoint))
+        {
+            await ShowAlertDialogAsync("設定エラー", "Gateway URL が正しくありません。先に Gateway URL を設定してください。");
+            return;
+        }
+
+        string? token = Environment.GetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN");
+
+        try
+        {
+            var probe = new Services.McpResourceProbe();
+            IReadOnlyList<string> uris = await probe.FetchResourceUrisAsync(endpoint, token, CancellationToken.None);
+
+            if (uris.Count == 0)
+            {
+                await ShowAlertDialogAsync("リソースが見つかりません", "mcp-gateway からリソース URI を取得しましたが、リストが空でした。");
+                return;
+            }
+
+            if (uris.Count == 1)
+            {
+                ResourceUriBox.Text = uris[0];
+                return;
+            }
+
+            var listView = new ListView { ItemsSource = uris, SelectedIndex = 0, MaxHeight = 160 };
+            var selectDialog = new ContentDialog
+            {
+                Title = "Resource URI を選択",
+                Content = listView,
+                PrimaryButtonText = "選択",
+                CloseButtonText = "キャンセル",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = Content.XamlRoot,
+            };
+            ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
+            if (result == ContentDialogResult.Primary && listView.SelectedItem is string selectedUri)
+            {
+                ResourceUriBox.Text = selectedUri;
+            }
+        }
+        catch (Exception ex)
+        {
+            await ShowAlertDialogAsync("取得エラー", Services.McpResourceProbe.GetUserMessage(ex));
+        }
+    }
+
     private void OnTimeoutChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         if (_isInitializing)
