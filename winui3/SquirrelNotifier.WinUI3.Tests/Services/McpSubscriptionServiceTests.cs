@@ -679,26 +679,21 @@ public class McpSubscriptionServiceTests : IDisposable
         // Arrange
         var mockRunner = new Mock<IProcessRunner>();
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
-        var hasBeenSeenMethod = typeof(McpSubscriptionService).GetMethod("HasBeenSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var markAsSeenMethod = typeof(McpSubscriptionService).GetMethod("MarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        hasBeenSeenMethod.Should().NotBeNull();
-        markAsSeenMethod.Should().NotBeNull();
+        var tryMarkAsSeenMethod = typeof(McpSubscriptionService).GetMethod("TryMarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        tryMarkAsSeenMethod.Should().NotBeNull();
 
         // Act & Assert
-        // First check: not seen
-        var result1 = (bool)hasBeenSeenMethod!.Invoke(service, new object[] { "evt_1" })!;
-        result1.Should().BeFalse();
+        // First call: not seen yet → returns true (claimed)
+        var result1 = (bool)tryMarkAsSeenMethod!.Invoke(service, new object[] { "evt_1", null! })!;
+        result1.Should().BeTrue();
 
-        // Mark as seen
-        markAsSeenMethod!.Invoke(service, new object[] { "evt_1", null! });
+        // Second call: already seen → returns false
+        var result2 = (bool)tryMarkAsSeenMethod.Invoke(service, new object[] { "evt_1", null! })!;
+        result2.Should().BeFalse();
 
-        // Second check: seen
-        var result2 = (bool)hasBeenSeenMethod.Invoke(service, new object[] { "evt_1" })!;
-        result2.Should().BeTrue();
-
-        // Different ID: not seen
-        var result3 = (bool)hasBeenSeenMethod.Invoke(service, new object[] { "evt_2" })!;
-        result3.Should().BeFalse();
+        // Different ID: not seen → returns true
+        var result3 = (bool)tryMarkAsSeenMethod.Invoke(service, new object[] { "evt_2", null! })!;
+        result3.Should().BeTrue();
     }
 
     [Fact]
@@ -835,20 +830,18 @@ public class McpSubscriptionServiceTests : IDisposable
         // Arrange
         var mockRunner = new Mock<IProcessRunner>();
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
-        var hasBeenSeenMethod = typeof(McpSubscriptionService).GetMethod("HasBeenSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var markAsSeenMethod = typeof(McpSubscriptionService).GetMethod("MarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        hasBeenSeenMethod.Should().NotBeNull();
-        markAsSeenMethod.Should().NotBeNull();
+        var tryMarkAsSeenMethod = typeof(McpSubscriptionService).GetMethod("TryMarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        tryMarkAsSeenMethod.Should().NotBeNull();
 
         // Add 101 items
         for (int i = 0; i < 101; i++)
         {
-            markAsSeenMethod!.Invoke(service, new object[] { $"evt_{i}", null! });
+            tryMarkAsSeenMethod!.Invoke(service, new object[] { $"evt_{i}", null! });
         }
 
-        // The first item should be evicted now, so it should not be detected as seen
-        var result = (bool)hasBeenSeenMethod!.Invoke(service, new object[] { "evt_0" })!;
-        result.Should().BeFalse();
+        // The first item should be evicted now, so TryMarkAsSeen returns true (not in cache)
+        var result = (bool)tryMarkAsSeenMethod!.Invoke(service, new object[] { "evt_0", null! })!;
+        result.Should().BeTrue();
     }
 
     [Fact]

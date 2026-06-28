@@ -44,14 +44,29 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
-        // 旧単一スロット設定をユーザーがカスタマイズしていた場合、reviewer スロットに移行する
-        const string legacyDefaultLauncherPath = "review-raven";
-        if (_settings.LauncherCommandPath != legacyDefaultLauncherPath
-            && _settings.ReviewerLauncherCommandPath == "claude")
+        // 旧単一スロット設定（path または arguments がカスタマイズ済み）を reviewer スロットに移行する
+        if (!_settings.LauncherSlotsMigrated)
         {
-            _settings.ReviewerLauncherCommandPath = _settings.LauncherCommandPath;
-            _settings.ReviewerLauncherArguments = _settings.LauncherArguments;
-            _settings.LauncherCommandPath = legacyDefaultLauncherPath;
+            const string legacyDefaultLauncherPath = "review-raven";
+            const string legacyDefaultLauncherArgs = "review --interactive --repo {owner}/{repo} --pr {prNumber}";
+            bool pathCustomized = _settings.LauncherCommandPath != legacyDefaultLauncherPath;
+            bool argsCustomized = _settings.LauncherArguments != legacyDefaultLauncherArgs;
+
+            if (pathCustomized || argsCustomized)
+            {
+                if (pathCustomized)
+                {
+                    _settings.ReviewerLauncherCommandPath = _settings.LauncherCommandPath;
+                    _settings.LauncherCommandPath = legacyDefaultLauncherPath;
+                }
+
+                if (argsCustomized)
+                {
+                    _settings.ReviewerLauncherArguments = _settings.LauncherArguments;
+                }
+            }
+
+            _settings.LauncherSlotsMigrated = true;
             SaveSettings();
         }
 
@@ -309,6 +324,8 @@ internal sealed class AppSettings
 
     // queue://review/queue に対して使うロール ("reviewer" | "reviewed")
     public string LauncherRole { get; set; } = "reviewer";
+
+    public bool LauncherSlotsMigrated { get; set; }
 
     public int LauncherTimeoutMs { get; set; } = 300000;
 

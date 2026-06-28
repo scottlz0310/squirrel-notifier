@@ -12,7 +12,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal static class ReviewEventParser
 {
-    public static List<ReviewEvent> Parse(string? json)
+    public static List<ReviewEvent> Parse(string? json, string? sourceUri = null)
     {
         List<ReviewEvent> events = new List<ReviewEvent>();
         if (string.IsNullOrWhiteSpace(json))
@@ -37,7 +37,7 @@ internal static class ReviewEventParser
                     {
                         try
                         {
-                            ReviewEvent reviewEvent = ConvertToEvent(candidate);
+                            ReviewEvent reviewEvent = ConvertToEvent(candidate, sourceUri);
                             events.Add(reviewEvent);
                         }
                         catch (Exception ex)
@@ -56,6 +56,11 @@ internal static class ReviewEventParser
                     reviewEvent.Validate();
                     if (UrlValidator.IsSafeGitHubUrl(reviewEvent.PrUrl, reviewEvent.Repository, reviewEvent.PrNumber))
                     {
+                        if (!string.IsNullOrEmpty(sourceUri))
+                        {
+                            reviewEvent.Source = sourceUri;
+                        }
+
                         events.Add(reviewEvent);
                         return events;
                     }
@@ -67,7 +72,7 @@ internal static class ReviewEventParser
                 {
                     try
                     {
-                        ReviewEvent converted = ConvertToEvent(candidate);
+                        ReviewEvent converted = ConvertToEvent(candidate, sourceUri);
                         events.Add(converted);
                     }
                     catch (Exception ex)
@@ -85,7 +90,7 @@ internal static class ReviewEventParser
         return events;
     }
 
-    private static ReviewEvent ConvertToEvent(ReviewCandidate candidate)
+    private static ReviewEvent ConvertToEvent(ReviewCandidate candidate, string? sourceUri = null)
     {
         if (string.IsNullOrEmpty(candidate.Owner) || string.IsNullOrEmpty(candidate.Repo))
         {
@@ -103,7 +108,8 @@ internal static class ReviewEventParser
 
         string eventId = $"evt_{safeOwner}_{safeRepo}_{candidate.PrNumber}_{safeReason}_{safeQueuedAt}";
 
-        string source = !string.IsNullOrEmpty(candidate.RequestedBy) ? candidate.RequestedBy : "thread-owl";
+        string source = !string.IsNullOrEmpty(sourceUri) ? sourceUri
+            : !string.IsNullOrEmpty(candidate.RequestedBy) ? candidate.RequestedBy : "thread-owl";
         string message = !string.IsNullOrEmpty(candidate.RequestedBy)
             ? $"{candidate.Reason} by {candidate.RequestedBy}"
             : candidate.Reason;

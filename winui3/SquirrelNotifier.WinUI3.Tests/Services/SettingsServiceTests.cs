@@ -263,4 +263,94 @@ public class SettingsServiceTests : IDisposable
         var anotherService = new SettingsService(_settingsDirectory);
         anotherService.Settings.LastSkippedVersion.Should().Be("v3.1.0");
     }
+
+    [Fact]
+    public void LauncherSlotsMigration_ShouldMigrateCustomArgsOnlySettings()
+    {
+        // Arrange: LauncherCommandPath は既定値のまま、LauncherArguments のみカスタマイズされた設定ファイルを作成
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "settings.json");
+        File.WriteAllText(settingsPath, """
+            {
+                "LauncherCommandPath": "review-raven",
+                "LauncherArguments": "custom-arg --repo {owner}/{repo}",
+                "LauncherSlotsMigrated": false
+            }
+            """);
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert: カスタム arguments が reviewer スロットに移行される
+            service.Settings.ReviewerLauncherArguments.Should().Be("custom-arg --repo {owner}/{repo}");
+            service.Settings.LauncherSlotsMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void LauncherSlotsMigration_ShouldMigrateCustomPathSettings()
+    {
+        // Arrange: LauncherCommandPath のみカスタマイズされた設定ファイルを作成
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "settings.json");
+        File.WriteAllText(settingsPath, """
+            {
+                "LauncherCommandPath": "my-custom-review-tool",
+                "LauncherArguments": "review --interactive --repo {owner}/{repo} --pr {prNumber}",
+                "LauncherSlotsMigrated": false
+            }
+            """);
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert: カスタム path が reviewer スロットに移行される
+            service.Settings.ReviewerLauncherCommandPath.Should().Be("my-custom-review-tool");
+            service.Settings.LauncherSlotsMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void LauncherSlotsMigration_ShouldSkipWhenAlreadyMigrated()
+    {
+        // Arrange: 既に移行済みの設定
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "settings.json");
+        File.WriteAllText(settingsPath, """
+            {
+                "LauncherCommandPath": "review-raven",
+                "LauncherArguments": "custom-arg",
+                "ReviewerLauncherCommandPath": "my-migrated-tool",
+                "LauncherSlotsMigrated": true
+            }
+            """);
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert: 移行済みなので reviewer スロットは上書きされない
+            service.Settings.ReviewerLauncherCommandPath.Should().Be("my-migrated-tool");
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
 }

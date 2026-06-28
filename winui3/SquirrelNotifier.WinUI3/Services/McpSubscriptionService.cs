@@ -25,6 +25,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private readonly Queue<CachedReviewEvent> _recentEvents = new();
     private readonly object _lock = new();
     private readonly ConcurrentDictionary<string, IProcessInstance> _activeProcesses = new();
+    private readonly SemaphoreSlim _cacheSemaphore = new(1, 1);
 
     private Task? _loopTask;
     private CancellationTokenSource? _activeProcessCts;
@@ -389,7 +390,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     {
                         await LogAsync($"Notification payload received: {result.FinalText}").ConfigureAwait(false);
 
-                        List<ReviewEvent> reviewEvents = ReviewEventParser.Parse(result.FinalText);
+                        List<ReviewEvent> reviewEvents = ReviewEventParser.Parse(result.FinalText, resourceUri);
                         if (reviewEvents.Count == 0)
                         {
                             await LogAsync($"Warning: Malformed or unsupported review event payload received: {result.FinalText}").ConfigureAwait(false);
@@ -398,22 +399,21 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                         {
                             foreach (ReviewEvent reviewEvent in reviewEvents)
                             {
-                                if (HasBeenSeen(reviewEvent.EventId))
-                                {
-                                    await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
-                                }
-                                else
+                                if (TryMarkAsSeen(reviewEvent.EventId, reviewEvent))
                                 {
                                     try
                                     {
                                         _notificationService.NotifyReviewEvent(reviewEvent);
-                                        MarkAsSeen(reviewEvent.EventId, reviewEvent);
                                         await PersistCacheAsync().ConfigureAwait(false);
                                     }
                                     catch (Exception notifyEx)
                                     {
                                         await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
                                     }
+                                }
+                                else
+                                {
+                                    await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
                                 }
                             }
                         }
@@ -478,7 +478,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         await _loggingService.WriteAsync(message).ConfigureAwait(false);
     }
 
-    private bool HasBeenSeen(string eventId)
+    private bool TryMarkAsSeen(string eventId, ReviewEvent? reviewEvent = null)
     {
         if (string.IsNullOrEmpty(eventId))
         {
@@ -487,28 +487,17 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
         lock (_lock)
         {
-            return _seenEventIds.Contains(eventId);
-        }
-    }
-
-    private void MarkAsSeen(string eventId, ReviewEvent? reviewEvent = null)
-    {
-        if (string.IsNullOrEmpty(eventId))
-        {
-            return;
-        }
-
-        lock (_lock)
-        {
-            if (_seenEventIds.Add(eventId))
+            if (!_seenEventIds.Add(eventId))
             {
-                _eventIdQueue.Enqueue(eventId);
+                return false;
+            }
 
-                while (_eventIdQueue.Count > 100)
-                {
-                    string oldId = _eventIdQueue.Dequeue();
-                    _seenEventIds.Remove(oldId);
-                }
+            _eventIdQueue.Enqueue(eventId);
+
+            while (_eventIdQueue.Count > 100)
+            {
+                string oldId = _eventIdQueue.Dequeue();
+                _seenEventIds.Remove(oldId);
             }
 
             if (reviewEvent != null)
@@ -529,6 +518,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     _recentEvents.Dequeue();
                 }
             }
+
+            return true;
         }
     }
 
@@ -595,6 +586,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             };
         }
 
+        await _cacheSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
             await _cacheService.SaveAsync(cache).ConfigureAwait(false);
@@ -602,6 +594,10 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         catch (Exception ex)
         {
             await LogAsync($"[WARN] Cache save failed: {ex.Message}").ConfigureAwait(false);
+        }
+        finally
+        {
+            _cacheSemaphore.Release();
         }
     }
 
@@ -656,6 +652,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         _cts.Dispose();
         _stopCts?.Dispose();
         _activeProcessCts?.Dispose();
+        _cacheSemaphore.Dispose();
     }
 
     internal static (string FriendlyMessage, string ErrorTag) GetErrorInfo(string rawError)
