@@ -92,7 +92,8 @@ public class DockerPortParserTests
     [InlineData("http://localhost:8080", "", "http://localhost:8080")] // 空 route は base のみ
     [InlineData("http://localhost:8080", "   ", "http://localhost:8080")] // 空白のみ route は base のみ
     [InlineData("http://localhost:8080", "/", "http://localhost:8080")] // ルートのみ route は base のみ
-    public void CombineRoute_NormalizesAndCombines(string baseUrl, string route, string expected)
+    [InlineData("http://localhost:8080", null, "http://localhost:8080")] // null route は base のみ
+    public void CombineRoute_NormalizesAndCombines(string baseUrl, string? route, string expected)
     {
         DockerPortParser.CombineRoute(baseUrl, route).Should().Be(expected);
     }

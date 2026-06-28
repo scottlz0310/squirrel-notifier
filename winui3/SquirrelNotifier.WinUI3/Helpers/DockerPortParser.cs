@@ -32,7 +32,7 @@ internal static class DockerPortParser
 
     // base URL に MCP route パスを正規化して結合する。
     // route が空の場合は base をそのまま返す。先頭スラッシュの補完・余分なスラッシュの除去を行う。
-    internal static string CombineRoute(string baseUrl, string route)
+    internal static string CombineRoute(string baseUrl, string? route)
     {
         string trimmedBase = baseUrl.TrimEnd('/');
         string trimmedRoute = (route ?? string.Empty).Trim();
