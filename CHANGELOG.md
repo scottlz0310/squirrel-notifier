@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Settings の「Resource URI」欄に「MCP から取得」ボタンを追加。`ModelContextProtocol.Core` v1.4.0（公式 C# MCP SDK）を使用し、MCP Streamable HTTP transport（initialize handshake → Mcp-Session-Id セッション管理 → resources/list）を通じて mcp-gateway から Resource URI を動的に取得できるようになった。`MCP_PROBE_AUTH_TOKEN` 環境変数が設定されている場合は Bearer トークンを全リクエストに付与する（#103）
+
 ## [0.1.3] - 2026-06-27
 
 ### Added
