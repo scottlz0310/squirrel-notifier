@@ -460,6 +460,7 @@ internal sealed partial class MainWindow : Window
             Title = title,
             Content = message,
             CloseButtonText = "OK",
+            XamlRoot = Content.XamlRoot,
         };
         await dialog.ShowAsync(ContentDialogPlacement.Popup);
     }
@@ -480,6 +481,7 @@ internal sealed partial class MainWindow : Window
             PrimaryButtonText = "選択",
             CloseButtonText = "キャンセル",
             DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Content.XamlRoot,
         };
         ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
         if (result == ContentDialogResult.Primary && listView.SelectedItem is string selectedUri)
