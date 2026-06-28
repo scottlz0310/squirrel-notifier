@@ -10,8 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- ランチャー設定を reviewer-side / reviewed-side の 2 スロット化。Settings に「起動ロール」（reviewer / reviewed）の RadioButton と、各スロットの Path・Arguments 入力欄を追加。`ReviewEvent.Source` が `queue://review/re-review-requests` の場合は常に reviewer スロットを使用し、`queue://review/queue` の場合は LauncherRole 設定で切り替える（#91）
+- `LauncherArgumentBuilder` に `{reason}` プレースホルダーを追加。`reviewEvent.Reason`（`opened` / `synchronized` / `re-review-requested` 等）を引数テンプレートに埋め込めるようになった。値は既存の `_safeNameRegex` で検証する（#91）
+- デフォルトのランチャー設定を `review-raven` から `claude -p "/thread-owl-pr-reviewer ..."` / `claude -p "/thread-owl-review-cycle ..."` に更新（#91）
+- 旧単一スロット設定（`LauncherCommandPath`）をユーザーがカスタマイズしていた場合、`SettingsService` コンストラクタ起動時に reviewer スロットへ自動移行（#91）
 - Settings の「Resource URI」欄に「MCP から取得」ボタンを追加。`ModelContextProtocol.Core` v1.4.0（公式 C# MCP SDK）を使用し、MCP Streamable HTTP transport（initialize handshake → Mcp-Session-Id セッション管理 → resources/list）を通じて mcp-gateway から Resource URI を動的に取得できるようになった。`MCP_PROBE_AUTH_TOKEN` 環境変数が設定されている場合は Bearer トークンを全リクエストに付与する（#103）
 - Gateway URL の「コンテナから自動設定」で、検出したポートに加えて MCP route パス（既定 `/mcp/thread-owl`）を選択・入力できるダイアログを追加。`docker ps` から取得した `http://localhost:PORT` に route を結合して設定するため、gateway root（`/`）に繋いで `resources/list` が 404 になる問題を回避できる。Gateway URL 入力欄にも route を含むプレースホルダーを表示（#102）
+- Settings の「Resource URI」欄を複数行 TextBox（`ResourceUrisBox`）に変更し、1 行 1 URI で複数の URI を設定できるようになった。`AppSettings.ResourceUris`（`List<string>`）に保存し、旧単一フィールド `ResourceUri` からの自動移行も対応（#92）
+- 複数 Resource URI に対して並行購読ループを実行。`McpSubscriptionService` が `Task.WhenAll` を使って各 URI の購読ループを独立したタスクとして並行実行し、`_activeProcesses`（`ConcurrentDictionary`）で全プロセスを追跡する。`StopAsync()` および `DisposeAsync()` が全プロセスをキルして確実に停止する（#92）
 
 ## [0.1.3] - 2026-06-27
 

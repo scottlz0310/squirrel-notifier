@@ -42,6 +42,53 @@ public class LauncherArgumentBuilderTests
     }
 
     [Theory]
+    [InlineData("opened")]
+    [InlineData("synchronized")]
+    [InlineData("re-review-requested")]
+    public void BuildArguments_ShouldSubstituteReasonPlaceholder(string reason)
+    {
+        // Arrange
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-event-reason",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+            Reason = reason,
+        };
+        string template = "-p \"/skill {owner}/{repo}#{prNumber} を {reason} モード\"";
+
+        // Act
+        List<string> result = LauncherArgumentBuilder.BuildArguments(template, reviewEvent);
+
+        // Assert
+        result.Should().HaveCount(2);
+        result[0].Should().Be("-p");
+        result[1].Should().Contain(reason);
+    }
+
+    [Fact]
+    public void BuildArguments_ShouldThrowForInvalidReason()
+    {
+        // Arrange
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-event-reason-invalid",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+            Reason = "bad;reason",
+        };
+        string template = "--reason {reason}";
+
+        // Act
+        Action act = () => LauncherArgumentBuilder.BuildArguments(template, reviewEvent);
+
+        // Assert
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Theory]
     [InlineData("invalid;owner/repo")]
     [InlineData("owner/repo&bad")]
     [InlineData("owner/repo|cmd")]

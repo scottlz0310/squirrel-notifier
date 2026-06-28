@@ -205,7 +205,7 @@ public class McpSubscriptionServiceTests : IDisposable
     public async Task Start_ShouldPassArgumentsAndSecretsCorrectly()
     {
         // Arrange
-        _settingsService.UpdateSettings("my-cmd", "--foo bar", "http://gateway:80", "queue://res", 30000, "review-raven", "", 300000);
+        _settingsService.UpdateSettings("my-cmd", "--foo bar", "http://gateway:80", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", "super-secret-token");
 
         var preflightProcess = CreateMockProcess(0, "help", "");
@@ -361,7 +361,7 @@ public class McpSubscriptionServiceTests : IDisposable
     public async Task Start_ShouldSkipTokenAndArgumentsWhenEmpty()
     {
         // Arrange
-        _settingsService.UpdateSettings("my-cmd", "", "http://gateway:80", "queue://res", 30000, "review-raven", "", 300000);
+        _settingsService.UpdateSettings("my-cmd", "", "http://gateway:80", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", null);
 
         var preflightProcess = CreateMockProcess(0, "help", "");
@@ -553,7 +553,7 @@ public class McpSubscriptionServiceTests : IDisposable
         await File.WriteAllTextAsync(testCmd, "@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\nexit /b 1\r\n", Encoding.ASCII);
 
         var settingsService = new SettingsService(tempDir);
-        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", "queue://res", 30000, "review-raven", "", 300000);
+        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
 
         var runner = new ProcessRunner();
         await using var service = new McpSubscriptionService(settingsService, _notificationService, _loggingService, runner);
@@ -679,26 +679,21 @@ public class McpSubscriptionServiceTests : IDisposable
         // Arrange
         var mockRunner = new Mock<IProcessRunner>();
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
-        var hasBeenSeenMethod = typeof(McpSubscriptionService).GetMethod("HasBeenSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var markAsSeenMethod = typeof(McpSubscriptionService).GetMethod("MarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        hasBeenSeenMethod.Should().NotBeNull();
-        markAsSeenMethod.Should().NotBeNull();
+        var tryMarkAsSeenMethod = typeof(McpSubscriptionService).GetMethod("TryMarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        tryMarkAsSeenMethod.Should().NotBeNull();
 
         // Act & Assert
-        // First check: not seen
-        var result1 = (bool)hasBeenSeenMethod!.Invoke(service, new object[] { "evt_1" })!;
-        result1.Should().BeFalse();
+        // First call: not seen yet → returns true (claimed)
+        var result1 = (bool)tryMarkAsSeenMethod!.Invoke(service, new object[] { "evt_1", null! })!;
+        result1.Should().BeTrue();
 
-        // Mark as seen
-        markAsSeenMethod!.Invoke(service, new object[] { "evt_1", null! });
+        // Second call: already seen → returns false
+        var result2 = (bool)tryMarkAsSeenMethod.Invoke(service, new object[] { "evt_1", null! })!;
+        result2.Should().BeFalse();
 
-        // Second check: seen
-        var result2 = (bool)hasBeenSeenMethod.Invoke(service, new object[] { "evt_1" })!;
-        result2.Should().BeTrue();
-
-        // Different ID: not seen
-        var result3 = (bool)hasBeenSeenMethod.Invoke(service, new object[] { "evt_2" })!;
-        result3.Should().BeFalse();
+        // Different ID: not seen → returns true
+        var result3 = (bool)tryMarkAsSeenMethod.Invoke(service, new object[] { "evt_2", null! })!;
+        result3.Should().BeTrue();
     }
 
     [Fact]
@@ -835,20 +830,18 @@ public class McpSubscriptionServiceTests : IDisposable
         // Arrange
         var mockRunner = new Mock<IProcessRunner>();
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
-        var hasBeenSeenMethod = typeof(McpSubscriptionService).GetMethod("HasBeenSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var markAsSeenMethod = typeof(McpSubscriptionService).GetMethod("MarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        hasBeenSeenMethod.Should().NotBeNull();
-        markAsSeenMethod.Should().NotBeNull();
+        var tryMarkAsSeenMethod = typeof(McpSubscriptionService).GetMethod("TryMarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        tryMarkAsSeenMethod.Should().NotBeNull();
 
         // Add 101 items
         for (int i = 0; i < 101; i++)
         {
-            markAsSeenMethod!.Invoke(service, new object[] { $"evt_{i}", null! });
+            tryMarkAsSeenMethod!.Invoke(service, new object[] { $"evt_{i}", null! });
         }
 
-        // The first item should be evicted now, so it should not be detected as seen
-        var result = (bool)hasBeenSeenMethod!.Invoke(service, new object[] { "evt_0" })!;
-        result.Should().BeFalse();
+        // The first item should be evicted now, so TryMarkAsSeen returns true (not in cache)
+        var result = (bool)tryMarkAsSeenMethod!.Invoke(service, new object[] { "evt_0", null! })!;
+        result.Should().BeTrue();
     }
 
     [Fact]
@@ -949,6 +942,262 @@ public class McpSubscriptionServiceTests : IDisposable
 
         // Assert: 新規通知後にキャッシュが保存される
         mockCacheService.Verify(c => c.SaveAsync(It.Is<NotificationCache>(nc => nc.SeenEventIds.Contains("evt_new"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task Start_WithMultipleResourceUris_ShouldLaunchProcessForEachUri()
+    {
+        // Arrange: 2つの URI を設定
+        _settingsService.UpdateSettings(
+            "my-cmd", "", "http://gateway:80",
+            new[] { "queue://uri-one", "queue://uri-two" },
+            30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var launchedUris = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var bothStartedTcs = new TaskCompletionSource();
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                int uriIndex = new List<string>(psi.ArgumentList).IndexOf("--uri");
+                if (uriIndex >= 0 && uriIndex + 1 < psi.ArgumentList.Count)
+                {
+                    launchedUris.Add(psi.ArgumentList[uriIndex + 1]);
+                    if (launchedUris.Count >= 2)
+                    {
+                        bothStartedTcs.TrySetResult();
+                    }
+                }
+
+                var mock = new Mock<IProcessInstance>();
+                mock.SetupGet(p => p.ExitCode).Returns(0);
+                mock.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Array.Empty<byte>())));
+                mock.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Array.Empty<byte>())));
+                mock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                    .Returns<CancellationToken>(ct => Task.Delay(Timeout.Infinite, ct));
+                return mock.Object;
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+
+        // Act
+        service.Start();
+        await bothStartedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync();
+
+        // Assert: 両方の URI に対してプロセスが起動された
+        launchedUris.Should().Contain("queue://uri-one");
+        launchedUris.Should().Contain("queue://uri-two");
+    }
+
+    [Fact]
+    public async Task StopAsync_WithMultipleResourceUris_ShouldStopAllLoopsPromptly()
+    {
+        // Arrange: 2つの URI を設定し、両ループがバックオフ待機中に StopAsync を呼ぶ
+        _settingsService.UpdateSettings(
+            "my-cmd", "", "http://gateway:80",
+            new[] { "queue://uri-one", "queue://uri-two" },
+            30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        int retryingCount = 0;
+        var bothRetryingTcs = new TaskCompletionSource();
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                return CreateMockProcess(1, "", "transient error");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 5);
+        service.StatusTextChanged += (_, text) =>
+        {
+            if (text.StartsWith("Retrying"))
+            {
+                int count = Interlocked.Increment(ref retryingCount);
+                if (count >= 2)
+                {
+                    bothRetryingTcs.TrySetResult();
+                }
+            }
+        };
+
+        service.Start();
+        await bothRetryingTcs.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Act: 両ループがバックオフ待機中に StopAsync を呼ぶ
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await service.StopAsync();
+        sw.Stop();
+
+        // Assert: 1000ms のバックオフ遅延より十分早く完了する
+        sw.ElapsedMilliseconds.Should().BeLessThan(800);
+        service.State.Should().Be(SubscriptionState.Stopped);
+    }
+
+    [Fact]
+    public async Task NotifyReviewEvent_WhenExceptionThrown_ShouldRedeliverOnNextSubscription()
+    {
+        // Arrange: 通知サービスが例外を投げる場合、seen cache から削除されて再配信で通知される
+        string eventPayload = @"{""eventId"":""evt_redeliver"",""repository"":""owner/repo"",""prNumber"":10,""prUrl"":""https://github.com/owner/repo/pull/10"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}";
+        string eventJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = true,
+            FinalText = eventPayload,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        int subscriptionCallCount = 0;
+        var testCts = new CancellationTokenSource();
+        int notifyCallCount = 0;
+
+        _mockNotificationService.Setup(n => n.NotifyReviewEvent(It.IsAny<ReviewEvent>()))
+            .Callback<ReviewEvent>(_ =>
+            {
+                notifyCallCount++;
+                if (notifyCallCount == 1)
+                {
+                    throw new InvalidOperationException("Simulated notification failure");
+                }
+            });
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 3)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(0, eventJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert: 1回目は失敗・ロールバック、2回目の再配信で通知が届く
+        notifyCallCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task NotifyReviewEvent_WhenExceptionThrown_ShouldPersistUndoSoRestartDoesNotDeduplicate()
+    {
+        // Arrange: 通知失敗 → UndoMarkAsSeen → PersistCacheAsync の順で、
+        // 再起動後も event が seen として残らないことを検証する
+        var savedCaches = new System.Collections.Generic.List<NotificationCache>();
+        var mockCacheService = new Mock<ICacheService>();
+        mockCacheService.Setup(c => c.LoadAsync()).ReturnsAsync(new NotificationCache());
+        mockCacheService.Setup(c => c.SaveAsync(It.IsAny<NotificationCache>()))
+            .Callback<NotificationCache>(nc => savedCaches.Add(new NotificationCache
+            {
+                SeenEventIds = new List<string>(nc.SeenEventIds),
+                RecentEvents = new List<CachedReviewEvent>(nc.RecentEvents),
+            }))
+            .Returns(Task.CompletedTask);
+
+        string evtA = @"{""eventId"":""evt_fail"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""msg""}";
+        string evtAJson = JsonSerializer.Serialize(new SubscriptionResult { Route = "subscription", NotificationReceived = true, FinalText = evtA });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var testCts = new CancellationTokenSource();
+        int callCount = 0;
+
+        _mockNotificationService.Setup(n => n.NotifyReviewEvent(It.IsAny<ReviewEvent>()))
+            .Throws(new InvalidOperationException("notify failed"));
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                if (++callCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(0, evtAJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, cacheService: mockCacheService.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert: 最後に保存された cache には evt_fail が含まれていない（undo が永続化された）
+        savedCaches.Should().NotBeEmpty();
+        NotificationCache lastCache = savedCaches[^1];
+        lastCache.SeenEventIds.Should().NotContain("evt_fail");
+    }
+
+    [Fact]
+    public async Task PersistCacheAsync_ConcurrentSaves_ShouldPreserveLatestSnapshot()
+    {
+        // Arrange: 並行保存で最新 snapshot が保存されることを検証
+        var saveOrder = new System.Collections.Concurrent.ConcurrentQueue<List<string>>();
+        var mockCacheService = new Mock<ICacheService>();
+        mockCacheService.Setup(c => c.LoadAsync()).ReturnsAsync(new NotificationCache());
+        mockCacheService.Setup(c => c.SaveAsync(It.IsAny<NotificationCache>()))
+            .Callback<NotificationCache>(nc => saveOrder.Enqueue(new List<string>(nc.SeenEventIds)))
+            .Returns(Task.CompletedTask);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, cacheService: mockCacheService.Object);
+
+        var tryMarkMethod = typeof(McpSubscriptionService).GetMethod("TryMarkAsSeen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var persistMethod = typeof(McpSubscriptionService).GetMethod("PersistCacheAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // RestoreCacheAsync を先に呼んで初期化する
+        var restoreMethod = typeof(McpSubscriptionService).GetMethod("RestoreCacheAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        await (Task)restoreMethod!.Invoke(service, null)!;
+
+        // evt_A と evt_B を登録してから並行保存する
+        tryMarkMethod!.Invoke(service, new object[] { "evt_A", null! });
+        tryMarkMethod!.Invoke(service, new object[] { "evt_B", null! });
+
+        var task1 = (Task)persistMethod!.Invoke(service, null)!;
+        var task2 = (Task)persistMethod!.Invoke(service, null)!;
+        await Task.WhenAll(task1, task2);
+
+        // Assert: 最終的に保存された snapshot は両方の event ID を含む
+        saveOrder.Should().NotBeEmpty();
+        List<string>? last = null;
+        while (saveOrder.TryDequeue(out var item))
+        {
+            last = item;
+        }
+
+        last.Should().Contain("evt_A").And.Contain("evt_B");
     }
 
     [Theory]

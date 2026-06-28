@@ -129,4 +129,38 @@ public class ReviewEventParserTests
         second.Source.Should().Be("thread-owl");
         second.Message.Should().Be("re-review requested");
     }
+
+    [Fact]
+    public void Parse_WithSourceUri_ShouldOverrideSourceInCandidateFormat()
+    {
+        // Arrange: ReviewCandidate 形式（requestedBy なし）
+        string json = @"[{
+            ""owner"": ""scottlz0310"",
+            ""repo"": ""squirrel-notifier"",
+            ""prNumber"": 42,
+            ""queuedAt"": ""2026-06-28T10:00:00Z"",
+            ""reason"": ""re-review-requested""
+        }]";
+
+        // Act
+        List<ReviewEvent> result = ReviewEventParser.Parse(json, "queue://review/re-review-requests");
+
+        // Assert
+        result.Should().ContainSingle();
+        result[0].Source.Should().Be("queue://review/re-review-requests");
+    }
+
+    [Fact]
+    public void Parse_WithSourceUri_ShouldOverrideSourceInReviewEventFormat()
+    {
+        // Arrange: ReviewEvent 直接形式（source フィールドあり）
+        string json = "{\"eventId\":\"evt_1\",\"repository\":\"org/repo\",\"prNumber\":42,\"prUrl\":\"https://github.com/org/repo/pull/42\",\"reason\":\"re-review-requested\",\"source\":\"thread-owl\",\"message\":\"msg\"}";
+
+        // Act
+        List<ReviewEvent> result = ReviewEventParser.Parse(json, "queue://review/re-review-requests");
+
+        // Assert
+        result.Should().ContainSingle();
+        result[0].Source.Should().Be("queue://review/re-review-requests");
+    }
 }

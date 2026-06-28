@@ -111,10 +111,16 @@ internal sealed partial class MainWindow : Window
         CommandPathBox.Text = settings.SubscriberCommandPath;
         ArgumentsBox.Text = settings.SubscriberArguments;
         GatewayUrlBox.Text = settings.GatewayUrl;
-        ResourceUriBox.Text = settings.ResourceUri;
+        ResourceUrisBox.Text = settings.ResourceUris.Count > 0
+            ? string.Join("\n", settings.ResourceUris)
+            : settings.ResourceUri;
         TimeoutBox.Value = settings.NotificationTimeoutMs;
-        LauncherPathBox.Text = settings.LauncherCommandPath;
-        LauncherArgumentsBox.Text = settings.LauncherArguments;
+        ReviewerPathBox.Text = settings.ReviewerLauncherCommandPath;
+        ReviewerArgumentsBox.Text = settings.ReviewerLauncherArguments;
+        ReviewedPathBox.Text = settings.ReviewedLauncherCommandPath;
+        ReviewedArgumentsBox.Text = settings.ReviewedLauncherArguments;
+        ReviewerRoleRadio.IsChecked = settings.LauncherRole != "reviewed";
+        ReviewedRoleRadio.IsChecked = settings.LauncherRole == "reviewed";
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
 
         _isInitializing = false;
@@ -473,20 +479,31 @@ internal sealed partial class MainWindow : Window
 
     private async void OnSelectResourceUriClick(object sender, RoutedEventArgs e)
     {
-        var listView = new ListView { ItemsSource = _knownResourceUris, SelectedIndex = 0, MaxHeight = 160 };
+        var listView = new ListView { ItemsSource = _knownResourceUris, SelectionMode = ListViewSelectionMode.Multiple, MaxHeight = 160 };
         var selectDialog = new ContentDialog
         {
-            Title = "Resource URI を選択",
+            Title = "Resource URI を追加",
             Content = listView,
-            PrimaryButtonText = "選択",
+            PrimaryButtonText = "追加",
             CloseButtonText = "キャンセル",
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Content.XamlRoot,
         };
         ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
-        if (result == ContentDialogResult.Primary && listView.SelectedItem is string selectedUri)
+        if (result == ContentDialogResult.Primary && listView.SelectedItems.Count > 0)
         {
-            ResourceUriBox.Text = selectedUri;
+            HashSet<string> existing = ResourceUrisBox.Text
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToHashSet();
+            foreach (object item in listView.SelectedItems)
+            {
+                if (item is string uri)
+                {
+                    existing.Add(uri);
+                }
+            }
+
+            ResourceUrisBox.Text = string.Join("\n", existing);
         }
     }
 
@@ -512,26 +529,31 @@ internal sealed partial class MainWindow : Window
                 return;
             }
 
-            if (uris.Count == 1)
-            {
-                ResourceUriBox.Text = uris[0];
-                return;
-            }
-
-            var listView = new ListView { ItemsSource = uris, SelectedIndex = 0, MaxHeight = 160 };
+            var listView = new ListView { ItemsSource = uris, SelectionMode = ListViewSelectionMode.Multiple, MaxHeight = 160 };
             var selectDialog = new ContentDialog
             {
-                Title = "Resource URI を選択",
+                Title = "追加する Resource URI を選択",
                 Content = listView,
-                PrimaryButtonText = "選択",
+                PrimaryButtonText = "追加",
                 CloseButtonText = "キャンセル",
                 DefaultButton = ContentDialogButton.Primary,
                 XamlRoot = Content.XamlRoot,
             };
             ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
-            if (result == ContentDialogResult.Primary && listView.SelectedItem is string selectedUri)
+            if (result == ContentDialogResult.Primary && listView.SelectedItems.Count > 0)
             {
-                ResourceUriBox.Text = selectedUri;
+                HashSet<string> existing = ResourceUrisBox.Text
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToHashSet();
+                foreach (object item in listView.SelectedItems)
+                {
+                    if (item is string selectedUri)
+                    {
+                        existing.Add(selectedUri);
+                    }
+                }
+
+                ResourceUrisBox.Text = string.Join("\n", existing);
             }
         }
         catch (Exception ex)
@@ -550,6 +572,16 @@ internal sealed partial class MainWindow : Window
         SaveCurrentSettings();
     }
 
+    private void OnLauncherRoleChanged(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        SaveCurrentSettings();
+    }
+
     private void SaveCurrentSettings()
     {
         try
@@ -557,21 +589,36 @@ internal sealed partial class MainWindow : Window
             string commandPath = CommandPathBox.Text;
             string arguments = ArgumentsBox.Text;
             string gatewayUrl = GatewayUrlBox.Text;
-            string resourceUri = ResourceUriBox.Text;
+            List<string> resourceUris = ResourceUrisBox.Text
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct()
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
+            if (resourceUris.Count == 0)
+            {
+                return;
+            }
+
             int timeoutMs = double.IsNaN(TimeoutBox.Value) ? 60000 : (int)TimeoutBox.Value;
 
-            string launcherPath = LauncherPathBox.Text;
-            string launcherArguments = LauncherArgumentsBox.Text;
+            string reviewerPath = ReviewerPathBox.Text;
+            string reviewerArguments = ReviewerArgumentsBox.Text;
+            string reviewedPath = ReviewedPathBox.Text;
+            string reviewedArguments = ReviewedArgumentsBox.Text;
+            string launcherRole = ReviewedRoleRadio.IsChecked == true ? "reviewed" : "reviewer";
             int launcherTimeoutMs = double.IsNaN(LauncherTimeoutBox.Value) ? 300000 : (int)LauncherTimeoutBox.Value;
 
             _settingsService.UpdateSettings(
                 commandPath,
                 arguments,
                 gatewayUrl,
-                resourceUri,
+                resourceUris,
                 timeoutMs,
-                launcherPath,
-                launcherArguments,
+                reviewerPath,
+                reviewerArguments,
+                reviewedPath,
+                reviewedArguments,
+                launcherRole,
                 launcherTimeoutMs);
         }
         catch
