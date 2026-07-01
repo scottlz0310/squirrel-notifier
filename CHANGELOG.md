@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Settings の Resource URI 複数行 TextBox で、`Enter` 入力による改行が `\r`（WinUI3 TextBox の既定の改行文字）であるため `Split('\n')` では分割されず、複数 URI を手入力すると1要素に `\r` が混入したまま保存されていた不具合を修正。`\r` と `\n` の両方で分割するように変更（#111 の手動検証で発見）
+
 ### Added
 - ランチャー設定を reviewer-side / reviewed-side の 2 スロット化。Settings に「起動ロール」（reviewer / reviewed）の RadioButton と、各スロットの Path・Arguments 入力欄を追加。`ReviewEvent.Source` が `queue://review/re-review-requests` の場合は常に reviewer スロットを使用し、`queue://review/queue` の場合は LauncherRole 設定で切り替える（#91）
 - `LauncherArgumentBuilder` に `{reason}` プレースホルダーを追加。`reviewEvent.Reason`（`opened` / `synchronized` / `re-review-requested` 等）を引数テンプレートに埋め込めるようになった。値は既存の `_safeNameRegex` で検証する（#91）

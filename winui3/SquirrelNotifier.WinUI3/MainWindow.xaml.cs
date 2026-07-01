@@ -477,6 +477,8 @@ internal sealed partial class MainWindow : Window
         "queue://review/re-review-requests",
     ];
 
+    private static readonly char[] _resourceUriLineSeparators = ['\r', '\n'];
+
     private async void OnSelectResourceUriClick(object sender, RoutedEventArgs e)
     {
         var listView = new ListView { ItemsSource = _knownResourceUris, SelectionMode = ListViewSelectionMode.Multiple, MaxHeight = 160 };
@@ -493,7 +495,7 @@ internal sealed partial class MainWindow : Window
         if (result == ContentDialogResult.Primary && listView.SelectedItems.Count > 0)
         {
             HashSet<string> existing = ResourceUrisBox.Text
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Split(_resourceUriLineSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToHashSet();
             foreach (object item in listView.SelectedItems)
             {
@@ -543,7 +545,7 @@ internal sealed partial class MainWindow : Window
             if (result == ContentDialogResult.Primary && listView.SelectedItems.Count > 0)
             {
                 HashSet<string> existing = ResourceUrisBox.Text
-                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Split(_resourceUriLineSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     .ToHashSet();
                 foreach (object item in listView.SelectedItems)
                 {
@@ -590,7 +592,7 @@ internal sealed partial class MainWindow : Window
             string arguments = ArgumentsBox.Text;
             string gatewayUrl = GatewayUrlBox.Text;
             List<string> resourceUris = ResourceUrisBox.Text
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Split(_resourceUriLineSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Distinct()
                 .Where(s => !string.IsNullOrWhiteSpace(s))
                 .ToList();
