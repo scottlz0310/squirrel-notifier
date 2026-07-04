@@ -251,6 +251,37 @@ public class McpSubscriptionServiceTests : IDisposable
         service.State.Should().Be(SubscriptionState.Error);
         service.LastError.Should().Contain("non-zero code 1");
         service.LastError.Should().Contain("Execution failed dramatically");
+        service.IsAuthenticationRequired.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Start_ShouldClassifyStructuredAuthLoginRequiredError()
+    {
+        // Arrange
+        string failureJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "failed",
+            ErrorCode = "AUTH_LOGIN_REQUIRED",
+            FinalText = null
+        });
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var subscriptionProcess = CreateMockProcess(1, failureJson, "cached refresh token was rejected; run --login again");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
+        await task;
+
+        // Assert
+        service.State.Should().Be(SubscriptionState.Error);
+        service.IsAuthenticationRequired.Should().BeTrue();
+        service.LastError.Should().StartWith("mcp-gateway への認証が必要です。");
     }
 
     [Fact]
@@ -1257,8 +1288,15 @@ public class McpSubscriptionServiceTests : IDisposable
     [InlineData("connect ECONNREFUSED 127.0.0.1:8080", "mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。", "[CONN_REFUSED]")]
     [InlineData("404 page not found", "指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]")]
     [InlineData("Error POSTing to endpoint: 404", "指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]")]
-    [InlineData("Unauthorized access", "mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]")]
-    [InlineData("401 Unauthorized", "mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]")]
+    [InlineData("AUTH_LOGIN_REQUIRED", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("REAUTH_REQUIRED", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("{\"error\":\"invalid_token\"}", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("No access token provided", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("invalid_grant: run --login again", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("401 Unauthorized", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("Forbidden", "mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]")]
+    [InlineData("AUTH_REFRESH_FAILED", "予期しないエラーが発生しました: AUTH_REFRESH_FAILED", "[GENERAL_ERROR]")]
+    [InlineData("AUTH_TIMEOUT", "予期しないエラーが発生しました: AUTH_TIMEOUT", "[GENERAL_ERROR]")]
     [InlineData("something went wrong", "予期しないエラーが発生しました: something went wrong", "[GENERAL_ERROR]")]
     [InlineData("", "不明なエラーが発生しました。", "[UNKNOWN_ERROR]")]
     [InlineData(null, "不明なエラーが発生しました。", "[UNKNOWN_ERROR]")]

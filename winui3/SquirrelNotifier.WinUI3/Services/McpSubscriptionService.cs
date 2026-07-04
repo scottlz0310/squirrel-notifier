@@ -12,6 +12,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 internal sealed class McpSubscriptionService : IAsyncDisposable
 {
     private const int _maxRecentEvents = 20;
+    private const string _authenticationRequiredErrorTag = "[AUTH_REQUIRED]";
 
     private readonly SettingsService _settingsService;
     private readonly INotificationService _notificationService;
@@ -33,6 +34,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private IProcessInstance? _activeProcess;
     private SubscriptionState _state = SubscriptionState.Stopped;
     private string _lastError = string.Empty;
+    private bool _isAuthenticationRequired;
 
     public event EventHandler<SubscriptionState>? StateChanged;
 
@@ -55,6 +57,12 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     {
         get => _lastError;
         private set => _lastError = value;
+    }
+
+    public bool IsAuthenticationRequired
+    {
+        get => _isAuthenticationRequired;
+        private set => _isAuthenticationRequired = value;
     }
 
     public McpSubscriptionService(
@@ -81,6 +89,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         }
 
         LastError = string.Empty;
+        IsAuthenticationRequired = false;
         State = SubscriptionState.Starting;
         _stopCts?.Dispose();
         _stopCts = new CancellationTokenSource();
@@ -391,7 +400,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     }
                     else if (process.ExitCode != 0)
                     {
-                        throw new InvalidOperationException($"Subscriber process exited with non-zero code {process.ExitCode}. Stderr: {stderr.Trim()}");
+                        string errorCode = string.IsNullOrWhiteSpace(result?.ErrorCode) ? "unknown" : result.ErrorCode;
+                        throw new InvalidOperationException($"Subscriber process exited with non-zero code {process.ExitCode}. ErrorCode: {errorCode}. Stderr: {stderr.Trim()}");
                     }
                     else if (parseError != null)
                     {
@@ -475,6 +485,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 if (retryCount > _maxRetries)
                 {
                     LastError = friendlyMessage;
+                    IsAuthenticationRequired = tag == _authenticationRequiredErrorTag;
                     State = SubscriptionState.Error;
                     ReportStatus($"Error: {friendlyMessage}");
                     await LogAsync($"[{resourceUri}] Subscription loop error (max retries exceeded) {tag}: {ex.Message}").ConfigureAwait(false);
@@ -730,9 +741,21 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             return ("指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]");
         }
 
-        if (rawError.Contains("401", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))
+        if (rawError.Contains("AUTH_LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("REAUTH_REQUIRED", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("invalid_token", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("invalid_client", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("unauthorized_client", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("No access token provided", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("run --login", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("401", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
+        }
+
+        if (rawError.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))
         {
             return ("mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]");
         }
