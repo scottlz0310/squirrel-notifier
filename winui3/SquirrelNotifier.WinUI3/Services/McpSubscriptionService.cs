@@ -401,7 +401,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     else if (process.ExitCode != 0)
                     {
                         string errorCode = string.IsNullOrWhiteSpace(result?.ErrorCode) ? "unknown" : result.ErrorCode;
-                        throw new InvalidOperationException($"Subscriber process exited with non-zero code {process.ExitCode}. ErrorCode: {errorCode}. Stderr: {stderr.Trim()}");
+                        string stdoutDetail = !string.IsNullOrWhiteSpace(result?.FinalText) ? result.FinalText : stdout.Trim();
+                        string parseErrorDetail = parseError != null ? $" ParseError: {parseError.Message}." : string.Empty;
+                        throw new InvalidOperationException($"Subscriber process exited with non-zero code {process.ExitCode}. ErrorCode: {errorCode}. Stdout: {stdoutDetail}.{parseErrorDetail} Stderr: {stderr.Trim()}");
                     }
                     else if (parseError != null)
                     {
@@ -748,11 +750,18 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             rawError.Contains("invalid_client", StringComparison.OrdinalIgnoreCase) ||
             rawError.Contains("unauthorized_client", StringComparison.OrdinalIgnoreCase) ||
             rawError.Contains("No access token provided", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("run --login", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("401", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
+            rawError.Contains("run --login", StringComparison.OrdinalIgnoreCase))
         {
             return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
+        }
+
+        // MCP_PROBE_AUTH_TOKEN を明示指定している場合、mcp-resource-subscriber は
+        // --login のトークンキャッシュを完全に読み飛ばすため、401 の原因が env 変数側の
+        // 設定不備でも --login の再認証では解消しない。両方の案内を残す。
+        if (rawError.Contains("401", StringComparison.OrdinalIgnoreCase) ||
+            rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください（MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください）。", _authenticationRequiredErrorTag);
         }
 
         if (rawError.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))

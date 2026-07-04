@@ -298,7 +298,7 @@ internal sealed partial class MainWindow : Window
                 if (_service.IsAuthenticationRequired)
                 {
                     _ = _loggingService.WriteAsync("[UI] Showing authentication required balloon notification.");
-                    _trayIconService.ShowBalloonTip("Squirrel Notifier", $"認証が必要です: {_service.LastError}");
+                    _trayIconService.ShowBalloonTip("Squirrel Notifier", _service.LastError);
                 }
                 else
                 {
