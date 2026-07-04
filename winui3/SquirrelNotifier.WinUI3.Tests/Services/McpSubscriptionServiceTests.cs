@@ -254,12 +254,16 @@ public class McpSubscriptionServiceTests : IDisposable
         service.IsAuthenticationRequired.Should().BeFalse();
     }
 
-    [Fact]
-    public async Task Start_ShouldNotMisclassifyPortNumberInStdoutAsAuthRequired()
+    [Theory]
+    [InlineData("{\"route\":\"failed\",\"serverUrl\":\"http://localhost:4010/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}")]
+    [InlineData("{\"route\":\"failed\",\"serverUrl\":\"http://localhost:401/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}")]
+    [InlineData("{\"route\":\"failed\",\"resourceUri\":\"queue://review/401/status\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}")]
+    public async Task Start_ShouldNotMisclassifyNumberInStdoutAsAuthRequired(string stdout)
     {
-        // Arrange: stdout の serverUrl にポート番号 4010 を含むが、認証エラーではないケース。
-        // "401" の部分一致で誤って IsAuthenticationRequired = true にならないことを確認する。
-        string stdout = "{\"route\":\"failed\",\"serverUrl\":\"http://localhost:4010/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}";
+        // Arrange: stdout の serverUrl / resourceUri にポート番号 4010、単独ポート番号 401、
+        // または URI パスセグメントとしての 401 を含むが、認証エラーではないケース。
+        // structuredErrorCode (RESOURCE_NOT_FOUND) が legacy な "401" 部分一致より優先され、
+        // IsAuthenticationRequired = true に誤分類されないことを確認する。
         var preflightProcess = CreateMockProcess(0, "help", "");
         var subscriptionProcess = CreateMockProcess(1, stdout, "");
 
@@ -1335,6 +1339,34 @@ public class McpSubscriptionServiceTests : IDisposable
     {
         // Act
         var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(input!);
+
+        // Assert
+        friendlyResult.Should().Be(expectedFriendly);
+        tagResult.Should().Be(expectedTag);
+    }
+
+    [Theory]
+    [InlineData("AUTH_LOGIN_REQUIRED", "some raw message", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("REAUTH_REQUIRED", "some raw message", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("AUTH_REFRESH_FAILED", "raw", "予期しないエラーが発生しました: raw", "[GENERAL_ERROR]")]
+    [InlineData("AUTH_TIMEOUT", "raw", "予期しないエラーが発生しました: raw", "[GENERAL_ERROR]")]
+    [InlineData(
+        "RESOURCE_NOT_FOUND",
+        "Subscription failure: Route=failed, ErrorCode=RESOURCE_NOT_FOUND, Message=serverUrl=http://localhost:401/mcp",
+        "予期しないエラーが発生しました: Subscription failure: Route=failed, ErrorCode=RESOURCE_NOT_FOUND, Message=serverUrl=http://localhost:401/mcp",
+        "[GENERAL_ERROR]")]
+    [InlineData(
+        "SUBSCRIPTION_FAILED",
+        "resourceUri=\"queue://review/401/status\"",
+        "予期しないエラーが発生しました: resourceUri=\"queue://review/401/status\"",
+        "[GENERAL_ERROR]")]
+    public void ErrorMessageMapping_WithStructuredErrorCode_ShouldPreferStructuredCodeOverLegacyStringMatching(
+        string structuredErrorCode, string rawError, string expectedFriendly, string expectedTag)
+    {
+        // Act: structuredErrorCode が既知の非認証コードの場合、rawError 内に "401" という
+        // 部分文字列（ポート番号や URI パスセグメント由来）が含まれていても、legacy な
+        // 文字列マッチングより structuredErrorCode を優先し、誤って AUTH_REQUIRED にしない。
+        var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(rawError, structuredErrorCode);
 
         // Assert
         friendlyResult.Should().Be(expectedFriendly);

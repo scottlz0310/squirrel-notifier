@@ -404,7 +404,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                         string errorCode = string.IsNullOrWhiteSpace(result?.ErrorCode) ? "unknown" : result.ErrorCode;
                         string stdoutDetail = !string.IsNullOrWhiteSpace(result?.FinalText) ? result.FinalText : stdout.Trim();
                         string parseErrorDetail = parseError != null ? $" ParseError: {parseError.Message}." : string.Empty;
-                        throw new InvalidOperationException($"Subscriber process exited with non-zero code {process.ExitCode}. ErrorCode: {errorCode}. Stdout: {stdoutDetail}.{parseErrorDetail} Stderr: {stderr.Trim()}");
+                        throw new SubscriberProcessException($"Subscriber process exited with non-zero code {process.ExitCode}. ErrorCode: {errorCode}. Stdout: {stdoutDetail}.{parseErrorDetail} Stderr: {stderr.Trim()}", result?.ErrorCode);
                     }
                     else if (parseError != null)
                     {
@@ -422,7 +422,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
                         if (result.Route == "failed" || result.Route == "timeout" || result.ErrorCode != null)
                         {
-                            throw new InvalidOperationException($"Subscription failure: Route={result.Route}, ErrorCode={result.ErrorCode}, Message={result.FinalText}");
+                            throw new SubscriberProcessException($"Subscription failure: Route={result.Route}, ErrorCode={result.ErrorCode}, Message={result.FinalText}", result.ErrorCode);
                         }
 
                         if (result.Route == "subscription" && result.NotificationReceived == true)
@@ -483,7 +483,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             catch (Exception ex)
             {
                 retryCount++;
-                (string friendlyMessage, string tag) = GetErrorInfo(ex.Message);
+                string? structuredErrorCode = (ex as SubscriberProcessException)?.ErrorCode;
+                (string friendlyMessage, string tag) = GetErrorInfo(ex.Message, structuredErrorCode);
 
                 if (retryCount > _maxRetries)
                 {
@@ -725,8 +726,29 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         _cacheSemaphore.Dispose();
     }
 
-    internal static (string FriendlyMessage, string ErrorTag) GetErrorInfo(string rawError)
+    internal static (string FriendlyMessage, string ErrorTag) GetErrorInfo(string rawError, string? structuredErrorCode = null)
     {
+        // 構造化された ErrorCode（mcp-resource-subscriber の JSON stdout 由来）が
+        // 得られている場合は、それを最優先で判定する。非ゼロ終了時は stdout 全文
+        // （serverUrl / resourceUri 等の URL・URI を含む）が rawError に結合されるため、
+        // legacy な部分一致判定だけでは URL・URI 中の数字列（例: ポート番号やパス
+        // セグメントとしての "401"）と実際の HTTP status を区別できない。ErrorCode が
+        // 判明していれば信頼できる分類材料になるため、legacy 文字列マッチングより優先する。
+        if (!string.IsNullOrWhiteSpace(structuredErrorCode) &&
+            !structuredErrorCode.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            if (structuredErrorCode.Equals("AUTH_LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase) ||
+                structuredErrorCode.Equals("REAUTH_REQUIRED", StringComparison.OrdinalIgnoreCase))
+            {
+                return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
+            }
+
+            // AUTH_REFRESH_FAILED / AUTH_TIMEOUT を含め、AUTH_LOGIN_REQUIRED 以外の
+            // 既知の ErrorCode は認証エラーではないため、legacy 文字列マッチングを
+            // スキップして直接 GENERAL_ERROR とする。
+            return ($"予期しないエラーが発生しました: {rawError}", "[GENERAL_ERROR]");
+        }
+
         if (string.IsNullOrEmpty(rawError))
         {
             return ("不明なエラーが発生しました。", "[UNKNOWN_ERROR]");
@@ -759,9 +781,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         // MCP_PROBE_AUTH_TOKEN を明示指定している場合、mcp-resource-subscriber は
         // --login のトークンキャッシュを完全に読み飛ばすため、401 の原因が env 変数側の
         // 設定不備でも --login の再認証では解消しない。両方の案内を残す。
-        // 非ゼロ終了時は structured stdout 全文（serverUrl のポート番号等を含む）が
-        // rawError に結合されるため、"401" は単語境界付きで判定し、ポート番号
-        // （例: 4010）等の部分一致で誤って AUTH_REQUIRED と分類しないようにする。
+        // ここは structuredErrorCode が得られない場合（stdout が空・パース不能等）の
+        // フォールバックであり、その場合は stdout に URL・URI が含まれる可能性は低いが、
+        // 念のため "401" は単語境界付きで判定する。
         if (Regex.IsMatch(rawError, @"\b401\b") ||
             rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
         {
@@ -775,6 +797,38 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
         return ($"予期しないエラーが発生しました: {rawError}", "[GENERAL_ERROR]");
     }
+}
+
+/// <summary>
+/// Subscriber プロセスの構造化された <c>errorCode</c> を保持する例外.
+/// stdout 全文（serverUrl / resourceUri 等の URL・URI を含む）はメッセージ文字列に
+/// 結合されるため、legacy な部分一致判定だけでは URL・URI 中の数字列（例: ポート番号
+/// や パスセグメントとしての "401"）と HTTP status を区別できない. 構造化された
+/// ErrorCode を別途保持することで、GetErrorInfo がそちらを優先判定できるようにする.
+/// </summary>
+internal sealed class SubscriberProcessException : Exception
+{
+    public SubscriberProcessException()
+    {
+    }
+
+    public SubscriberProcessException(string message)
+        : base(message)
+    {
+    }
+
+    public SubscriberProcessException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    public SubscriberProcessException(string message, string? errorCode)
+        : base(message)
+    {
+        ErrorCode = errorCode;
+    }
+
+    public string? ErrorCode { get; }
 }
 
 /// <summary>
