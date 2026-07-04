@@ -18,7 +18,9 @@
 
     <SummaryInformation Description="Squirrel Notifier - MCP リソース更新通知アプリ" />
 
-    <MajorUpgrade DowngradeErrorMessage="新しいバージョンの Squirrel Notifier がすでにインストールされています。" />
+    <!-- 同一バージョンの再ビルドでも、旧 ProductCode の製品を置き換える。 -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="新しいバージョンの Squirrel Notifier がすでにインストールされています。" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- インストール先: %LocalAppData%\Programs\SquirrelNotifier\ -->

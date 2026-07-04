@@ -83,6 +83,7 @@ jobs:
           /p:OutputPath="$msiOutDir"
         $msi = Get-ChildItem -Path $msiOutDir -Filter "*.msi" -Recurse | Select-Object -First 1
         if (-not $msi) { throw "MSI ファイルが見つかりませんでした: $msiOutDir" }
+        ./scripts/test-msi-major-upgrade.ps1 -MsiPath $msi.FullName
         $msiName = "SquirrelNotifier-Setup-$version-$platform.msi"
         Copy-Item -Path $msi.FullName -Destination "./$msiName"
         echo "MSI_NAME=$msiName" >> $env:GITHUB_OUTPUT

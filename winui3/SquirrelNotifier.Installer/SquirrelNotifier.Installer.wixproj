@@ -12,8 +12,8 @@
     <DefineConstants>PackageVersion=$(PackageVersion);HarvestPath=$(HarvestPath)</DefineConstants>
     <!-- WiX 7 OSMF EULA 同意 -->
     <AcceptEula>wix7</AcceptEula>
-    <!-- perUser + Files 要素の組み合わせで発生する ICE バリデーションエラーを抑制 -->
-    <SuppressIces>ICE03;ICE38;ICE64;ICE91</SuppressIces>
+    <!-- perUser + Files 要素と、意図的な同一バージョン置換で発生する ICE を抑制 -->
+    <SuppressIces>ICE03;ICE38;ICE61;ICE64;ICE91</SuppressIces>
   </PropertyGroup>
 
   <ItemGroup>
