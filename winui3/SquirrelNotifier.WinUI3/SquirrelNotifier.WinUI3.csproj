@@ -25,6 +25,8 @@
     <AnalysisMode>All</AnalysisMode>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsAsErrors />
+    <!-- single-instance 判定を Program.cs のカスタム Main で行うため、XAML 生成の既定 Main を無効化する -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <WarningsNotAsErrors>CA1515</WarningsNotAsErrors>
     <NoWarn>$(NoWarn);CA1001;CA1003;CA1014;CA1031;CA1063;CA1303;CA1816;CA1822;CA1823;CA1848;CA1849;CA1869;CA2007;CA2016;CA2216;CA5392;SA0001;SA1101;SA1312;SA1600;SA1601;SA1633;SA1200;SA1201;SA1202;SA1203;SA1204;SA1214;SA1402;SA1649;SA1309</NoWarn>
   </PropertyGroup>
