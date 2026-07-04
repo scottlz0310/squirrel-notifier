@@ -258,12 +258,16 @@ public class McpSubscriptionServiceTests : IDisposable
     [InlineData("{\"route\":\"failed\",\"serverUrl\":\"http://localhost:4010/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}")]
     [InlineData("{\"route\":\"failed\",\"serverUrl\":\"http://localhost:401/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}")]
     [InlineData("{\"route\":\"failed\",\"resourceUri\":\"queue://review/401/status\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}")]
+    [InlineData("{\"route\":\"timeout\",\"resourceUri\":\"queue://review/401/status\",\"errorCode\":\"SUBSCRIPTION_FAILED\"}")]
     public async Task Start_ShouldNotMisclassifyNumberInStdoutAsAuthRequired(string stdout)
     {
         // Arrange: stdout の serverUrl / resourceUri にポート番号 4010、単独ポート番号 401、
         // または URI パスセグメントとしての 401 を含むが、認証エラーではないケース。
-        // structuredErrorCode (RESOURCE_NOT_FOUND) が legacy な "401" 部分一致より優先され、
-        // IsAuthenticationRequired = true に誤分類されないことを確認する。
+        // RESOURCE_NOT_FOUND はホワイトリストにより structuredErrorCode を優先、
+        // SUBSCRIPTION_FAILED はホワイトリスト外だが stderr が空で診断テキストも空になる
+        // ため、いずれも legacy な "401" 部分一致で IsAuthenticationRequired = true に
+        // 誤分類されないことを確認する（subscribeResource 失敗時は catch {} で詳細を
+        // 握りつぶし stderr に何も出力しない、という現行 subscriber の出力契約どおり）。
         var preflightProcess = CreateMockProcess(0, "help", "");
         var subscriptionProcess = CreateMockProcess(1, stdout, "");
 
@@ -1414,21 +1418,41 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("INTERNAL_ERROR", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("SUBSCRIPTION_FAILED", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("INTERNAL_ERROR", "something unrelated happened", "予期しないエラーが発生しました: something unrelated happened", "[GENERAL_ERROR]")]
-    public void ErrorMessageMapping_WithGenericStructuredErrorCode_ShouldFallBackToLegacyStringMatching(
-        string structuredErrorCode, string rawError, string expectedFriendly, string expectedTag)
+    [InlineData("INTERNAL_ERROR", "full raw message", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("SUBSCRIPTION_FAILED", "full raw message", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("INTERNAL_ERROR", "something unrelated happened", "something unrelated happened", "予期しないエラーが発生しました: something unrelated happened", "[GENERAL_ERROR]")]
+    public void ErrorMessageMapping_WithGenericStructuredErrorCode_ShouldFallBackToLegacyStringMatchingOnDiagnosticText(
+        string structuredErrorCode, string rawError, string diagnosticText, string expectedFriendly, string expectedTag)
     {
         // Act: INTERNAL_ERROR / SUBSCRIPTION_FAILED は意味が確定していない汎用 ErrorCode
         // （resolveBearerToken 以外の経路の失敗、または subscribeResource 失敗の詳細不明な
         // コード）であり、実際の認証エラー詳細（invalid_token 等）が stderr にのみ出力
         // される場合があるため、legacy 文字列マッチングにフォールバックし、Issue #113 の
-        // 認証検出経路を維持する。
-        var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(rawError, structuredErrorCode);
+        // 認証検出経路を維持する。判定対象は diagnosticText（stderr / FinalText のみ）。
+        var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(rawError, structuredErrorCode, diagnosticText);
 
         // Assert
         friendlyResult.Should().Be(expectedFriendly);
         tagResult.Should().Be(expectedTag);
+    }
+
+    [Fact]
+    public void ErrorMessageMapping_WithSubscriptionFailedAndEmptyDiagnosticText_ShouldNotMatchUriPathSegment401()
+    {
+        // Arrange: SUBSCRIPTION_FAILED は subscribeResource の例外を catch {} で握りつぶし、
+        // JSON stdout に resourceUri のみを含めて返す（stderr は空、FinalText も無し）。
+        // rawError（表示用フルメッセージ）には resourceUri="queue://review/401/status" の
+        // ような URI パスセグメントとしての "401" が含まれ得るが、判定対象は
+        // diagnosticText（この場合は空文字列）に限定されるため、誤って AUTH_REQUIRED に
+        // ならないことを確認する。
+        string rawError = "Subscriber process exited with non-zero code 1. ErrorCode: SUBSCRIPTION_FAILED. " +
+            "Stdout: {\"route\":\"timeout\",\"resourceUri\":\"queue://review/401/status\",\"errorCode\":\"SUBSCRIPTION_FAILED\"}. Stderr: ";
+
+        // Act
+        var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(rawError, "SUBSCRIPTION_FAILED", diagnosticText: string.Empty);
+
+        // Assert
+        friendlyResult.Should().Be($"予期しないエラーが発生しました: {rawError}");
+        tagResult.Should().Be("[GENERAL_ERROR]");
     }
 }
