@@ -44,6 +44,23 @@ jobs:
       - name: Build solution
         run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore /p:Platform=x64 /p:IncludeWindowsSdkBuildTools=false
 
+      - name: Verify MSI MajorUpgrade
+        shell: pwsh
+        run: |
+          $payloadDir = (New-Item -ItemType Directory -Path "./installer-test-payload" -Force).FullName
+          New-Item -ItemType File -Path (Join-Path $payloadDir "SquirrelNotifier.WinUI3.exe") -Force | Out-Null
+          $outputDir = (New-Item -ItemType Directory -Path "./installer-test-output" -Force).FullName
+          dotnet build winui3/SquirrelNotifier.Installer/SquirrelNotifier.Installer.wixproj `
+            --configuration Release `
+            /p:Platform=x64 `
+            /p:HarvestPath="$payloadDir" `
+            /p:PackageVersion=1.2.3 `
+            /p:OutputPath="$outputDir"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $msi = Get-ChildItem -Path $outputDir -Filter "*.msi" -Recurse | Select-Object -First 1
+          if (-not $msi) { throw "検証用 MSI が見つかりません: $outputDir" }
+          ./scripts/test-msi-major-upgrade.ps1 -MsiPath $msi.FullName
+
       - name: Run tests with coverage
         run: |
           foreach ($type in @("line", "branch", "method")) {
