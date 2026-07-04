@@ -255,6 +255,31 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Start_ShouldNotMisclassifyPortNumberInStdoutAsAuthRequired()
+    {
+        // Arrange: stdout の serverUrl にポート番号 4010 を含むが、認証エラーではないケース。
+        // "401" の部分一致で誤って IsAuthenticationRequired = true にならないことを確認する。
+        string stdout = "{\"route\":\"failed\",\"serverUrl\":\"http://localhost:4010/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}";
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var subscriptionProcess = CreateMockProcess(1, stdout, "");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
+        await task;
+
+        // Assert
+        service.State.Should().Be(SubscriptionState.Error);
+        service.IsAuthenticationRequired.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Start_ShouldClassifyStructuredAuthLoginRequiredError()
     {
         // Arrange
@@ -1296,6 +1321,10 @@ public class McpSubscriptionServiceTests : IDisposable
     [InlineData("{\"error\":\"invalid_client\"}", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
     [InlineData("{\"error\":\"unauthorized_client\"}", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
     [InlineData("401 Unauthorized", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください（MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください）。", "[AUTH_REQUIRED]")]
+    [InlineData(
+        "Subscriber process exited with non-zero code 1. ErrorCode: RESOURCE_NOT_FOUND. Stdout: {\"route\":\"failed\",\"serverUrl\":\"http://localhost:4010/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}. Stderr: ",
+        "予期しないエラーが発生しました: Subscriber process exited with non-zero code 1. ErrorCode: RESOURCE_NOT_FOUND. Stdout: {\"route\":\"failed\",\"serverUrl\":\"http://localhost:4010/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}. Stderr: ",
+        "[GENERAL_ERROR]")]
     [InlineData("Forbidden", "mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]")]
     [InlineData("AUTH_REFRESH_FAILED", "予期しないエラーが発生しました: AUTH_REFRESH_FAILED", "[GENERAL_ERROR]")]
     [InlineData("AUTH_TIMEOUT", "予期しないエラーが発生しました: AUTH_TIMEOUT", "[GENERAL_ERROR]")]

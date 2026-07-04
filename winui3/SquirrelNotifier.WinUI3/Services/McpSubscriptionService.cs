@@ -5,6 +5,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -758,7 +759,10 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         // MCP_PROBE_AUTH_TOKEN を明示指定している場合、mcp-resource-subscriber は
         // --login のトークンキャッシュを完全に読み飛ばすため、401 の原因が env 変数側の
         // 設定不備でも --login の再認証では解消しない。両方の案内を残す。
-        if (rawError.Contains("401", StringComparison.OrdinalIgnoreCase) ||
+        // 非ゼロ終了時は structured stdout 全文（serverUrl のポート番号等を含む）が
+        // rawError に結合されるため、"401" は単語境界付きで判定し、ポート番号
+        // （例: 4010）等の部分一致で誤って AUTH_REQUIRED と分類しないようにする。
+        if (Regex.IsMatch(rawError, @"\b401\b") ||
             rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
         {
             return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください（MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください）。", _authenticationRequiredErrorTag);
