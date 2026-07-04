@@ -231,6 +231,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8,
             };
             psi.ArgumentList.Add("--help");
 
@@ -317,6 +319,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    StandardOutputEncoding = System.Text.Encoding.UTF8,
+                    StandardErrorEncoding = System.Text.Encoding.UTF8,
                 };
 
                 // Add token env
@@ -362,68 +366,91 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     string stdout = await stdoutTask.ConfigureAwait(false);
                     string stderr = await stderrTask.ConfigureAwait(false);
 
-                    if (process.ExitCode != 0)
+                    // NOTIFICATION_TIMEOUT は待機時間内にイベントが無かっただけの正常な満了。
+                    // subscriber は timeout でも非ゼロ終了するため、終了コードより先に stdout で判定し、
+                    // リトライを消費せずに再購読へ進む。
+                    SubscriptionResult? result = null;
+                    JsonException? parseError = null;
+                    if (!string.IsNullOrWhiteSpace(stdout))
+                    {
+                        try
+                        {
+                            result = JsonSerializer.Deserialize<SubscriptionResult>(stdout);
+                        }
+                        catch (JsonException ex)
+                        {
+                            parseError = ex;
+                        }
+                    }
+
+                    bool isIdleTimeout = result?.Route == "timeout" && result.ErrorCode == "NOTIFICATION_TIMEOUT";
+
+                    if (isIdleTimeout)
+                    {
+                        await LogAsync($"[{resourceUri}] No notification within timeout window; re-subscribing.").ConfigureAwait(false);
+                    }
+                    else if (process.ExitCode != 0)
                     {
                         throw new InvalidOperationException($"Subscriber process exited with non-zero code {process.ExitCode}. Stderr: {stderr.Trim()}");
                     }
-
-                    if (string.IsNullOrWhiteSpace(stdout))
+                    else if (parseError != null)
                     {
-                        throw new JsonException("Subscriber process output was empty.");
+                        throw parseError;
                     }
-
-                    // Parse JSON
-                    SubscriptionResult? result = JsonSerializer.Deserialize<SubscriptionResult>(stdout);
-                    if (result == null)
+                    else if (result == null)
                     {
-                        throw new JsonException("Failed to deserialize subscriber output JSON.");
-                    }
-
-                    result.Validate();
-
-                    if (result.Route == "failed" || result.Route == "timeout" || result.ErrorCode != null)
-                    {
-                        throw new InvalidOperationException($"Subscription failure: Route={result.Route}, ErrorCode={result.ErrorCode}, Message={result.FinalText}");
-                    }
-
-                    if (result.Route == "subscription" && result.NotificationReceived == true)
-                    {
-                        await LogAsync($"Notification payload received: {result.FinalText}").ConfigureAwait(false);
-
-                        List<ReviewEvent> reviewEvents = ReviewEventParser.Parse(result.FinalText, resourceUri);
-                        if (reviewEvents.Count == 0)
-                        {
-                            await LogAsync($"Warning: Malformed or unsupported review event payload received: {result.FinalText}").ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            foreach (ReviewEvent reviewEvent in reviewEvents)
-                            {
-                                if (TryMarkAsSeen(reviewEvent.EventId, reviewEvent))
-                                {
-                                    try
-                                    {
-                                        _notificationService.NotifyReviewEvent(reviewEvent);
-                                        await PersistCacheAsync().ConfigureAwait(false);
-                                    }
-                                    catch (Exception notifyEx)
-                                    {
-                                        // 通知失敗時は claim を解除し、ディスクにも反映して再起動後の duplicate 扱いを防ぐ
-                                        UndoMarkAsSeen(reviewEvent.EventId);
-                                        await PersistCacheAsync().ConfigureAwait(false);
-                                        await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
-                                    }
-                                }
-                                else
-                                {
-                                    await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
-                                }
-                            }
-                        }
+                        throw new JsonException(string.IsNullOrWhiteSpace(stdout)
+                            ? "Subscriber process output was empty."
+                            : "Failed to deserialize subscriber output JSON.");
                     }
                     else
                     {
-                        await LogAsync($"Subscriber finished execution. Route={result.Route}").ConfigureAwait(false);
+                        result.Validate();
+
+                        if (result.Route == "failed" || result.Route == "timeout" || result.ErrorCode != null)
+                        {
+                            throw new InvalidOperationException($"Subscription failure: Route={result.Route}, ErrorCode={result.ErrorCode}, Message={result.FinalText}");
+                        }
+
+                        if (result.Route == "subscription" && result.NotificationReceived == true)
+                        {
+                            await LogAsync($"Notification payload received: {result.FinalText}").ConfigureAwait(false);
+
+                            List<ReviewEvent> reviewEvents = ReviewEventParser.Parse(result.FinalText, resourceUri);
+                            if (reviewEvents.Count == 0)
+                            {
+                                await LogAsync($"Warning: Malformed or unsupported review event payload received: {result.FinalText}").ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                foreach (ReviewEvent reviewEvent in reviewEvents)
+                                {
+                                    if (TryMarkAsSeen(reviewEvent.EventId, reviewEvent))
+                                    {
+                                        try
+                                        {
+                                            _notificationService.NotifyReviewEvent(reviewEvent);
+                                            await PersistCacheAsync().ConfigureAwait(false);
+                                        }
+                                        catch (Exception notifyEx)
+                                        {
+                                            // 通知失敗時は claim を解除し、ディスクにも反映して再起動後の duplicate 扱いを防ぐ
+                                            UndoMarkAsSeen(reviewEvent.EventId);
+                                            await PersistCacheAsync().ConfigureAwait(false);
+                                            await LogAsync($"Error: Failed to show Windows notification: {notifyEx.Message}").ConfigureAwait(false);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            await LogAsync($"Subscriber finished execution. Route={result.Route}").ConfigureAwait(false);
+                        }
                     }
                 }
                 finally
