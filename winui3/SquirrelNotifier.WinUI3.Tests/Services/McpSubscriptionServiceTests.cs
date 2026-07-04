@@ -120,6 +120,58 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task Start_ShouldResubscribeWithoutConsumingRetryOnNotificationTimeout(int exitCode)
+    {
+        // Arrange: NOTIFICATION_TIMEOUT は待機満了の正常応答。subscriber は非ゼロ終了することがある
+        string timeoutJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "timeout",
+            ErrorCode = "NOTIFICATION_TIMEOUT",
+            Subscribed = true,
+            NotificationReceived = false,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        int subscriptionStartCount = 0;
+
+        var testCts = new CancellationTokenSource();
+
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionStartCount++;
+                if (subscriptionStartCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(exitCode, timeoutJson, "auth token source: cache");
+            });
+
+        // maxRetries: 0 → エラー扱いなら 1 回目のプロセス終了で即 max retries exceeded になる
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert: リトライを消費せず 2 回目の購読プロセスが起動している
+        subscriptionStartCount.Should().BeGreaterThanOrEqualTo(2);
+        service.State.Should().NotBe(SubscriptionState.Error);
+        service.LastError.Should().BeEmpty();
+    }
+
+    [Theory]
     [InlineData("failed", "ERR_01", "Gateway failed")]
     [InlineData("timeout", null, "Timeout occurred")]
     public async Task Start_ShouldTransitionToErrorOnFailureJson(string route, string? errorCode, string message)

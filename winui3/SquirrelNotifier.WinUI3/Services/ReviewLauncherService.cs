@@ -92,6 +92,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8,
             };
 
             // Build and add safe arguments
