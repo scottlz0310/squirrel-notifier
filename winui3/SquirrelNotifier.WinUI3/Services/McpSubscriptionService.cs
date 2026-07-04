@@ -15,6 +15,18 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private const int _maxRecentEvents = 20;
     private const string _authenticationRequiredErrorTag = "[AUTH_REQUIRED]";
 
+    // mcp-resource-subscriber の ErrorCode のうち、意味が確定していて非認証エラーと
+    // 判断してよいもの。ここに含まれない ErrorCode（INTERNAL_ERROR、SUBSCRIPTION_FAILED
+    // 等の詳細不明な汎用コード）は legacy 文字列マッチングにフォールバックさせる。
+    private static readonly HashSet<string> _nonAuthErrorCodesWithConfirmedSemantics = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "RESOURCE_NOT_FOUND",
+        "SERVER_URL_UNKNOWN",
+        "NOTIFICATION_TIMEOUT",
+        "AUTH_TIMEOUT",
+        "AUTH_REFRESH_FAILED",
+    };
+
     private readonly SettingsService _settingsService;
     private readonly INotificationService _notificationService;
     private readonly LoggingService _loggingService;
@@ -732,8 +744,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         // 得られている場合は、それを最優先で判定する。非ゼロ終了時は stdout 全文
         // （serverUrl / resourceUri 等の URL・URI を含む）が rawError に結合されるため、
         // legacy な部分一致判定だけでは URL・URI 中の数字列（例: ポート番号やパス
-        // セグメントとしての "401"）と実際の HTTP status を区別できない。ErrorCode が
-        // 判明していれば信頼できる分類材料になるため、legacy 文字列マッチングより優先する。
+        // セグメントとしての "401"）と実際の HTTP status を区別できない。
         if (!string.IsNullOrWhiteSpace(structuredErrorCode) &&
             !structuredErrorCode.Equals("unknown", StringComparison.OrdinalIgnoreCase))
         {
@@ -743,10 +754,18 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                 return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
             }
 
-            // AUTH_REFRESH_FAILED / AUTH_TIMEOUT を含め、AUTH_LOGIN_REQUIRED 以外の
-            // 既知の ErrorCode は認証エラーではないため、legacy 文字列マッチングを
-            // スキップして直接 GENERAL_ERROR とする。
-            return ($"予期しないエラーが発生しました: {rawError}", "[GENERAL_ERROR]");
+            // ホワイトリスト方式: 意味が確定している非認証 ErrorCode のみ legacy
+            // 文字列マッチングをスキップして直接 GENERAL_ERROR とする。
+            // INTERNAL_ERROR（resolveBearerToken 以外の経路、例えば明示指定した
+            // MCP_PROBE_AUTH_TOKEN が client.connect で拒否されるケース）や
+            // SUBSCRIPTION_FAILED（subscribeResource 失敗時の詳細不明な汎用コード）は
+            // 実際の認証エラー詳細（invalid_token 等）が stderr にのみ出力される
+            // ことがあるため、ここでホワイトリストに含めず legacy マッチングに
+            // フォールバックさせ、Issue #113 の認証検出経路を維持する。
+            if (_nonAuthErrorCodesWithConfirmedSemantics.Contains(structuredErrorCode))
+            {
+                return ($"予期しないエラーが発生しました: {rawError}", "[GENERAL_ERROR]");
+            }
         }
 
         if (string.IsNullOrEmpty(rawError))

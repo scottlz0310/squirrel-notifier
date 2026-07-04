@@ -314,6 +314,40 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Start_ShouldDetectAuthErrorFromStderrWhenErrorCodeIsGenericInternalError()
+    {
+        // Arrange: MCP_PROBE_AUTH_TOKEN を明示指定している場合、mcp-resource-subscriber は
+        // resolveBearerToken 以外の経路（client.connect でのトークン拒否等）で失敗し、
+        // errorCode は詳細不明な汎用コード "INTERNAL_ERROR" になる。実際の認証エラー
+        // 詳細（invalid_token）は stderr にのみ出力されるため、legacy 文字列マッチングへの
+        // フォールバックで引き続き認証エラーとして検出できることを確認する（Issue #113 の回帰防止）。
+        string failureJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "failed",
+            ErrorCode = "INTERNAL_ERROR",
+            FinalText = null
+        });
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var subscriptionProcess = CreateMockProcess(1, failureJson, "subscribe-probe failed: gateway rejected token: invalid_token");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
+        await task;
+
+        // Assert
+        service.State.Should().Be(SubscriptionState.Error);
+        service.IsAuthenticationRequired.Should().BeTrue();
+        service.LastError.Should().StartWith("mcp-gateway への認証が必要です。");
+    }
+
+    [Fact]
     public async Task Start_ShouldPassArgumentsAndSecretsCorrectly()
     {
         // Arrange
@@ -1356,16 +1390,41 @@ public class McpSubscriptionServiceTests : IDisposable
         "予期しないエラーが発生しました: Subscription failure: Route=failed, ErrorCode=RESOURCE_NOT_FOUND, Message=serverUrl=http://localhost:401/mcp",
         "[GENERAL_ERROR]")]
     [InlineData(
-        "SUBSCRIPTION_FAILED",
+        "SERVER_URL_UNKNOWN",
+        "resourceUri=\"queue://review/401/status\"",
+        "予期しないエラーが発生しました: resourceUri=\"queue://review/401/status\"",
+        "[GENERAL_ERROR]")]
+    [InlineData(
+        "NOTIFICATION_TIMEOUT",
         "resourceUri=\"queue://review/401/status\"",
         "予期しないエラーが発生しました: resourceUri=\"queue://review/401/status\"",
         "[GENERAL_ERROR]")]
     public void ErrorMessageMapping_WithStructuredErrorCode_ShouldPreferStructuredCodeOverLegacyStringMatching(
         string structuredErrorCode, string rawError, string expectedFriendly, string expectedTag)
     {
-        // Act: structuredErrorCode が既知の非認証コードの場合、rawError 内に "401" という
-        // 部分文字列（ポート番号や URI パスセグメント由来）が含まれていても、legacy な
-        // 文字列マッチングより structuredErrorCode を優先し、誤って AUTH_REQUIRED にしない。
+        // Act: structuredErrorCode が意味の確定した非認証コード（ホワイトリスト）の場合、
+        // rawError 内に "401" という部分文字列（ポート番号や URI パスセグメント由来）が
+        // 含まれていても、legacy な文字列マッチングより structuredErrorCode を優先し、
+        // 誤って AUTH_REQUIRED にしない。
+        var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(rawError, structuredErrorCode);
+
+        // Assert
+        friendlyResult.Should().Be(expectedFriendly);
+        tagResult.Should().Be(expectedTag);
+    }
+
+    [Theory]
+    [InlineData("INTERNAL_ERROR", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("SUBSCRIPTION_FAILED", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("INTERNAL_ERROR", "something unrelated happened", "予期しないエラーが発生しました: something unrelated happened", "[GENERAL_ERROR]")]
+    public void ErrorMessageMapping_WithGenericStructuredErrorCode_ShouldFallBackToLegacyStringMatching(
+        string structuredErrorCode, string rawError, string expectedFriendly, string expectedTag)
+    {
+        // Act: INTERNAL_ERROR / SUBSCRIPTION_FAILED は意味が確定していない汎用 ErrorCode
+        // （resolveBearerToken 以外の経路の失敗、または subscribeResource 失敗の詳細不明な
+        // コード）であり、実際の認証エラー詳細（invalid_token 等）が stderr にのみ出力
+        // される場合があるため、legacy 文字列マッチングにフォールバックし、Issue #113 の
+        // 認証検出経路を維持する。
         var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(rawError, structuredErrorCode);
 
         // Assert
