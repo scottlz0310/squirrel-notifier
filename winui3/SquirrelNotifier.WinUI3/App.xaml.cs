@@ -75,14 +75,27 @@ public partial class App : Application
             _window.HideWindowToTray();
         }
 
+        Program.Reactivated += OnReactivated;
+
         _subscriptionService.Start();
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        Program.Reactivated -= OnReactivated;
         _notificationService.OpenAppRequested -= OnOpenAppRequested;
         _subscriptionService.DisposeAsync().AsTask().ConfigureAwait(false);
         _autoUpdateService.Dispose();
+    }
+
+    private void OnReactivated(object? sender, Microsoft.Windows.AppLifecycle.AppActivationArguments e)
+    {
+        // 二重起動を検知した別プロセスからリダイレクトされた場合、既存インスタンスのウィンドウを前面化する
+        _ = _loggingService.WriteAsync("[INFO] 二重起動を検知。既存インスタンスのウィンドウを前面化します。");
+        if (_window != null)
+        {
+            _window.DispatcherQueue.TryEnqueue(() => _window.ShowWindowFromTray());
+        }
     }
 
     private void OnOpenAppRequested(object? sender, EventArgs e)

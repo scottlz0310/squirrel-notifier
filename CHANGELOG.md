@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- single-instance ガードが無く、アプリを 2 回起動すると 2 インスタンスが同時に常駐して同一 Resource URI を並行購読してしまう不具合を修正。Windows App SDK の `AppInstance.FindOrRegisterForKey` + `RedirectActivationToAsync` による instance redirection を導入し、2 個目の起動はアクティブ化イベントを既存インスタンスへリダイレクトして自身は起動せず終了する。既存インスタンス側はリダイレクトを受け取るとウィンドウを前面化する（#116）
 - `queue://review/*` の購読ループで、待機時間内にイベントが無い正常な満了（`route=timeout` / `errorCode=NOTIFICATION_TIMEOUT`）を購読失敗として扱い、リトライを消費して最大リトライ超過で購読が恒久停止していた不具合を修正。`NOTIFICATION_TIMEOUT` はリトライを消費せずそのまま再購読へ進むようにした。subscriber が timeout 時に非ゼロ終了することがあるため、終了コードより先に stdout の JSON で idle timeout を判定する（#111 の手動検証で発見）
 - レビュー起動結果ダイアログの標準出力・標準エラーが文字化けする不具合を修正。GUI プロセスにはコンソールが無く、リダイレクトした子プロセス出力の既定エンコーディングが UTF-8 に解決されないため、`ReviewLauncherService` と `McpSubscriptionService` の `ProcessStartInfo` に `StandardOutputEncoding` / `StandardErrorEncoding = UTF-8` を明示した（#111 の手動検証で発見）
 - Settings の Resource URI 複数行 TextBox で、`Enter` 入力による改行が `\r`（WinUI3 TextBox の既定の改行文字）であるため `Split('\n')` では分割されず、複数 URI を手入力すると1要素に `\r` が混入したまま保存されていた不具合を修正。`\r` と `\n` の両方で分割するように変更（#111 の手動検証で発見）
