@@ -5,6 +5,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -12,6 +13,19 @@ namespace SquirrelNotifier.WinUI3.Services;
 internal sealed class McpSubscriptionService : IAsyncDisposable
 {
     private const int _maxRecentEvents = 20;
+    private const string _authenticationRequiredErrorTag = "[AUTH_REQUIRED]";
+
+    // mcp-resource-subscriber の ErrorCode のうち、意味が確定していて非認証エラーと
+    // 判断してよいもの。ここに含まれない ErrorCode（INTERNAL_ERROR、SUBSCRIPTION_FAILED
+    // 等の詳細不明な汎用コード）は legacy 文字列マッチングにフォールバックさせる。
+    private static readonly HashSet<string> _nonAuthErrorCodesWithConfirmedSemantics = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "RESOURCE_NOT_FOUND",
+        "SERVER_URL_UNKNOWN",
+        "NOTIFICATION_TIMEOUT",
+        "AUTH_TIMEOUT",
+        "AUTH_REFRESH_FAILED",
+    };
 
     private readonly SettingsService _settingsService;
     private readonly INotificationService _notificationService;
@@ -33,6 +47,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private IProcessInstance? _activeProcess;
     private SubscriptionState _state = SubscriptionState.Stopped;
     private string _lastError = string.Empty;
+    private bool _isAuthenticationRequired;
 
     public event EventHandler<SubscriptionState>? StateChanged;
 
@@ -55,6 +70,12 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     {
         get => _lastError;
         private set => _lastError = value;
+    }
+
+    public bool IsAuthenticationRequired
+    {
+        get => _isAuthenticationRequired;
+        private set => _isAuthenticationRequired = value;
     }
 
     public McpSubscriptionService(
@@ -81,6 +102,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         }
 
         LastError = string.Empty;
+        IsAuthenticationRequired = false;
         State = SubscriptionState.Starting;
         _stopCts?.Dispose();
         _stopCts = new CancellationTokenSource();
@@ -391,7 +413,11 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
                     }
                     else if (process.ExitCode != 0)
                     {
-                        throw new InvalidOperationException($"Subscriber process exited with non-zero code {process.ExitCode}. Stderr: {stderr.Trim()}");
+                        string errorCode = string.IsNullOrWhiteSpace(result?.ErrorCode) ? "unknown" : result.ErrorCode;
+                        string stdoutDetail = !string.IsNullOrWhiteSpace(result?.FinalText) ? result.FinalText : stdout.Trim();
+                        string parseErrorDetail = parseError != null ? $" ParseError: {parseError.Message}." : string.Empty;
+                        string diagnosticText = CombineDiagnosticText(result?.FinalText, stderr);
+                        throw new SubscriberProcessException($"Subscriber process exited with non-zero code {process.ExitCode}. ErrorCode: {errorCode}. Stdout: {stdoutDetail}.{parseErrorDetail} Stderr: {stderr.Trim()}", result?.ErrorCode, diagnosticText);
                     }
                     else if (parseError != null)
                     {
@@ -409,7 +435,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
                         if (result.Route == "failed" || result.Route == "timeout" || result.ErrorCode != null)
                         {
-                            throw new InvalidOperationException($"Subscription failure: Route={result.Route}, ErrorCode={result.ErrorCode}, Message={result.FinalText}");
+                            throw new SubscriberProcessException($"Subscription failure: Route={result.Route}, ErrorCode={result.ErrorCode}, Message={result.FinalText}", result.ErrorCode, result.FinalText);
                         }
 
                         if (result.Route == "subscription" && result.NotificationReceived == true)
@@ -470,11 +496,14 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             catch (Exception ex)
             {
                 retryCount++;
-                (string friendlyMessage, string tag) = GetErrorInfo(ex.Message);
+                string? structuredErrorCode = (ex as SubscriberProcessException)?.ErrorCode;
+                string? diagnosticText = (ex as SubscriberProcessException)?.DiagnosticText;
+                (string friendlyMessage, string tag) = GetErrorInfo(ex.Message, structuredErrorCode, diagnosticText);
 
                 if (retryCount > _maxRetries)
                 {
                     LastError = friendlyMessage;
+                    IsAuthenticationRequired = tag == _authenticationRequiredErrorTag;
                     State = SubscriptionState.Error;
                     ReportStatus($"Error: {friendlyMessage}");
                     await LogAsync($"[{resourceUri}] Subscription loop error (max retries exceeded) {tag}: {ex.Message}").ConfigureAwait(false);
@@ -711,34 +740,147 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         _cacheSemaphore.Dispose();
     }
 
-    internal static (string FriendlyMessage, string ErrorTag) GetErrorInfo(string rawError)
+    internal static (string FriendlyMessage, string ErrorTag) GetErrorInfo(string rawError, string? structuredErrorCode = null, string? diagnosticText = null)
     {
+        // 構造化された ErrorCode（mcp-resource-subscriber の JSON stdout 由来）が
+        // 得られている場合は、それを最優先で判定する。
+        if (!string.IsNullOrWhiteSpace(structuredErrorCode) &&
+            !structuredErrorCode.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            if (structuredErrorCode.Equals("AUTH_LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase) ||
+                structuredErrorCode.Equals("REAUTH_REQUIRED", StringComparison.OrdinalIgnoreCase))
+            {
+                return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
+            }
+
+            // ホワイトリスト方式: 意味が確定している非認証 ErrorCode のみ legacy
+            // 文字列マッチングをスキップして直接 GENERAL_ERROR とする。
+            if (_nonAuthErrorCodesWithConfirmedSemantics.Contains(structuredErrorCode))
+            {
+                return ($"予期しないエラーが発生しました: {rawError}", "[GENERAL_ERROR]");
+            }
+
+            // INTERNAL_ERROR（resolveBearerToken 以外の経路、例えば明示指定した
+            // MCP_PROBE_AUTH_TOKEN が client.connect で拒否されるケース）や
+            // SUBSCRIPTION_FAILED（subscribeResource 失敗時の詳細不明な汎用コード）は
+            // 実際の認証エラー詳細（invalid_token 等）が stderr にのみ出力される
+            // ことがあるため、legacy マッチングにフォールバックさせ、Issue #113 の
+            // 認証検出経路を維持する。ただし判定対象は diagnosticText（stderr /
+            // result.FinalText のみ）に限定する。SUBSCRIPTION_FAILED のように詳細を
+            // catch {} で握りつぶし、JSON stdout に serverUrl / resourceUri のみを
+            // 含めて返す出力契約もあるため、stdout 全文（構造化 URL・URI フィールドを
+            // 含む rawError）を判定対象にすると、URI パスセグメントとしての "401" 等に
+            // 誤って一致してしまう。
+            return MatchLegacyErrorPatterns(diagnosticText ?? string.Empty, rawError);
+        }
+
         if (string.IsNullOrEmpty(rawError))
         {
             return ("不明なエラーが発生しました。", "[UNKNOWN_ERROR]");
         }
 
-        if (rawError.Contains("fetch failed", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("ECONNREFUSED", StringComparison.OrdinalIgnoreCase))
+        // structuredErrorCode が得られない場合（stdout が空・パース不能等）は、
+        // rawError 全体を判定対象にする従来のフォールバック。この場合 stdout に
+        // 構造化された URL・URI が含まれる可能性は低い。
+        return MatchLegacyErrorPatterns(rawError, rawError);
+    }
+
+    private static (string FriendlyMessage, string ErrorTag) MatchLegacyErrorPatterns(string textToMatch, string rawErrorForDisplay)
+    {
+        if (textToMatch.Contains("fetch failed", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("ECONNREFUSED", StringComparison.OrdinalIgnoreCase))
         {
             return ("mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。", "[CONN_REFUSED]");
         }
 
-        if (rawError.Contains("404 page not found", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Error POSTing to endpoint: 404", StringComparison.OrdinalIgnoreCase))
+        if (textToMatch.Contains("404 page not found", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("Error POSTing to endpoint: 404", StringComparison.OrdinalIgnoreCase))
         {
             return ("指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]");
         }
 
-        if (rawError.Contains("401", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase) ||
-            rawError.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))
+        if (textToMatch.Contains("AUTH_LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("REAUTH_REQUIRED", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("invalid_token", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("invalid_client", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("unauthorized_client", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("No access token provided", StringComparison.OrdinalIgnoreCase) ||
+            textToMatch.Contains("run --login", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
+        }
+
+        // MCP_PROBE_AUTH_TOKEN を明示指定している場合、mcp-resource-subscriber は
+        // --login のトークンキャッシュを完全に読み飛ばすため、401 の原因が env 変数側の
+        // 設定不備でも --login の再認証では解消しない。両方の案内を残す。
+        // "401" は単語境界付きで判定するが、それでもポート番号や URI パスセグメントの
+        // ような数字列に一致し得るため、呼び出し元で判定対象を構造化 URL・URI を含まない
+        // テキストに限定することが前提となる。
+        if (Regex.IsMatch(textToMatch, @"\b401\b") ||
+            textToMatch.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください（MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください）。", _authenticationRequiredErrorTag);
+        }
+
+        if (textToMatch.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))
         {
             return ("mcp-gateway で認証エラーが発生しました。認証トークン（MCP_PROBE_AUTH_TOKEN）の設定を確認してください。", "[AUTH_ERROR]");
         }
 
-        return ($"予期しないエラーが発生しました: {rawError}", "[GENERAL_ERROR]");
+        return ($"予期しないエラーが発生しました: {rawErrorForDisplay}", "[GENERAL_ERROR]");
     }
+
+    private static string CombineDiagnosticText(string? finalText, string stderr)
+    {
+        string text = finalText ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(stderr))
+        {
+            return text;
+        }
+
+        return string.IsNullOrWhiteSpace(text) ? stderr : $"{text} {stderr}";
+    }
+}
+
+/// <summary>
+/// Subscriber プロセスの構造化された <c>errorCode</c> を保持する例外.
+/// stdout 全文（serverUrl / resourceUri 等の URL・URI を含む）はメッセージ文字列に
+/// 結合されるため、legacy な部分一致判定だけでは URL・URI 中の数字列（例: ポート番号
+/// や パスセグメントとしての "401"）と HTTP status を区別できない. 構造化された
+/// ErrorCode を別途保持することで、GetErrorInfo がそちらを優先判定できるようにする.
+/// </summary>
+internal sealed class SubscriberProcessException : Exception
+{
+    public SubscriberProcessException()
+    {
+    }
+
+    public SubscriberProcessException(string message)
+        : base(message)
+    {
+    }
+
+    public SubscriberProcessException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    public SubscriberProcessException(string message, string? errorCode, string? diagnosticText = null)
+        : base(message)
+    {
+        ErrorCode = errorCode;
+        DiagnosticText = diagnosticText;
+    }
+
+    public string? ErrorCode { get; }
+
+    /// <summary>
+    /// Gets legacy 文字列マッチングの判定専用テキスト（stderr / result.FinalText のみ）.
+    /// serverUrl・resourceUri のような構造化 URL・URI フィールドを含まないため、ポート
+    /// 番号や URI パスセグメントとしての数字列（例: "401"）による誤判定を避けられる.
+    /// </summary>
+    public string? DiagnosticText { get; }
 }
 
 /// <summary>

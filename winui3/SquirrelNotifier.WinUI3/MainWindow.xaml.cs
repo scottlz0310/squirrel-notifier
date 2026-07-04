@@ -295,8 +295,16 @@ internal sealed partial class MainWindow : Window
             if (!_hasShownErrorBalloon)
             {
                 _hasShownErrorBalloon = true;
-                _ = _loggingService.WriteAsync("[UI] Showing connection error balloon notification.");
-                _trayIconService.ShowBalloonTip("Squirrel Notifier", $"接続エラー: {_service.LastError}");
+                if (_service.IsAuthenticationRequired)
+                {
+                    _ = _loggingService.WriteAsync("[UI] Showing authentication required balloon notification.");
+                    _trayIconService.ShowBalloonTip("Squirrel Notifier", _service.LastError);
+                }
+                else
+                {
+                    _ = _loggingService.WriteAsync("[UI] Showing connection error balloon notification.");
+                    _trayIconService.ShowBalloonTip("Squirrel Notifier", $"接続エラー: {_service.LastError}");
+                }
             }
         }
         else
