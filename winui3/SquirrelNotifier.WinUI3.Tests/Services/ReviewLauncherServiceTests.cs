@@ -263,4 +263,66 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedPsi.Should().NotBeNull();
         capturedPsi!.FileName.Should().Contain(expectedCmd);
     }
+
+    [Theory]
+    [InlineData("queue://review/re-review-requests", "reviewer", "reviewer-cmd", "--reviewer-arg")]
+    [InlineData("queue://review/queue", "reviewer", "reviewer-cmd", "--reviewer-arg")]
+    [InlineData("queue://review/queue", "reviewed", "reviewed-cmd", "--reviewed-arg")]
+    public void BuildCommandLine_ShouldSelectCorrectSlotBySourceAndRole(
+        string source, string role, string expectedCmd, string expectedArg)
+    {
+        // Arrange
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-copy",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+            Source = source,
+        };
+
+        ConfigureSettings(
+            reviewerCmd: "reviewer-cmd", reviewerArgs: "--reviewer-arg",
+            reviewedCmd: "reviewed-cmd", reviewedArgs: "--reviewed-arg",
+            role: role);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        string commandLine = service.BuildCommandLine(reviewEvent);
+
+        // Assert
+        commandLine.Should().Be($"{expectedCmd} {expectedArg}");
+        mockRunner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Never);
+    }
+
+    [Fact]
+    public void BuildCommandLine_ShouldExpandPlaceholdersAndQuoteArgumentsWithSpaces()
+    {
+        // Arrange: 既定のテンプレートは -p "<prompt>" 形式で、prompt にプレースホルダーを含む
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-copy-2",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 123,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/123",
+            Source = "queue://review/queue",
+            Reason = "opened",
+        };
+
+        ConfigureSettings(
+            reviewerCmd: "claude",
+            reviewerArgs: "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            role: "reviewer");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        string commandLine = service.BuildCommandLine(reviewEvent);
+
+        // Assert
+        commandLine.Should().Be("claude -p \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\"");
+    }
 }

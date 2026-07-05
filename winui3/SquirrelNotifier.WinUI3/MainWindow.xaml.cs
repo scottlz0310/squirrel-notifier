@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Controls;
 using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.Graphics;
 using WinRT;
@@ -39,6 +40,7 @@ internal sealed partial class MainWindow : Window
     private bool _isCheckingForUpdates;
     private bool _hasShownErrorBalloon;
     private bool _isAutoStartToggling;
+    private CancellationTokenSource? _copyFeedbackCts;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
 
@@ -816,6 +818,56 @@ internal sealed partial class MainWindow : Window
         if (sender is Button button && button.CommandParameter is Models.ReviewEvent reviewEvent)
         {
             await ExecuteReviewAsync(reviewEvent).ConfigureAwait(false);
+        }
+    }
+
+    private void OnCopyLaunchCommandClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.CommandParameter is not Models.ReviewEvent reviewEvent)
+        {
+            return;
+        }
+
+        try
+        {
+            string commandLine = _launcherService.BuildCommandLine(reviewEvent);
+
+            var dataPackage = new DataPackage();
+            dataPackage.SetText(commandLine);
+            Clipboard.SetContent(dataPackage);
+
+            ShowCopyFeedback("起動コマンドをクリップボードにコピーしました。", isError: false);
+        }
+        catch (Exception ex)
+        {
+            ShowCopyFeedback($"コピーに失敗しました: {ex.Message}", isError: true);
+        }
+    }
+
+    private void ShowCopyFeedback(string message, bool isError)
+    {
+        _copyFeedbackCts?.Cancel();
+        _copyFeedbackCts?.Dispose();
+        _copyFeedbackCts = new CancellationTokenSource();
+        CancellationToken token = _copyFeedbackCts.Token;
+
+        CopyFeedbackInfoBar.Severity = isError ? InfoBarSeverity.Error : InfoBarSeverity.Success;
+        CopyFeedbackInfoBar.Message = message;
+        CopyFeedbackInfoBar.IsOpen = true;
+
+        _ = HideCopyFeedbackAfterDelayAsync(token);
+    }
+
+    private async Task HideCopyFeedbackAfterDelayAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2.5), token).ConfigureAwait(true);
+            CopyFeedbackInfoBar.IsOpen = false;
+        }
+        catch (OperationCanceledException)
+        {
+            // superseded by a newer copy feedback; nothing to do
         }
     }
 
