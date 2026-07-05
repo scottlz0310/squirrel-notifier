@@ -99,4 +99,33 @@ public class RateLimitReminderServiceTests
 
         mockNotificationService.Verify(n => n.NotifyRateLimitReset("5時間制限"), Times.Once);
     }
+
+    [Fact]
+    public async Task Schedule_WhenTimeElapses_ShouldRaiseReminderFiredWithId()
+    {
+        var mockNotificationService = new Mock<INotificationService>();
+        using var service = new RateLimitReminderService(mockNotificationService.Object);
+        List<string> firedIds = new();
+        service.ReminderFired += (_, id) => firedIds.Add(id);
+
+        service.Schedule("5h", "5時間制限", DateTimeOffset.Now.AddMilliseconds(50));
+
+        await Task.Delay(500);
+
+        firedIds.Should().ContainSingle().Which.Should().Be("5h");
+    }
+
+    [Fact]
+    public void Cancel_ShouldNotRaiseReminderFired()
+    {
+        var mockNotificationService = new Mock<INotificationService>();
+        using var service = new RateLimitReminderService(mockNotificationService.Object);
+        bool raised = false;
+        service.ReminderFired += (_, _) => raised = true;
+        service.Schedule("5h", "5時間制限", DateTimeOffset.Now.AddMinutes(5));
+
+        service.Cancel("5h");
+
+        raised.Should().BeFalse();
+    }
 }

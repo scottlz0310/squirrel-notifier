@@ -23,6 +23,8 @@ internal sealed class RateLimitReminderService : IRateLimitReminderService, IDis
         _notificationService = notificationService;
     }
 
+    public event EventHandler<string>? ReminderFired;
+
     public bool IsScheduled(string id) => _reminders.ContainsKey(id);
 
     public void Schedule(string id, string label, DateTimeOffset resetAt)
@@ -84,6 +86,7 @@ internal sealed class RateLimitReminderService : IRateLimitReminderService, IDis
         {
             cts.Dispose();
             _notificationService.NotifyRateLimitReset(label);
+            ReminderFired?.Invoke(this, id);
         }
     }
 }

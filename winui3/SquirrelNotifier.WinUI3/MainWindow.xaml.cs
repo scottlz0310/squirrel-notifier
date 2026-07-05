@@ -112,6 +112,7 @@ internal sealed partial class MainWindow : Window
         _loggingService.LogAppended += OnLogAppended;
         _notificationService.ReviewEventReceived += OnReviewEventReceived;
         _notificationService.LaunchReviewRequested += OnLaunchReviewRequested;
+        _rateLimitReminderService.ReminderFired += OnRateLimitReminderFired;
         LogList.ItemsSource = _logEntries;
         ReviewEventList.ItemsSource = _reviewEvents;
         RateLimitList.ItemsSource = _rateLimits;
@@ -592,8 +593,6 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private const string _rateLimitUriScheme = "ratelimit://";
-
     private async void OnRefreshRateLimitClick(object sender, RoutedEventArgs e)
     {
         string gatewayUrl = GatewayUrlBox.Text;
@@ -605,14 +604,14 @@ internal sealed partial class MainWindow : Window
 
         List<string> rateLimitUris = ResourceUrisBox.Text
             .Split(_resourceUriLineSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(uri => uri.StartsWith(_rateLimitUriScheme, StringComparison.OrdinalIgnoreCase))
+            .Where(uri => uri.StartsWith(Services.RateLimitStatusParser.UriScheme, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         if (rateLimitUris.Count == 0)
         {
             await ShowAlertDialogAsync(
                 "URI 未設定",
-                $"{_rateLimitUriScheme} で始まる Resource URI が設定されていません。Resource URIs 欄に追加してください。");
+                $"{Services.RateLimitStatusParser.UriScheme} で始まる Resource URI が設定されていません。Resource URIs 欄に追加してください。");
             return;
         }
 
@@ -640,6 +639,21 @@ internal sealed partial class MainWindow : Window
             info.IsReminderScheduled = _rateLimitReminderService.IsScheduled(info.ReminderKey);
             _rateLimits.Add(info);
         }
+    }
+
+    private void OnRateLimitReminderFired(object? sender, string reminderKey)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            foreach (Models.RateLimitInfo info in _rateLimits)
+            {
+                if (info.ReminderKey == reminderKey)
+                {
+                    info.IsReminderScheduled = false;
+                    break;
+                }
+            }
+        });
     }
 
     private void OnToggleRateLimitReminderClick(object sender, RoutedEventArgs e)

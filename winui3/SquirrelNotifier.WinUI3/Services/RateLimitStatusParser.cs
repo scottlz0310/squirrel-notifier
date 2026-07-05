@@ -11,6 +11,10 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal static class RateLimitStatusParser
 {
+    // ratelimit:// URI は McpSubscriptionService の常時購読（ReviewEventParser 前提）とは
+    // 別経路（手動 resources/read）で読み取るため、両サービスで同じスキーム判定を共有する。
+    public const string UriScheme = "ratelimit://";
+
     public static List<RateLimitInfo> Parse(string? json, string? sourceUri = null)
     {
         List<RateLimitInfo> limits = new();

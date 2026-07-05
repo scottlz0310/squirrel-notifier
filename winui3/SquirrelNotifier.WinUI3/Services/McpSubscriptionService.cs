@@ -304,9 +304,21 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         ReportStatus("Subscribed.");
 
         AppSettings settings = _settingsService.Settings;
-        List<string> uris = settings.ResourceUris.Count > 0
+        List<string> allUris = settings.ResourceUris.Count > 0
             ? settings.ResourceUris
             : new List<string> { settings.ResourceUri };
+
+        // ratelimit:// は手動 resources/read（McpResourceProbe 経由）専用の URI であり、
+        // ReviewEventParser を前提とするこの常時購読ループの対象には含めない。
+        List<string> uris = allUris
+            .Where(uri => !uri.StartsWith(RateLimitStatusParser.UriScheme, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (uris.Count == 0)
+        {
+            await LogAsync("No subscribable resource URIs configured (ratelimit:// URIs are excluded from continuous subscription).").ConfigureAwait(false);
+            return;
+        }
 
         if (uris.Count == 1)
         {
