@@ -14,7 +14,7 @@ namespace SquirrelNotifier.WinUI3.Helpers;
 /// </summary>
 internal static class CommandLineFormatter
 {
-    private static readonly char[] _charsRequiringQuotes = [' ', '\t'];
+    private static readonly char[] _charsRequiringQuotes = [' ', '\t', '"'];
 
     public static string Format(string commandPath, IReadOnlyList<string> arguments)
     {
@@ -38,7 +38,10 @@ internal static class CommandLineFormatter
             return value;
         }
 
-        string escaped = value.Replace("\"", "\\\"", StringComparison.Ordinal);
+        // cmd.exe / PowerShell の双方で、貼り付け後に単一引数として再解釈されるのは
+        // "" (ダブルクォート二重化) のみ。CRT 形式の \" エスケープは PowerShell の
+        // トークナイザーでは認識されず、引数が分裂する（実機検証済み）。
+        string escaped = value.Replace("\"", "\"\"", StringComparison.Ordinal);
         return $"\"{escaped}\"";
     }
 }

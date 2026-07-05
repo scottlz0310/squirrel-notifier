@@ -37,7 +37,19 @@ public class CommandLineFormatterTests
         string result = CommandLineFormatter.Format("claude", new[] { "-p", "say \"hello\" now" });
 
         // Assert
-        result.Should().Be("claude -p \"say \\\"hello\\\" now\"");
+        // "" (ダブルクォート二重化) は cmd.exe / PowerShell の双方で単一引数として
+        // 再解釈される（実機検証済み）。CRT 形式の \" は PowerShell では分裂する。
+        result.Should().Be("claude -p \"say \"\"hello\"\" now\"");
+    }
+
+    [Fact]
+    public void Format_ShouldQuoteEmbeddedQuotes_WithoutWhitespace()
+    {
+        // Act
+        string result = CommandLineFormatter.Format("claude", new[] { "-p", "hello\"world" });
+
+        // Assert
+        result.Should().Be("claude -p \"hello\"\"world\"");
     }
 
     [Fact]

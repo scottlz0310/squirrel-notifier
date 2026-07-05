@@ -869,6 +869,11 @@ internal sealed partial class MainWindow : Window
         {
             // superseded by a newer copy feedback; nothing to do
         }
+        catch (Exception ex)
+        {
+            // ウィンドウ終了中などで InfoBar 更新が失敗しても致命的ではないためログのみ
+            _ = _loggingService.WriteAsync($"Failed to hide copy feedback InfoBar: {ex.Message}");
+        }
     }
 
     private async Task ExecuteReviewAsync(Models.ReviewEvent reviewEvent)
