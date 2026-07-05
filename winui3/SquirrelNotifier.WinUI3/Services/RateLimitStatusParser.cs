@@ -11,7 +11,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal static class RateLimitStatusParser
 {
-    public static List<RateLimitInfo> Parse(string? json)
+    public static List<RateLimitInfo> Parse(string? json, string? sourceUri = null)
     {
         List<RateLimitInfo> limits = new();
         if (string.IsNullOrWhiteSpace(json))
@@ -32,11 +32,12 @@ internal static class RateLimitStatusParser
                 return limits;
             }
 
-            foreach (RateLimitInfo info in payload.Limits)
+            foreach (RateLimitInfo info in payload.Limits ?? [])
             {
                 try
                 {
                     info.Validate();
+                    info.SourceUri = sourceUri ?? string.Empty;
                     limits.Add(info);
                 }
                 catch (ArgumentException ex)

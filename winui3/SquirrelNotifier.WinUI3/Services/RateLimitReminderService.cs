@@ -42,7 +42,7 @@ internal sealed class RateLimitReminderService : IRateLimitReminderService, IDis
             delay = _maxDelay;
         }
 
-        _ = RunReminderAsync(id, label, delay, cts.Token);
+        _ = RunReminderAsync(id, label, delay, cts);
     }
 
     public void Cancel(string id)
@@ -65,18 +65,22 @@ internal sealed class RateLimitReminderService : IRateLimitReminderService, IDis
         _reminders.Clear();
     }
 
-    private async Task RunReminderAsync(string id, string label, TimeSpan delay, CancellationToken token)
+    private async Task RunReminderAsync(string id, string label, TimeSpan delay, CancellationTokenSource cts)
     {
         try
         {
-            await Task.Delay(delay, token).ConfigureAwait(false);
+            await Task.Delay(delay, cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             return;
         }
 
-        if (_reminders.TryRemove(id, out CancellationTokenSource? cts))
+        // id だけで削除すると、Task.Delay 完了と Cancel/再 Schedule が競合した際に
+        // 後から登録された新しい CancellationTokenSource を誤って取り除いてしまう。
+        // 値（CTS インスタンス）も一致する場合のみ削除することで、この取り違えを防ぐ。
+        var entry = new KeyValuePair<string, CancellationTokenSource>(id, cts);
+        if (((ICollection<KeyValuePair<string, CancellationTokenSource>>)_reminders).Remove(entry))
         {
             cts.Dispose();
             _notificationService.NotifyRateLimitReset(label);

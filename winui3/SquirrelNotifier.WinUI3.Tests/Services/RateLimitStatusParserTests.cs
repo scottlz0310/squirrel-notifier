@@ -45,11 +45,25 @@ public class RateLimitStatusParserTests
     [InlineData(null)]
     [InlineData("not a json")]
     [InlineData("{\"limits\":[]}")]
+    [InlineData("{\"limits\":null}")]
     [InlineData("{\"other\":\"field\"}")]
     public void Parse_InvalidOrEmptyJson_ShouldReturnEmptyList(string? json)
     {
         List<RateLimitInfo> result = RateLimitStatusParser.Parse(json);
 
         result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Parse_WithSourceUri_ShouldSetSourceUriOnEachEntry()
+    {
+        const string SourceUri = "ratelimit://status/claude";
+        string json = "{\"limits\":[{\"id\":\"5h\",\"label\":\"5時間制限\",\"resetAt\":\"2026-07-05T20:00:00Z\"}]}";
+
+        List<RateLimitInfo> result = RateLimitStatusParser.Parse(json, SourceUri);
+
+        result.Should().ContainSingle();
+        result[0].SourceUri.Should().Be(SourceUri);
+        result[0].ReminderKey.Should().Be($"{SourceUri}:5h");
     }
 }

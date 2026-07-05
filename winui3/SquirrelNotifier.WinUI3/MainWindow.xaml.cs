@@ -625,7 +625,7 @@ internal sealed partial class MainWindow : Window
             try
             {
                 string json = await probe.ReadResourceTextAsync(endpoint, token, uri, CancellationToken.None).ConfigureAwait(true);
-                fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json));
+                fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, uri));
             }
             catch (Exception ex)
             {
@@ -637,7 +637,7 @@ internal sealed partial class MainWindow : Window
         _rateLimits.Clear();
         foreach (Models.RateLimitInfo info in fetchedLimits)
         {
-            info.IsReminderScheduled = _rateLimitReminderService.IsScheduled(info.Id);
+            info.IsReminderScheduled = _rateLimitReminderService.IsScheduled(info.ReminderKey);
             _rateLimits.Add(info);
         }
     }
@@ -651,12 +651,12 @@ internal sealed partial class MainWindow : Window
 
         if (info.IsReminderScheduled)
         {
-            _rateLimitReminderService.Cancel(info.Id);
+            _rateLimitReminderService.Cancel(info.ReminderKey);
             info.IsReminderScheduled = false;
         }
         else
         {
-            _rateLimitReminderService.Schedule(info.Id, info.Label, info.ResetAt);
+            _rateLimitReminderService.Schedule(info.ReminderKey, info.Label, info.ResetAt);
             info.IsReminderScheduled = true;
         }
     }

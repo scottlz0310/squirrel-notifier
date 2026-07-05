@@ -22,6 +22,14 @@ internal sealed class RateLimitInfo : INotifyPropertyChanged
     public DateTimeOffset ResetAt { get; set; }
 
     [JsonIgnore]
+    public string SourceUri { get; set; } = string.Empty;
+
+    // 複数の ratelimit:// URI を同時に扱う場合、異なるリソース間で Id が衝突すると
+    // リマインダー予約が相互に上書きされるため、URI を含めたキーで一意化する。
+    [JsonIgnore]
+    public string ReminderKey => $"{SourceUri}:{Id}";
+
+    [JsonIgnore]
     public bool IsReminderScheduled
     {
         get => _isReminderScheduled;
