@@ -33,6 +33,9 @@ internal sealed class ReviewEvent
     [JsonIgnore]
     public DateTime ReceivedTime { get; set; } = DateTime.Now;
 
+    [JsonIgnore]
+    public string PrCaption => $"{Repository} #{PrNumber}";
+
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(EventId))

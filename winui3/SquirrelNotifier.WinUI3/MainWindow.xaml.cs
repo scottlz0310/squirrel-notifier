@@ -856,7 +856,7 @@ internal sealed partial class MainWindow : Window
 
     private void OnOpenPrClick(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && button.CommandParameter is string url)
+        if (sender is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase button && button.CommandParameter is string url)
         {
             if (Helpers.UrlValidator.IsSafeGitHubUrl(url))
             {

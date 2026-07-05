@@ -181,12 +181,15 @@
                                 <Grid ColumnDefinitions="*,Auto" Margin="0,2,0,2">
                                     <StackPanel Grid.Column="0" Spacing="2">
                                         <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap" FontWeight="Medium"/>
-                                        <TextBlock Text="{x:Bind Repository}" FontSize="11" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
+                                        <HyperlinkButton Content="{x:Bind PrCaption}"
+                                                         AutomationProperties.Name="PRを開く"
+                                                         Click="OnOpenPrClick"
+                                                         CommandParameter="{x:Bind PrUrl}"
+                                                         FontSize="11"
+                                                         Padding="0"
+                                                         HorizontalAlignment="Left"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                        <Button Content="PRを開く"
-                                                Click="OnOpenPrClick"
-                                                CommandParameter="{x:Bind PrUrl}"/>
                                         <Button Content="レビュー起動"
                                                 Click="OnLaunchReviewClick"
                                                 CommandParameter="{x:Bind}"/>
