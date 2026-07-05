@@ -87,6 +87,23 @@ internal sealed class NotificationService : INotificationService
         }
     }
 
+    public void NotifyRateLimitReset(string label)
+    {
+        try
+        {
+            AppNotificationBuilder builder = new AppNotificationBuilder()
+                .AddText("レートリミット解除")
+                .AddText($"{label} の制限が解除されました。");
+
+            AppNotification notification = builder.BuildNotification();
+            AppNotificationManager.Default.Show(notification);
+        }
+        catch
+        {
+            // Fallback could be added here
+        }
+    }
+
     private void OnNotificationInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
     {
         if (args.Arguments.TryGetValue("action", out string? action))

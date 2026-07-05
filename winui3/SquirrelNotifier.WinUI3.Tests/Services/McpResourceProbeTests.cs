@@ -125,6 +125,46 @@ public sealed class McpResourceProbeTests
     }
 
     [Fact]
+    public async Task ReadResourceTextAsync_ReturnsTextContent()
+    {
+        const string ResourceUri = "ratelimit://status/claude";
+        const string ExpectedJson = "{\"limits\":[{\"id\":\"5h\",\"label\":\"5時間制限\",\"resetAt\":\"2026-07-05T20:00:00Z\"}]}";
+        var handler = new SequencedMcpHandler("session-005", []) { ReadResourceText = ExpectedJson };
+        using var httpClient = new HttpClient(handler, disposeHandler: false);
+        var probe = new McpResourceProbe(() => httpClient);
+
+        string result = await probe.ReadResourceTextAsync(
+            new Uri("http://localhost:12345/mcp"),
+            null,
+            ResourceUri,
+            CancellationToken.None);
+
+        result.Should().Be(ExpectedJson);
+    }
+
+    [Fact]
+    public async Task ReadResourceTextAsync_WithBearerToken_SendsAuthorizationHeader()
+    {
+        const string Token = "test-bearer-token";
+        var handler = new SequencedMcpHandler("session-006", []) { ReadResourceText = "{}" };
+        using var httpClient = new HttpClient(handler, disposeHandler: false);
+        var probe = new McpResourceProbe(() => httpClient);
+
+        await probe.ReadResourceTextAsync(
+            new Uri("http://localhost:12345/mcp"),
+            Token,
+            "ratelimit://status/claude",
+            CancellationToken.None);
+
+        handler.Captured
+            .Where(c => c.Request.Method == HttpMethod.Post)
+            .Should().AllSatisfy(c =>
+                c.Request.Headers.Authorization.Should().NotBeNull()
+                    .And.Subject.As<System.Net.Http.Headers.AuthenticationHeaderValue>()
+                    .Parameter.Should().Be(Token));
+    }
+
+    [Fact]
     public void GetUserMessage_WithCancellationException_ReturnsCancelMessage()
     {
         string msg = McpResourceProbe.GetUserMessage(new OperationCanceledException("cancelled"));
@@ -184,6 +224,8 @@ public sealed class McpResourceProbeTests
 
         public IReadOnlyList<(string Method, HttpRequestMessage Request)> Captured => _captured;
 
+        public string ReadResourceText { get; init; } = string.Empty;
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -201,6 +243,7 @@ public sealed class McpResourceProbeTests
                 "initialize" => CreateInitializeResponse(id),
                 "notifications/initialized" => new HttpResponseMessage(HttpStatusCode.Accepted),
                 "resources/list" => CreateResourcesListResponse(id),
+                "resources/read" => CreateResourcesReadResponse(id, body),
                 _ => new HttpResponseMessage(HttpStatusCode.NoContent),
             };
         }
@@ -264,6 +307,45 @@ public sealed class McpResourceProbeTests
             HttpResponseMessage response = new(HttpStatusCode.OK);
             response.Content = new StringContent(json, Encoding.UTF8, "application/json");
             return response;
+        }
+
+        private HttpResponseMessage CreateResourcesReadResponse(int id, string requestBody)
+        {
+            string requestedUri = ExtractRequestedUri(requestBody);
+            var payload = new
+            {
+                jsonrpc = "2.0",
+                id,
+                result = new
+                {
+                    contents = new[]
+                    {
+                        new { uri = requestedUri, mimeType = "application/json", text = ReadResourceText },
+                    },
+                },
+            };
+            string json = JsonSerializer.Serialize(payload);
+            HttpResponseMessage response = new(HttpStatusCode.OK);
+            response.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            return response;
+        }
+
+        private static string ExtractRequestedUri(string body)
+        {
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("params", out JsonElement paramsEl) &&
+                    paramsEl.TryGetProperty("uri", out JsonElement uriEl))
+                {
+                    return uriEl.GetString() ?? string.Empty;
+                }
+            }
+            catch (JsonException)
+            {
+            }
+
+            return string.Empty;
         }
     }
 }
