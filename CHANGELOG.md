@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Recent review events の各行に ✕（片付ける）ボタンを追加し、対応が完了した PR のイベントを一覧から除去できるようにした。除去は行（eventId）単位で、同一 PR の後続イベントは通常どおり表示される。イベント一覧はアプリ再起動時に復元されないため片付け状態の永続化は行わない（#128）
+
 ### Changed
 - Recent review events のイベント行キャプションに PR 番号を表示するようにした（`owner/repo #123` 形式）。キャプションは `HyperlinkButton` になり、クリックで PR を直接開ける（URL は既存の `UrlValidator.IsSafeGitHubUrl` で検証）。これに伴い行の「PRを開く」ボタンは削除し、行 UI のボタン過密を緩和した（#129）
 
