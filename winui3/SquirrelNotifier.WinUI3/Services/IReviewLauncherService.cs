@@ -15,4 +15,6 @@ internal interface IReviewLauncherService
     Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, CancellationToken cancellationToken);
 
     void Cancel();
+
+    string BuildCommandLine(ReviewEvent reviewEvent);
 }
