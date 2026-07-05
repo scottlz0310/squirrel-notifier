@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- 起動ロールの設定切替を廃止し、イベント行で両ロールのアクションを提供するようにした（#127）
+  - Settings の「起動ロール」ラジオボタンと settings.json の `launcherRole` を削除。ランチャースロットは「どのボタンを押したか」だけで決まるため、`re-review-requests` の reviewer 強制ロジックも不要になり削除
+  - イベント行のアクションを「レビューする」（reviewer スロット起動）と「レビューに対応」（reviewed スロット起動）の 2 つの `SplitButton` に集約。primary クリックで起動、flyout の「コマンドをコピー」で従来どおり起動コマンドをクリップボードへコピーできる
+  - トースト通知の起動ボタンは推奨ロールに基づき「レビューする」（reviewer）を表示する。現行の購読イベント（`opened` / `synchronized` / `re-review-requested`）はいずれも次のアクションが reviewer side のため。reviewed side を推奨するイベント種別（レビューが投稿された等）は queue に未定義のため、未知の reason では起動ボタンを出さず「アプリを開く」で行 UI へ誘導する
+
 ### Added
 - Recent review events の各行に ✕（片付ける）ボタンを追加し、対応が完了した PR のイベントを一覧から除去できるようにした。除去は行（eventId）単位で、同一 PR の後続イベントは通常どおり表示される。イベント一覧はアプリ再起動時に復元されないため片付け状態の永続化は行わない（#128）
 

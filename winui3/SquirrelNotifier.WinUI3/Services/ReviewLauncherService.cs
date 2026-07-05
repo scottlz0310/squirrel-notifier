@@ -44,7 +44,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         _processRunner = processRunner ?? new ProcessRunner();
     }
 
-    public async Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, CancellationToken cancellationToken)
+    public async Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
 
@@ -62,10 +62,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             _isRunning = true;
         }
 
-        await LogAsync($"User requested review execution for PR: {reviewEvent.Repository}#{reviewEvent.PrNumber}").ConfigureAwait(false);
+        await LogAsync($"User requested review execution for PR: {reviewEvent.Repository}#{reviewEvent.PrNumber} (role={role})").ConfigureAwait(false);
 
         AppSettings settings = _settingsService.Settings;
-        (string commandPath, string argumentsTemplate) = ResolveLauncherSlot(settings, reviewEvent);
+        (string commandPath, string argumentsTemplate) = ResolveLauncherSlot(settings, role);
         int timeoutMs = settings.LauncherTimeoutMs;
 
         _activeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -179,25 +179,23 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     // コマンド文字列を組み立てる（クリップボードコピー用）。コマンドパスは
     // ResolveCommandPath で解決した絶対パスではなく、設定値そのもの（例: "claude"）を使う。
     // ユーザーが自分のターミナルへ貼り付けて実行する用途では、そちらの方が可搬性が高く分かりやすいため。
-    public string BuildCommandLine(ReviewEvent reviewEvent)
+    public string BuildCommandLine(ReviewEvent reviewEvent, LauncherRole role)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
 
         AppSettings settings = _settingsService.Settings;
-        (string commandPath, string argumentsTemplate) = ResolveLauncherSlot(settings, reviewEvent);
+        (string commandPath, string argumentsTemplate) = ResolveLauncherSlot(settings, role);
         System.Collections.Generic.List<string> args = LauncherArgumentBuilder.BuildArguments(argumentsTemplate, reviewEvent);
 
         return CommandLineFormatter.Format(commandPath, args);
     }
 
-    // re-review-requests URI は常に reviewer スロット、queue URI は LauncherRole で切り替え
-    private static (string CommandPath, string ArgumentsTemplate) ResolveLauncherSlot(AppSettings settings, ReviewEvent reviewEvent)
+    // スロットはユーザーが押したアクションのロールだけで決まる（#127）
+    private static (string CommandPath, string ArgumentsTemplate) ResolveLauncherSlot(AppSettings settings, LauncherRole role)
     {
-        bool useReviewer = reviewEvent.Source.Contains("re-review-requests", StringComparison.OrdinalIgnoreCase)
-            || settings.LauncherRole == "reviewer";
-        string commandPath = useReviewer ? settings.ReviewerLauncherCommandPath : settings.ReviewedLauncherCommandPath;
-        string argumentsTemplate = useReviewer ? settings.ReviewerLauncherArguments : settings.ReviewedLauncherArguments;
-        return (commandPath, argumentsTemplate);
+        return role == LauncherRole.Reviewer
+            ? (settings.ReviewerLauncherCommandPath, settings.ReviewerLauncherArguments)
+            : (settings.ReviewedLauncherCommandPath, settings.ReviewedLauncherArguments);
     }
 
     private void KillActiveProcess()

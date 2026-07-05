@@ -40,7 +40,7 @@
                   HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Stretch">
             <ScrollViewer MaxHeight="240">
-                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                       ColumnDefinitions="Auto,*"
                       RowSpacing="8"
                       ColumnSpacing="8"
@@ -75,36 +75,28 @@
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Timeout (ms):" VerticalAlignment="Center"/>
                     <NumberBox Grid.Row="4" Grid.Column="1" x:Name="TimeoutBox" Minimum="1" Maximum="300000" ValueChanged="OnTimeoutChanged"/>
 
-                    <TextBlock Grid.Row="5" Grid.Column="0" Text="起動ロール:" VerticalAlignment="Center"/>
-                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="16">
-                        <RadioButton x:Name="ReviewerRoleRadio" Content="reviewer（レビュアー）"
-                                     GroupName="LauncherRole" Checked="OnLauncherRoleChanged"/>
-                        <RadioButton x:Name="ReviewedRoleRadio" Content="reviewed（実装者）"
-                                     GroupName="LauncherRole" Checked="OnLauncherRoleChanged"/>
-                    </StackPanel>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Reviewer Path:" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="5" Grid.Column="1" x:Name="ReviewerPathBox" TextChanged="OnSettingChanged"/>
 
-                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Reviewer Path:" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="6" Grid.Column="1" x:Name="ReviewerPathBox" TextChanged="OnSettingChanged"/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Reviewer Args:" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="6" Grid.Column="1" x:Name="ReviewerArgumentsBox" TextChanged="OnSettingChanged"/>
 
-                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Reviewer Args:" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="7" Grid.Column="1" x:Name="ReviewerArgumentsBox" TextChanged="OnSettingChanged"/>
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Reviewed Path:" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="7" Grid.Column="1" x:Name="ReviewedPathBox" TextChanged="OnSettingChanged"/>
 
-                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Reviewed Path:" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="8" Grid.Column="1" x:Name="ReviewedPathBox" TextChanged="OnSettingChanged"/>
+                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Reviewed Args:" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="8" Grid.Column="1" x:Name="ReviewedArgumentsBox" TextChanged="OnSettingChanged"/>
 
-                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Reviewed Args:" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="9" Grid.Column="1" x:Name="ReviewedArgumentsBox" TextChanged="OnSettingChanged"/>
+                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Launcher Timeout:" VerticalAlignment="Center"/>
+                    <NumberBox Grid.Row="9" Grid.Column="1" x:Name="LauncherTimeoutBox" Minimum="1" Maximum="300000" ValueChanged="OnTimeoutChanged"/>
 
-                    <TextBlock Grid.Row="10" Grid.Column="0" Text="Launcher Timeout:" VerticalAlignment="Center"/>
-                    <NumberBox Grid.Row="10" Grid.Column="1" x:Name="LauncherTimeoutBox" Minimum="1" Maximum="300000" ValueChanged="OnTimeoutChanged"/>
-
-                    <TextBlock Grid.Row="11" Grid.Column="0" Text="自動起動:" VerticalAlignment="Center"/>
-                    <ToggleSwitch Grid.Row="11" Grid.Column="1" x:Name="AutoStartToggle"
+                    <TextBlock Grid.Row="10" Grid.Column="0" Text="自動起動:" VerticalAlignment="Center"/>
+                    <ToggleSwitch Grid.Row="10" Grid.Column="1" x:Name="AutoStartToggle"
                                   OnContent="有効" OffContent="無効"
                                   Toggled="OnAutoStartToggled"/>
 
-                    <TextBlock Grid.Row="12" Grid.Column="0" Text="タスク状態:" VerticalAlignment="Center"/>
-                    <StackPanel Grid.Row="12" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Grid.Row="11" Grid.Column="0" Text="タスク状態:" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="11" Grid.Column="1" Orientation="Horizontal" Spacing="8">
                         <TextBlock x:Name="AutoStartStatusText" VerticalAlignment="Center" Text="確認中..."/>
                         <Button x:Name="RepairAutoStartButton" Content="修復" Click="OnRepairAutoStartClick" IsEnabled="False"/>
                     </StackPanel>
@@ -190,12 +182,30 @@
                                                          HorizontalAlignment="Left"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                        <Button Content="レビュー起動"
-                                                Click="OnLaunchReviewClick"
-                                                CommandParameter="{x:Bind}"/>
-                                        <Button Content="コマンドをコピー"
-                                                Click="OnCopyLaunchCommandClick"
-                                                CommandParameter="{x:Bind}"/>
+                                        <SplitButton Content="レビューする"
+                                                     AutomationProperties.Name="reviewer としてレビューを起動"
+                                                     Click="OnLaunchReviewerClick"
+                                                     CommandParameter="{x:Bind}">
+                                            <SplitButton.Flyout>
+                                                <MenuFlyout Placement="Bottom">
+                                                    <MenuFlyoutItem Text="コマンドをコピー"
+                                                                    Click="OnCopyReviewerCommandClick"
+                                                                    CommandParameter="{x:Bind}"/>
+                                                </MenuFlyout>
+                                            </SplitButton.Flyout>
+                                        </SplitButton>
+                                        <SplitButton Content="レビューに対応"
+                                                     AutomationProperties.Name="reviewed としてレビュー対応を起動"
+                                                     Click="OnLaunchReviewedClick"
+                                                     CommandParameter="{x:Bind}">
+                                            <SplitButton.Flyout>
+                                                <MenuFlyout Placement="Bottom">
+                                                    <MenuFlyoutItem Text="コマンドをコピー"
+                                                                    Click="OnCopyReviewedCommandClick"
+                                                                    CommandParameter="{x:Bind}"/>
+                                                </MenuFlyout>
+                                            </SplitButton.Flyout>
+                                        </SplitButton>
                                         <Button AutomationProperties.Name="イベントを片付ける"
                                                 ToolTipService.ToolTip="このイベントを一覧から片付ける"
                                                 Click="OnDismissEventClick"

@@ -12,9 +12,9 @@ internal interface IReviewLauncherService
 {
     bool IsRunning { get; }
 
-    Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, CancellationToken cancellationToken);
+    Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken);
 
     void Cancel();
 
-    string BuildCommandLine(ReviewEvent reviewEvent);
+    string BuildCommandLine(ReviewEvent reviewEvent, LauncherRole role);
 }

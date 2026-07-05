@@ -50,7 +50,14 @@ internal sealed class NotificationService : INotificationService
         }
     }
 
-    public event EventHandler<string>? LaunchReviewRequested;
+    public event EventHandler<LaunchReviewRequest>? LaunchReviewRequested;
+
+    // 現行の購読イベント（opened / synchronized / re-review-requested）はいずれも
+    // 「次のアクションは reviewer side（レビューする）」に対応する（#127 決定事項 3）。
+    // reviewed side を推奨するイベント種別（レビューが投稿された等）は queue に未定義のため、
+    // 未知の reason では起動ボタンを出さず「アプリを開く」で両ロールの行 UI へ誘導する。
+    private static bool IsReviewerRecommended(string reason)
+        => reason is "opened" or "synchronized" or "re-review-requested";
 
     public void NotifyReviewEvent(ReviewEvent reviewEvent)
     {
@@ -69,9 +76,13 @@ internal sealed class NotificationService : INotificationService
                     .AddArgument("url", reviewEvent.PrUrl));
             }
 
-            builder.AddButton(new AppNotificationButton("レビューを起動")
-                .AddArgument("action", "launchReview")
-                .AddArgument("eventId", reviewEvent.EventId));
+            if (IsReviewerRecommended(reviewEvent.Reason))
+            {
+                builder.AddButton(new AppNotificationButton("レビューする")
+                    .AddArgument("action", "launchReview")
+                    .AddArgument("role", "reviewer")
+                    .AddArgument("eventId", reviewEvent.EventId));
+            }
 
             builder.AddButton(new AppNotificationButton("アプリを開く")
                 .AddArgument("action", "openApp"));
@@ -127,7 +138,11 @@ internal sealed class NotificationService : INotificationService
             {
                 if (!string.IsNullOrEmpty(eventId))
                 {
-                    LaunchReviewRequested?.Invoke(this, eventId);
+                    // role 引数を持たない旧形式の通知（アプリ更新前に表示されたもの）は reviewer として扱う
+                    LauncherRole role = args.Arguments.TryGetValue("role", out string? roleValue) && roleValue == "reviewed"
+                        ? LauncherRole.Reviewed
+                        : LauncherRole.Reviewer;
+                    LaunchReviewRequested?.Invoke(this, new LaunchReviewRequest(eventId, role));
                 }
             }
             else if (action == "openApp")

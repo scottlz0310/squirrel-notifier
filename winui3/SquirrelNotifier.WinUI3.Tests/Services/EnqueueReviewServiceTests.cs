@@ -133,7 +133,7 @@ public class EnqueueReviewServiceTests : IDisposable
         _settingsService.UpdateSettings(
             "mcp-resource-subscriber", "--skip-resource-list-check",
             "http://localhost:3000", new[] { "queue://review/queue" }, 30000,
-            "claude", "-p test", "claude", "-p test", "reviewer", 300000);
+            "claude", "-p test", "claude", "-p test", 300000);
 
         Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
         Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();

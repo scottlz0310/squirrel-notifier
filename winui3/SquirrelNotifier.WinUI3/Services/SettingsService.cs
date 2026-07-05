@@ -225,7 +225,6 @@ internal sealed class SettingsService
         string reviewerLauncherArguments,
         string reviewedLauncherCommandPath,
         string reviewedLauncherArguments,
-        string launcherRole,
         int launcherTimeoutMs)
     {
         if (string.IsNullOrWhiteSpace(commandPath))
@@ -259,11 +258,6 @@ internal sealed class SettingsService
             throw new ArgumentException("Reviewed launcher command path cannot be empty", nameof(reviewedLauncherCommandPath));
         }
 
-        if (launcherRole != "reviewer" && launcherRole != "reviewed")
-        {
-            throw new ArgumentException("Launcher role must be 'reviewer' or 'reviewed'", nameof(launcherRole));
-        }
-
         if (launcherTimeoutMs <= 0 || launcherTimeoutMs > 300000)
         {
             throw new ArgumentOutOfRangeException(nameof(launcherTimeoutMs), "Launcher timeout must be between 1 and 300000 ms");
@@ -279,7 +273,6 @@ internal sealed class SettingsService
         _settings.ReviewerLauncherArguments = reviewerLauncherArguments;
         _settings.ReviewedLauncherCommandPath = reviewedLauncherCommandPath;
         _settings.ReviewedLauncherArguments = reviewedLauncherArguments;
-        _settings.LauncherRole = launcherRole;
         _settings.LauncherTimeoutMs = launcherTimeoutMs;
         SaveSettings();
     }
@@ -314,9 +307,6 @@ internal sealed class AppSettings
     public string ReviewedLauncherCommandPath { get; set; } = "claude";
 
     public string ReviewedLauncherArguments { get; set; } = "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
-
-    // queue://review/queue に対して使うロール ("reviewer" | "reviewed")
-    public string LauncherRole { get; set; } = "reviewer";
 
     public bool LauncherSlotsMigrated { get; set; }
 
