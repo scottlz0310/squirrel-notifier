@@ -11,6 +11,8 @@ internal interface INotificationService
 
     void NotifyReviewEvent(ReviewEvent reviewEvent);
 
+    void NotifyRateLimitReset(string label);
+
     event System.EventHandler<ReviewEvent>? ReviewEventReceived;
 
     event System.EventHandler? OpenAppRequested;

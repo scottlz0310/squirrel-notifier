@@ -23,6 +23,7 @@ public partial class App : Application
     private readonly ReviewLauncherService _launcherService;
     private readonly TaskSchedulerService _taskSchedulerService = new();
     private readonly EnqueueReviewService _enqueueReviewService;
+    private readonly RateLimitReminderService _rateLimitReminderService;
 
     public App()
     {
@@ -59,6 +60,7 @@ public partial class App : Application
         _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
         _enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
+        _rateLimitReminderService = new RateLimitReminderService(_notificationService);
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -67,7 +69,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, _rateLimitReminderService, showWindow);
         _window.Closed += OnWindowClosed;
 
         _window.Activate();
@@ -88,6 +90,7 @@ public partial class App : Application
         _notificationService.OpenAppRequested -= OnOpenAppRequested;
         _subscriptionService.DisposeAsync().AsTask().ConfigureAwait(false);
         _autoUpdateService.Dispose();
+        _rateLimitReminderService.Dispose();
     }
 
     private void OnReactivated(object? sender, Microsoft.Windows.AppLifecycle.AppActivationArguments e)

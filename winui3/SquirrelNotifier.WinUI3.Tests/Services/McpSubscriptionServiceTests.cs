@@ -1148,6 +1148,92 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Start_WithRateLimitUriMixedIn_ShouldExcludeItFromContinuousSubscription()
+    {
+        // Arrange: ratelimit:// は手動 resources/read 専用であり、常時購読対象に含めてはならない
+        _settingsService.UpdateSettings(
+            "my-cmd", "", "http://gateway:80",
+            new[] { "queue://uri-one", "ratelimit://status/claude" },
+            30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var launchedUris = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var startedTcs = new TaskCompletionSource();
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                int uriIndex = new List<string>(psi.ArgumentList).IndexOf("--uri");
+                if (uriIndex >= 0 && uriIndex + 1 < psi.ArgumentList.Count)
+                {
+                    launchedUris.Add(psi.ArgumentList[uriIndex + 1]);
+                    startedTcs.TrySetResult();
+                }
+
+                var mock = new Mock<IProcessInstance>();
+                mock.SetupGet(p => p.ExitCode).Returns(0);
+                mock.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Array.Empty<byte>())));
+                mock.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Array.Empty<byte>())));
+                mock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                    .Returns<CancellationToken>(ct => Task.Delay(Timeout.Infinite, ct));
+                return mock.Object;
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+
+        // Act
+        service.Start();
+        await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync();
+
+        // Assert: queue:// のみ起動され、ratelimit:// は購読対象から除外される
+        launchedUris.Should().Contain("queue://uri-one");
+        launchedUris.Should().NotContain("ratelimit://status/claude");
+    }
+
+    [Fact]
+    public async Task Start_WithOnlyRateLimitUris_ShouldNotLaunchAnyProcessAndStayRunning()
+    {
+        // Arrange: 全 URI が ratelimit:// の場合、常時購読対象が空になる
+        _settingsService.UpdateSettings(
+            "my-cmd", "", "http://gateway:80",
+            new[] { "ratelimit://status/claude" },
+            30000, "review-raven", "", "review-raven", "", "reviewer", 300000);
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                throw new InvalidOperationException("ratelimit:// URI に対してプロセスが起動されるべきではありません。");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        runMethod.Should().NotBeNull();
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert
+        service.State.Should().Be(SubscriptionState.Running);
+    }
+
+    [Fact]
     public async Task StopAsync_WithMultipleResourceUris_ShouldStopAllLoopsPromptly()
     {
         // Arrange: 2つの URI を設定し、両ループがバックオフ待機中に StopAsync を呼ぶ

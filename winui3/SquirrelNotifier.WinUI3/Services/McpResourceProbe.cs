@@ -22,6 +22,59 @@ internal sealed class McpResourceProbe
         string? bearerToken,
         CancellationToken cancellationToken)
     {
+        return await WithClientAsync(
+            endpoint,
+            bearerToken,
+            async (client, ct) =>
+            {
+                IList<McpClientResource> resources = await client.ListResourcesAsync((ModelContextProtocol.RequestOptions?)null, ct).ConfigureAwait(false);
+
+                List<string> uris = new(resources.Count);
+                foreach (McpClientResource resource in resources)
+                {
+                    if (!string.IsNullOrEmpty(resource.Uri))
+                    {
+                        uris.Add(resource.Uri);
+                    }
+                }
+
+                return (IReadOnlyList<string>)uris.AsReadOnly();
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<string> ReadResourceTextAsync(
+        Uri endpoint,
+        string? bearerToken,
+        string resourceUri,
+        CancellationToken cancellationToken)
+    {
+        return await WithClientAsync(
+            endpoint,
+            bearerToken,
+            async (client, ct) =>
+            {
+                ReadResourceResult result = await client.ReadResourceAsync(new Uri(resourceUri), (ModelContextProtocol.RequestOptions?)null, ct).ConfigureAwait(false);
+
+                foreach (ResourceContents content in result.Contents)
+                {
+                    if (content is TextResourceContents textContent)
+                    {
+                        return textContent.Text;
+                    }
+                }
+
+                return string.Empty;
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<T> WithClientAsync<T>(
+        Uri endpoint,
+        string? bearerToken,
+        Func<McpClient, CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken)
+    {
         using HttpClient httpClient = _httpClientFactory();
 
         if (!string.IsNullOrEmpty(bearerToken))
@@ -42,18 +95,7 @@ internal sealed class McpResourceProbe
 
         await using McpClient client = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        IList<McpClientResource> resources = await client.ListResourcesAsync((ModelContextProtocol.RequestOptions?)null, cancellationToken).ConfigureAwait(false);
-
-        List<string> uris = new(resources.Count);
-        foreach (McpClientResource resource in resources)
-        {
-            if (!string.IsNullOrEmpty(resource.Uri))
-            {
-                uris.Add(resource.Uri);
-            }
-        }
-
-        return uris.AsReadOnly();
+        return await action(client, cancellationToken).ConfigureAwait(false);
     }
 
     internal static string GetUserMessage(Exception ex)

@@ -37,6 +37,8 @@ internal sealed partial class MainWindow : Window
     private readonly IReviewLauncherService _launcherService;
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly EnqueueReviewService _enqueueReviewService;
+    private readonly IRateLimitReminderService _rateLimitReminderService;
+    private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private bool _isCheckingForUpdates;
     private bool _hasShownErrorBalloon;
     private bool _isAutoStartToggling;
@@ -81,6 +83,7 @@ internal sealed partial class MainWindow : Window
         IReviewLauncherService launcherService,
         ITaskSchedulerService taskSchedulerService,
         EnqueueReviewService enqueueReviewService,
+        IRateLimitReminderService rateLimitReminderService,
         bool showWindow = true)
     {
         InitializeComponent();
@@ -103,13 +106,16 @@ internal sealed partial class MainWindow : Window
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
         _enqueueReviewService = enqueueReviewService;
+        _rateLimitReminderService = rateLimitReminderService;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
         _notificationService.ReviewEventReceived += OnReviewEventReceived;
         _notificationService.LaunchReviewRequested += OnLaunchReviewRequested;
+        _rateLimitReminderService.ReminderFired += OnRateLimitReminderFired;
         LogList.ItemsSource = _logEntries;
         ReviewEventList.ItemsSource = _reviewEvents;
+        RateLimitList.ItemsSource = _rateLimits;
 
         // Load settings
         AppSettings settings = _settingsService.Settings;
@@ -584,6 +590,88 @@ internal sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             await ShowAlertDialogAsync("取得エラー", Services.McpResourceProbe.GetUserMessage(ex));
+        }
+    }
+
+    private async void OnRefreshRateLimitClick(object sender, RoutedEventArgs e)
+    {
+        string gatewayUrl = GatewayUrlBox.Text;
+        if (!Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? endpoint))
+        {
+            await ShowAlertDialogAsync("設定エラー", "Gateway URL が正しくありません。先に Gateway URL を設定してください。");
+            return;
+        }
+
+        List<string> rateLimitUris = ResourceUrisBox.Text
+            .Split(_resourceUriLineSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(uri => uri.StartsWith(Services.RateLimitStatusParser.UriScheme, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (rateLimitUris.Count == 0)
+        {
+            await ShowAlertDialogAsync(
+                "URI 未設定",
+                $"{Services.RateLimitStatusParser.UriScheme} で始まる Resource URI が設定されていません。Resource URIs 欄に追加してください。");
+            return;
+        }
+
+        string? token = Environment.GetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN");
+        var probe = new Services.McpResourceProbe();
+        var fetchedLimits = new List<Models.RateLimitInfo>();
+
+        foreach (string uri in rateLimitUris)
+        {
+            try
+            {
+                string json = await probe.ReadResourceTextAsync(endpoint, token, uri, CancellationToken.None).ConfigureAwait(true);
+                fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, uri));
+            }
+            catch (Exception ex)
+            {
+                await ShowAlertDialogAsync("取得エラー", Services.McpResourceProbe.GetUserMessage(ex));
+                return;
+            }
+        }
+
+        _rateLimits.Clear();
+        foreach (Models.RateLimitInfo info in fetchedLimits)
+        {
+            info.IsReminderScheduled = _rateLimitReminderService.IsScheduled(info.ReminderKey);
+            _rateLimits.Add(info);
+        }
+    }
+
+    private void OnRateLimitReminderFired(object? sender, string reminderKey)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            foreach (Models.RateLimitInfo info in _rateLimits)
+            {
+                if (info.ReminderKey == reminderKey)
+                {
+                    info.IsReminderScheduled = false;
+                    break;
+                }
+            }
+        });
+    }
+
+    private void OnToggleRateLimitReminderClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.CommandParameter is not Models.RateLimitInfo info)
+        {
+            return;
+        }
+
+        if (info.IsReminderScheduled)
+        {
+            _rateLimitReminderService.Cancel(info.ReminderKey);
+            info.IsReminderScheduled = false;
+        }
+        else
+        {
+            _rateLimitReminderService.Schedule(info.ReminderKey, info.Label, info.ResetAt);
+            info.IsReminderScheduled = true;
         }
     }
 
