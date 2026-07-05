@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-05
+
 ### Fixed
 - mcp-resource-subscriber が `AUTH_LOGIN_REQUIRED`、`invalid_token` などの再認証を要するエラーを返した場合、汎用の接続エラーではなく「認証が必要です」と通知するように修正（#113）。レビュー対応として、認証必須バルーンの文言重複を解消し、非ゼロ終了時の例外メッセージに stdout / JSON パース失敗情報を含めて原因特定しやすくし、401 判定時のメッセージに `MCP_PROBE_AUTH_TOKEN` 設定不備の可能性も併記するように調整。さらに、serverUrl のポート番号や resourceUri のパスセグメントとして単独の `401` が現れるケースでも誤って認証エラーと分類されないよう、`GetErrorInfo` を構造化された `result.ErrorCode` 優先で判定する設計に変更。`RESOURCE_NOT_FOUND` 等の意味が確定した非認証コードのみホワイトリストで legacy マッチングをスキップし、`INTERNAL_ERROR` / `SUBSCRIPTION_FAILED` のような詳細不明な汎用コードでは stderr の認証エラー詳細を見逃さないよう legacy マッチングにフォールバックする。さらに、`SUBSCRIPTION_FAILED` は実際には詳細を握りつぶし JSON stdout に resourceUri 等の URL・URI のみを返す出力契約であるため、legacy マッチングの判定対象を stdout 全文ではなく stderr / result.FinalText のみの診断テキストに限定し、URI パスセグメントとしての `401` による誤判定も回避する（#120）
 - MSI を同一バージョンで再ビルドした場合でも、旧 ProductCode の製品を MajorUpgrade で置き換えるように修正。生成 MSI の Upgrade table を CI とリリース時に検証する回帰チェックも追加（#117）
