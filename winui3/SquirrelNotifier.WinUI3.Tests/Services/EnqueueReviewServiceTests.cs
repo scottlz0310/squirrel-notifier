@@ -60,18 +60,45 @@ public class EnqueueReviewServiceTests : IDisposable
         return mockProcess;
     }
 
+    // --version の既定モック（現行の最低要求バージョンを満たす）。call モード呼び出し前に
+    // EnqueueReviewService が必ず 1 回 --version を実行するため、全テストで必要。
+    private Mock<IProcessInstance> CreateVersionOkMockProcess()
+    {
+        return CreateMockProcess(0, "mcp-resource-subscriber v0.4.0", string.Empty);
+    }
+
+    private static Mock<IProcessRunner> CreateRunner(
+        Mock<IProcessInstance> callProcess,
+        Mock<IProcessInstance> versionProcess,
+        Action<ProcessStartInfo>? captureCallPsi = null)
+    {
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("--version"))))
+            .Returns(versionProcess.Object);
+
+        Moq.Language.Flow.ISetup<IProcessRunner, IProcessInstance> callSetup =
+            mockRunner.Setup(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("call"))));
+
+        if (captureCallPsi != null)
+        {
+            callSetup.Callback<ProcessStartInfo>(captureCallPsi);
+        }
+
+        callSetup.Returns(callProcess.Object);
+
+        return mockRunner;
+    }
+
     [Fact]
     public async Task EnqueueAsync_ShouldReturnSuccess_WhenExitCodeIsZero()
     {
         // Arrange
         var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
-        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
+        Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
         ProcessStartInfo? capturedPsi = null;
 
-        var mockRunner = new Mock<IProcessRunner>();
-        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
-            .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
-            .Returns(mockProcess.Object);
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess, psi => capturedPsi = psi);
 
         var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
 
@@ -86,6 +113,7 @@ public class EnqueueReviewServiceTests : IDisposable
         capturedPsi!.ArgumentList.Should().Contain("call");
         capturedPsi.ArgumentList.Should().Contain("--tool");
         capturedPsi.ArgumentList.Should().Contain("enqueue_review");
+        capturedPsi.ArgumentList[0].Should().Be("call"); // "call" は先頭 positional 引数である必要がある
 
         int argsIndex = capturedPsi.ArgumentList.IndexOf("--args");
         argsIndex.Should().BeGreaterThan(-1);
@@ -98,15 +126,45 @@ public class EnqueueReviewServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task EnqueueAsync_ShouldIncludeSubscriberArguments_BeforeUrlFlag()
+    {
+        // Arrange: 購読側と同じ固定引数（例: --skip-resource-list-check）を call モードにも引き継ぐ
+        var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
+        _settingsService.UpdateSettings(
+            "mcp-resource-subscriber", "--skip-resource-list-check",
+            "http://localhost:3000", new[] { "queue://review/queue" }, 30000,
+            "claude", "-p test", "claude", "-p test", "reviewer", 300000);
+
+        Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
+        ProcessStartInfo? capturedPsi = null;
+
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess, psi => capturedPsi = psi);
+
+        var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        await service.EnqueueAsync(reference, "opened", CancellationToken.None);
+
+        // Assert
+        capturedPsi.Should().NotBeNull();
+        capturedPsi!.ArgumentList[0].Should().Be("call");
+        capturedPsi.ArgumentList.Should().Contain("--skip-resource-list-check");
+        int flagIndex = capturedPsi.ArgumentList.IndexOf("--skip-resource-list-check");
+        int urlIndex = capturedPsi.ArgumentList.IndexOf("--url");
+        flagIndex.Should().BeLessThan(urlIndex);
+    }
+
+    [Fact]
     public async Task EnqueueAsync_ShouldReturnToolError_WhenExitCodeIsOne()
     {
         // Arrange (allowlist rejection surfaces as exit code 1 / TOOL_ERROR)
         var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
         string stdout = "{\"isError\":true,\"errorCode\":null,\"content\":[{\"type\":\"text\",\"text\":\"Repository scottlz0310/squirrel-notifier is not in the allowlist\"}]}";
-        Mock<IProcessInstance> mockProcess = CreateMockProcess(1, stdout, string.Empty);
+        Mock<IProcessInstance> callProcess = CreateMockProcess(1, stdout, string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
 
-        var mockRunner = new Mock<IProcessRunner>();
-        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
 
         var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
 
@@ -126,10 +184,10 @@ public class EnqueueReviewServiceTests : IDisposable
         // Arrange
         var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
         string stdout = "{\"isError\":true,\"errorCode\":\"AUTH_LOGIN_REQUIRED\",\"content\":null}";
-        Mock<IProcessInstance> mockProcess = CreateMockProcess(2, stdout, string.Empty);
+        Mock<IProcessInstance> callProcess = CreateMockProcess(2, stdout, string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
 
-        var mockRunner = new Mock<IProcessRunner>();
-        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
 
         var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
 
@@ -140,7 +198,30 @@ public class EnqueueReviewServiceTests : IDisposable
         result.Success.Should().BeFalse();
         result.ExitCode.Should().Be(2);
         result.IsAuthenticationRequired.Should().BeTrue();
-        result.ErrorMessage.Should().Contain("認証");
+        result.ErrorMessage.Should().Contain("--login");
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ShouldReturnAuthFailedGuidance_WhenErrorCodeIsAuthFailed()
+    {
+        // Arrange: AUTH_FAILED（明示指定した MCP_PROBE_AUTH_TOKEN が無効等）は --login では解消しない
+        var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
+        string stdout = "{\"isError\":true,\"errorCode\":\"AUTH_FAILED\",\"content\":[{\"type\":\"text\",\"text\":\"invalid_token\"}]}";
+        Mock<IProcessInstance> callProcess = CreateMockProcess(2, stdout, string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
+
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
+
+        var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        EnqueueReviewResult result = await service.EnqueueAsync(reference, "opened", CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.IsAuthenticationRequired.Should().BeTrue();
+        result.ErrorMessage.Should().Contain("MCP_PROBE_AUTH_TOKEN");
+        result.ErrorMessage.Should().NotContain("を実行して再認証してください");
     }
 
     [Fact]
@@ -148,10 +229,10 @@ public class EnqueueReviewServiceTests : IDisposable
     {
         // Arrange
         var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
-        Mock<IProcessInstance> mockProcess = CreateMockProcess(3, string.Empty, "fetch failed");
+        Mock<IProcessInstance> callProcess = CreateMockProcess(3, string.Empty, "fetch failed");
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
 
-        var mockRunner = new Mock<IProcessRunner>();
-        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
 
         var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
 
@@ -166,14 +247,58 @@ public class EnqueueReviewServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task EnqueueAsync_ShouldFailFast_WhenSubscriberVersionIsTooOld()
+    {
+        // Arrange: v0.3.0 は call サブコマンドを認識せず subscribe モードへフォールバックするため、
+        // 実際に call を試みる前に検出して拒否する。
+        var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
+        Mock<IProcessInstance> versionProcess = CreateMockProcess(0, "mcp-resource-subscriber v0.3.0", string.Empty);
+        Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
+
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
+
+        var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        EnqueueReviewResult result = await service.EnqueueAsync(reference, "opened", CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("v0.3.0");
+        result.ErrorMessage.Should().Contain("v0.4.0");
+        mockRunner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("call"))), Times.Never);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ShouldFailFast_WhenSubscriberVersionOutputIsUnparseable()
+    {
+        // Arrange
+        var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
+        Mock<IProcessInstance> versionProcess = CreateMockProcess(0, "unexpected output", string.Empty);
+        Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
+
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
+
+        var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        EnqueueReviewResult result = await service.EnqueueAsync(reference, "opened", CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("バージョンを確認できません");
+        mockRunner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("call"))), Times.Never);
+    }
+
+    [Fact]
     public async Task EnqueueAsync_ShouldSupportCancellation()
     {
         // Arrange
         var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
-        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Pending...", string.Empty, delayMs: 5000);
+        Mock<IProcessInstance> callProcess = CreateMockProcess(0, "Pending...", string.Empty, delayMs: 5000);
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
 
-        var mockRunner = new Mock<IProcessRunner>();
-        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
 
         var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
         using var cts = new CancellationTokenSource();
@@ -187,6 +312,6 @@ public class EnqueueReviewServiceTests : IDisposable
         // Assert
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("キャンセル");
-        mockProcess.Verify(p => p.Kill(true), Times.Once);
+        callProcess.Verify(p => p.Kill(true), Times.Once);
     }
 }

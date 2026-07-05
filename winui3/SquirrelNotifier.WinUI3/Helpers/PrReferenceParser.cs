@@ -10,7 +10,7 @@ using SquirrelNotifier.WinUI3.Models;
 namespace SquirrelNotifier.WinUI3.Helpers;
 
 /// <summary>
-/// GitHub PR URL または <c>owner/repo#number</c> 形式の入力を (owner, repo, prNumber) にパースする。.
+/// GitHub PR URL または <c>owner/repo#number</c> 形式の入力を (owner, repo, prNumber) にパースする.
 /// </summary>
 internal static class PrReferenceParser
 {

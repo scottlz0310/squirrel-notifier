@@ -117,8 +117,10 @@
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                     <TextBox Grid.Column="0"
                              x:Name="PrReferenceBox"
+                             AutomationProperties.Name="PR URL または owner/repo#123"
                              PlaceholderText="https://github.com/owner/repo/pull/123 または owner/repo#123"/>
-                    <ComboBox Grid.Column="1" x:Name="ReasonComboBox" MinWidth="180"/>
+                    <ComboBox Grid.Column="1" x:Name="ReasonComboBox" MinWidth="180"
+                              AutomationProperties.Name="レビュー開始理由（reason）"/>
                     <Button Grid.Column="2" x:Name="EnqueueReviewButton" Content="レビュー開始" Click="OnEnqueueReviewClick"/>
                 </Grid>
             </StackPanel>
