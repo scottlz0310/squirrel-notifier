@@ -22,6 +22,7 @@ public partial class App : Application
     private readonly AutoUpdateService _autoUpdateService;
     private readonly ReviewLauncherService _launcherService;
     private readonly TaskSchedulerService _taskSchedulerService = new();
+    private readonly EnqueueReviewService _enqueueReviewService;
 
     public App()
     {
@@ -57,6 +58,7 @@ public partial class App : Application
         _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, cacheService: _cacheService);
         _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
+        _enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -65,7 +67,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, showWindow);
         _window.Closed += OnWindowClosed;
 
         _window.Activate();

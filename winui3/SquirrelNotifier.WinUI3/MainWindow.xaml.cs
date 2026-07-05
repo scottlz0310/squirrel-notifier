@@ -35,6 +35,7 @@ internal sealed partial class MainWindow : Window
     private readonly INotificationService _notificationService;
     private readonly IReviewLauncherService _launcherService;
     private readonly ITaskSchedulerService _taskSchedulerService;
+    private readonly EnqueueReviewService _enqueueReviewService;
     private bool _isCheckingForUpdates;
     private bool _hasShownErrorBalloon;
     private bool _isAutoStartToggling;
@@ -77,6 +78,7 @@ internal sealed partial class MainWindow : Window
         INotificationService notificationService,
         IReviewLauncherService launcherService,
         ITaskSchedulerService taskSchedulerService,
+        EnqueueReviewService enqueueReviewService,
         bool showWindow = true)
     {
         InitializeComponent();
@@ -98,6 +100,7 @@ internal sealed partial class MainWindow : Window
         _notificationService = notificationService;
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
+        _enqueueReviewService = enqueueReviewService;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -122,6 +125,9 @@ internal sealed partial class MainWindow : Window
         ReviewerRoleRadio.IsChecked = settings.LauncherRole != "reviewed";
         ReviewedRoleRadio.IsChecked = settings.LauncherRole == "reviewed";
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
+
+        ReasonComboBox.ItemsSource = _enqueueReviewReasons;
+        ReasonComboBox.SelectedIndex = 0;
 
         _isInitializing = false;
 
@@ -483,6 +489,13 @@ internal sealed partial class MainWindow : Window
     [
         "queue://review/queue",
         "queue://review/re-review-requests",
+    ];
+
+    private static readonly string[] _enqueueReviewReasons =
+    [
+        "opened",
+        "synchronized",
+        "re-review-requested",
     ];
 
     private static readonly char[] _resourceUriLineSeparators = ['\r', '\n'];
@@ -906,6 +919,46 @@ internal sealed partial class MainWindow : Window
                 XamlRoot = Content.XamlRoot,
             };
             await errDialog.ShowAsync(ContentDialogPlacement.Popup);
+        }
+    }
+
+    private async void OnEnqueueReviewClick(object sender, RoutedEventArgs e)
+    {
+        string input = PrReferenceBox.Text;
+        if (!Helpers.PrReferenceParser.TryParse(input, out Models.PrReference? reference) || reference == null)
+        {
+            await ShowAlertDialogAsync(
+                "入力エラー",
+                "PR URL（https://github.com/owner/repo/pull/123）または owner/repo#123 の形式で入力してください。");
+            return;
+        }
+
+        string reason = ReasonComboBox.SelectedItem as string ?? "opened";
+
+        EnqueueReviewButton.IsEnabled = false;
+        try
+        {
+            Models.EnqueueReviewResult result = await _enqueueReviewService.EnqueueAsync(reference, reason, CancellationToken.None).ConfigureAwait(true);
+
+            if (result.Success)
+            {
+                string message = $"{reference.Owner}/{reference.Repo}#{reference.PrNumber} を reason={reason} で登録しました。";
+                if (_service.State != SubscriptionState.Running)
+                {
+                    message += "\n購読が停止中のため、通知は届きません。先に購読を開始してください。";
+                }
+
+                await ShowAlertDialogAsync("レビュー登録完了", message).ConfigureAwait(true);
+                PrReferenceBox.Text = string.Empty;
+            }
+            else
+            {
+                await ShowAlertDialogAsync("レビュー登録エラー", result.ErrorMessage).ConfigureAwait(true);
+            }
+        }
+        finally
+        {
+            EnqueueReviewButton.IsEnabled = true;
         }
     }
 

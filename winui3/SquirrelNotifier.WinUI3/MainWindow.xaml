@@ -8,7 +8,7 @@
     mc:Ignorable="d"
     Title="Squirrel Notifier">
     <Grid Padding="16"
-          RowDefinitions="Auto,Auto,*,Auto"
+          RowDefinitions="Auto,Auto,Auto,*,Auto"
           RowSpacing="12">
         <StackPanel Spacing="6">
             <TextBlock Text="Squirrel Notifier"
@@ -112,6 +112,25 @@
                 BorderThickness="1"
                 CornerRadius="8"
                 Padding="8">
+            <StackPanel Spacing="6">
+                <TextBlock Text="レビューを手動開始" FontWeight="SemiBold"/>
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                    <TextBox Grid.Column="0"
+                             x:Name="PrReferenceBox"
+                             AutomationProperties.Name="PR URL または owner/repo#123"
+                             PlaceholderText="https://github.com/owner/repo/pull/123 または owner/repo#123"/>
+                    <ComboBox Grid.Column="1" x:Name="ReasonComboBox" MinWidth="180"
+                              AutomationProperties.Name="レビュー開始理由（reason）"/>
+                    <Button Grid.Column="2" x:Name="EnqueueReviewButton" Content="レビュー開始" Click="OnEnqueueReviewClick"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="3"
+                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="8">
             <Grid RowDefinitions="*,*">
                 <StackPanel Grid.Row="0" Margin="0,0,0,8">
                     <TextBlock Text="Recent review events"
@@ -159,7 +178,7 @@
             </Grid>
         </Border>
 
-        <StackPanel Grid.Row="3"
+        <StackPanel Grid.Row="4"
                     Orientation="Horizontal"
                     Spacing="8"
                     VerticalAlignment="Center">
