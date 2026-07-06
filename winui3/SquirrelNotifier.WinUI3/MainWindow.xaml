@@ -195,6 +195,13 @@
                                         <Button Content="コマンドをコピー"
                                                 Click="OnCopyLaunchCommandClick"
                                                 CommandParameter="{x:Bind}"/>
+                                        <Button AutomationProperties.Name="イベントを片付ける"
+                                                ToolTipService.ToolTip="このイベントを一覧から片付ける"
+                                                Click="OnDismissEventClick"
+                                                CommandParameter="{x:Bind}"
+                                                Padding="6,4">
+                                            <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                                        </Button>
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>

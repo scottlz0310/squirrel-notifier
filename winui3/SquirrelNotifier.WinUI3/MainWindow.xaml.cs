@@ -854,6 +854,14 @@ internal sealed partial class MainWindow : Window
         });
     }
 
+    private void OnDismissEventClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.CommandParameter is Models.ReviewEvent reviewEvent)
+        {
+            _reviewEvents.Remove(reviewEvent);
+        }
+    }
+
     private void OnOpenPrClick(object sender, RoutedEventArgs e)
     {
         if (sender is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase button && button.CommandParameter is string url)
