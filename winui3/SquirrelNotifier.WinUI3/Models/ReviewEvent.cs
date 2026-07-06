@@ -34,7 +34,7 @@ internal sealed class ReviewEvent
     public DateTime ReceivedTime { get; set; } = DateTime.Now;
 
     [JsonIgnore]
-    public string PrCaption => $"{Repository} #{PrNumber}";
+    public string PrCaption => PrNumber > 0 ? $"{Repository} #{PrNumber}" : Repository;
 
     public void Validate()
     {

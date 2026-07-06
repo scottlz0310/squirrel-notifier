@@ -41,7 +41,17 @@ public partial class App : Application
         // 実行中プロセスで通知アクティベーションを受け取るには、NotificationInvoked の
         // 購読を Register() より前に行う必要がある（#130）。
         // https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/notifications/app-notifications/app-notifications-quickstart
-        _notificationService.Initialize();
+        try
+        {
+            _notificationService.Initialize();
+        }
+        catch (System.Runtime.InteropServices.COMException ex) when (ex.Message.Contains("Insights.Resource.dll", StringComparison.Ordinal))
+        {
+            // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題。
+            // Register() と同条件で発生しうるため、ここで捕捉せず起動クラッシュさせない。
+            _ = _loggingService.WriteAsync($"[WARN] NotificationService.Initialize() 失敗（{ex.HResult:X8}）: {ex.Message}");
+        }
+
         _notificationService.OpenAppRequested += OnOpenAppRequested;
 
         try
