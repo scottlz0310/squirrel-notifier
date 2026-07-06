@@ -240,6 +240,35 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void SettingsDirectory_ShouldReturnConstructorValue()
+    {
+        _settingsService.SettingsDirectory.Should().Be(_settingsDirectory);
+    }
+
+    [Fact]
+    public void UpdateRateLimitMonitoredAgentIds_ShouldUpdateAndPersist()
+    {
+        // Arrange
+        bool eventRaised = false;
+        _settingsService.SettingsChanged += (_, _) => eventRaised = true;
+
+        // Act
+        _settingsService.UpdateRateLimitMonitoredAgentIds(new[] { "claude-code", "agy" });
+
+        // Assert
+        _settingsService.Settings.RateLimitMonitoredAgentIds.Should().BeEquivalentTo(new[] { "claude-code", "agy" });
+        eventRaised.Should().BeTrue();
+
+        // Verify persistence
+        var anotherService = new SettingsService(_settingsDirectory, pnpmBinDir: string.Empty);
+        anotherService.Settings.RateLimitMonitoredAgentIds.Should().BeEquivalentTo(new[] { "claude-code", "agy" });
+    }
+
+    [Fact]
+    public void UpdateRateLimitMonitoredAgentIds_ShouldThrow_WhenNull()
+        => FluentActions.Invoking(() => _settingsService.UpdateRateLimitMonitoredAgentIds(null!)).Should().Throw<ArgumentNullException>();
+
+    [Fact]
     public void UpdateLastSkippedVersion_ShouldUpdateAndPersistVersion()
     {
         // Arrange

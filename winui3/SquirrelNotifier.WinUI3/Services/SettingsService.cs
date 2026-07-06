@@ -15,6 +15,8 @@ internal sealed class SettingsService
 
     public AppSettings Settings => _settings;
 
+    public string SettingsDirectory => _settingsDirectory;
+
     public event EventHandler? SettingsChanged;
 
     public SettingsService()
@@ -215,6 +217,13 @@ internal sealed class SettingsService
         SaveSettings();
     }
 
+    public void UpdateRateLimitMonitoredAgentIds(IReadOnlyList<string> agentIds)
+    {
+        ArgumentNullException.ThrowIfNull(agentIds);
+        _settings.RateLimitMonitoredAgentIds = new List<string>(agentIds);
+        SaveSettings();
+    }
+
     public void UpdateSettings(
         string commandPath,
         string arguments,
@@ -313,4 +322,8 @@ internal sealed class AppSettings
     public int LauncherTimeoutMs { get; set; } = 300000;
 
     public string LastSkippedVersion { get; set; } = string.Empty;
+
+    // ローカルの statusline スクリプトがレートリミット状態を書き出すエージェント ID
+    // （RateLimitAgentCatalog 参照）のうち、監視対象として選択されているもの
+    public List<string> RateLimitMonitoredAgentIds { get; set; } = new();
 }

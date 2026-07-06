@@ -133,6 +133,21 @@
                     <TextBlock Grid.Column="0" Text="レートリミット状態" FontWeight="SemiBold" VerticalAlignment="Center"/>
                     <Button Grid.Column="1" Content="更新" Click="OnRefreshRateLimitClick"/>
                 </Grid>
+                <TextBlock Text="監視対象:" FontSize="11" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
+                <ItemsControl x:Name="RateLimitAgentList">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="12"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:RateLimitAgentOption">
+                            <CheckBox Content="{x:Bind DisplayName}"
+                                      IsChecked="{x:Bind IsMonitored, Mode=TwoWay}"
+                                      IsEnabled="{x:Bind IsAvailable}"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
                 <ListView x:Name="RateLimitList"
                           Height="90"
                           SelectionMode="None">

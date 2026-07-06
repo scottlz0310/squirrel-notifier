@@ -24,6 +24,7 @@ public partial class App : Application
     private readonly TaskSchedulerService _taskSchedulerService = new();
     private readonly EnqueueReviewService _enqueueReviewService;
     private readonly RateLimitReminderService _rateLimitReminderService;
+    private readonly RateLimitFileService _rateLimitFileService;
 
     public App()
     {
@@ -69,6 +70,7 @@ public partial class App : Application
         _autoUpdateService = new AutoUpdateService(_loggingService);
         _enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
         _rateLimitReminderService = new RateLimitReminderService(_notificationService);
+        _rateLimitFileService = new RateLimitFileService(_settingsService.SettingsDirectory);
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -83,7 +85,7 @@ public partial class App : Application
         bool showWindow = isNotificationActivation
             || (!commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t"));
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, _rateLimitReminderService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, _rateLimitReminderService, _rateLimitFileService, showWindow);
         _window.Closed += OnWindowClosed;
 
         _window.Activate();

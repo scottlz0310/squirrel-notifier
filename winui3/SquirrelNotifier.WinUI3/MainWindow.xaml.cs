@@ -38,7 +38,9 @@ internal sealed partial class MainWindow : Window
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly EnqueueReviewService _enqueueReviewService;
     private readonly IRateLimitReminderService _rateLimitReminderService;
+    private readonly RateLimitFileService _rateLimitFileService;
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
+    private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
     private bool _isCheckingForUpdates;
     private bool _hasShownErrorBalloon;
     private bool _isAutoStartToggling;
@@ -84,6 +86,7 @@ internal sealed partial class MainWindow : Window
         ITaskSchedulerService taskSchedulerService,
         EnqueueReviewService enqueueReviewService,
         IRateLimitReminderService rateLimitReminderService,
+        RateLimitFileService rateLimitFileService,
         bool showWindow = true)
     {
         InitializeComponent();
@@ -107,6 +110,7 @@ internal sealed partial class MainWindow : Window
         _taskSchedulerService = taskSchedulerService;
         _enqueueReviewService = enqueueReviewService;
         _rateLimitReminderService = rateLimitReminderService;
+        _rateLimitFileService = rateLimitFileService;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -116,6 +120,7 @@ internal sealed partial class MainWindow : Window
         LogList.ItemsSource = _logEntries;
         ReviewEventList.ItemsSource = _reviewEvents;
         RateLimitList.ItemsSource = _rateLimits;
+        RateLimitAgentList.ItemsSource = _rateLimitAgentOptions;
 
         // Load settings
         AppSettings settings = _settingsService.Settings;
@@ -134,6 +139,16 @@ internal sealed partial class MainWindow : Window
 
         ReasonComboBox.ItemsSource = _enqueueReviewReasons;
         ReasonComboBox.SelectedIndex = 0;
+
+        foreach (Models.RateLimitAgentDefinition definition in Models.RateLimitAgentCatalog.All)
+        {
+            var option = new Models.RateLimitAgentOption(definition.Id, definition.DisplayName, definition.IsAvailable)
+            {
+                IsMonitored = definition.IsAvailable && settings.RateLimitMonitoredAgentIds.Contains(definition.Id),
+            };
+            option.PropertyChanged += OnRateLimitAgentOptionChanged;
+            _rateLimitAgentOptions.Add(option);
+        }
 
         _isInitializing = false;
 
@@ -593,42 +608,74 @@ internal sealed partial class MainWindow : Window
 
     private async void OnRefreshRateLimitClick(object sender, RoutedEventArgs e)
     {
-        string gatewayUrl = GatewayUrlBox.Text;
-        if (!Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? endpoint))
+        var fetchedLimits = new List<Models.RateLimitInfo>();
+
+        // 1. ローカルファイル経由（statusline フック連携、#139）
+        // IsAvailable=false（codex 等、対応待ち）は settings.json の手動編集等で IsMonitored=true に
+        // なっていてもローカルファイル読み取りの対象にしない。
+        List<Models.RateLimitAgentOption> monitoredAgents = _rateLimitAgentOptions.Where(o => o.IsMonitored && o.IsAvailable).ToList();
+        foreach (Models.RateLimitAgentOption agent in monitoredAgents)
         {
-            await ShowAlertDialogAsync("設定エラー", "Gateway URL が正しくありません。先に Gateway URL を設定してください。");
-            return;
+            try
+            {
+                string? json = await _rateLimitFileService.ReadAgentStatusAsync(agent.Id, CancellationToken.None).ConfigureAwait(true);
+                if (json == null)
+                {
+                    await ShowAlertDialogAsync(
+                        "レートリミット情報がありません",
+                        $"{agent.DisplayName} のレートリミット情報がまだありません。statusline スクリプトの拡張が必要です。詳細は docs/statusline-integration.md を参照してください。");
+                    continue;
+                }
+
+                fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, Services.RateLimitFileService.BuildSourceIdentifier(agent.Id)));
+            }
+            catch (Exception ex)
+            {
+                await ShowAlertDialogAsync("取得エラー", $"{agent.DisplayName} のレートリミット状態の読み取りに失敗しました: {ex.Message}");
+            }
         }
 
+        // 2. MCP ratelimit:// 経由（既存。サーバー側で将来対応された場合のために維持）
         List<string> rateLimitUris = ResourceUrisBox.Text
             .Split(_resourceUriLineSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(uri => uri.StartsWith(Services.RateLimitStatusParser.UriScheme, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        if (rateLimitUris.Count == 0)
+        // MCP 側の取得に失敗しても、既にローカルファイル経由で取得済みの結果は破棄せず
+        // 部分成功として表示する（#139 レビュー対応）。
+        if (rateLimitUris.Count > 0)
         {
-            await ShowAlertDialogAsync(
-                "URI 未設定",
-                $"{Services.RateLimitStatusParser.UriScheme} で始まる Resource URI が設定されていません。Resource URIs 欄に追加してください。");
-            return;
+            string gatewayUrl = GatewayUrlBox.Text;
+            if (!Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? endpoint))
+            {
+                await ShowAlertDialogAsync("設定エラー", "Gateway URL が正しくありません。先に Gateway URL を設定してください。");
+            }
+            else
+            {
+                string? token = Environment.GetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN");
+                var probe = new Services.McpResourceProbe();
+
+                foreach (string uri in rateLimitUris)
+                {
+                    try
+                    {
+                        string json = await probe.ReadResourceTextAsync(endpoint, token, uri, CancellationToken.None).ConfigureAwait(true);
+                        fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, uri));
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowAlertDialogAsync("取得エラー", Services.McpResourceProbe.GetUserMessage(ex));
+                    }
+                }
+            }
         }
 
-        string? token = Environment.GetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN");
-        var probe = new Services.McpResourceProbe();
-        var fetchedLimits = new List<Models.RateLimitInfo>();
-
-        foreach (string uri in rateLimitUris)
+        if (monitoredAgents.Count == 0 && rateLimitUris.Count == 0)
         {
-            try
-            {
-                string json = await probe.ReadResourceTextAsync(endpoint, token, uri, CancellationToken.None).ConfigureAwait(true);
-                fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, uri));
-            }
-            catch (Exception ex)
-            {
-                await ShowAlertDialogAsync("取得エラー", Services.McpResourceProbe.GetUserMessage(ex));
-                return;
-            }
+            await ShowAlertDialogAsync(
+                "監視対象未設定",
+                "レートリミット監視対象のエージェントが選択されていないか、Resource URIs に ratelimit:// で始まる URI が設定されていません。");
+            return;
         }
 
         _rateLimits.Clear();
@@ -637,6 +684,17 @@ internal sealed partial class MainWindow : Window
             info.IsReminderScheduled = _rateLimitReminderService.IsScheduled(info.ReminderKey);
             _rateLimits.Add(info);
         }
+    }
+
+    private void OnRateLimitAgentOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (_isInitializing || e.PropertyName != nameof(Models.RateLimitAgentOption.IsMonitored))
+        {
+            return;
+        }
+
+        List<string> monitoredIds = _rateLimitAgentOptions.Where(o => o.IsMonitored).Select(o => o.Id).ToList();
+        _settingsService.UpdateRateLimitMonitoredAgentIds(monitoredIds);
     }
 
     private void OnRateLimitReminderFired(object? sender, string reminderKey)
