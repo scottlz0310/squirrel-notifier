@@ -119,10 +119,9 @@ public class SettingsServiceTests : IDisposable
         string reviewerArgs = "--reviewer-arg",
         string reviewedCmd = "reviewed-cmd",
         string reviewedArgs = "--reviewed-arg",
-        string role = "reviewer",
         int launcherTimeout = 150000)
     {
-        _settingsService.UpdateSettings(cmd, args, url, uris ?? _defaultUris, timeout, reviewerCmd, reviewerArgs, reviewedCmd, reviewedArgs, role, launcherTimeout);
+        _settingsService.UpdateSettings(cmd, args, url, uris ?? _defaultUris, timeout, reviewerCmd, reviewerArgs, reviewedCmd, reviewedArgs, launcherTimeout);
     }
 
     [Fact]
@@ -142,7 +141,6 @@ public class SettingsServiceTests : IDisposable
         _settingsService.Settings.ReviewerLauncherArguments.Should().Be("--reviewer-arg");
         _settingsService.Settings.ReviewedLauncherCommandPath.Should().Be("reviewed-cmd");
         _settingsService.Settings.ReviewedLauncherArguments.Should().Be("--reviewed-arg");
-        _settingsService.Settings.LauncherRole.Should().Be("reviewer");
         _settingsService.Settings.LauncherTimeoutMs.Should().Be(150000);
     }
 
@@ -173,10 +171,6 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public void UpdateSettings_ShouldThrowForEmptyReviewedCommandPath()
         => FluentActions.Invoking(() => UpdateSettingsDefault(reviewedCmd: "")).Should().Throw<ArgumentException>();
-
-    [Fact]
-    public void UpdateSettings_ShouldThrowForInvalidRole()
-        => FluentActions.Invoking(() => UpdateSettingsDefault(role: "invalid")).Should().Throw<ArgumentException>();
 
     [Theory]
     [InlineData(0)]

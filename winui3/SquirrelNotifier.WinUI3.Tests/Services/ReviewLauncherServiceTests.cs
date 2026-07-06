@@ -64,7 +64,6 @@ public class ReviewLauncherServiceTests : IDisposable
         string reviewerArgs = "--reviewer-arg",
         string reviewedCmd = "reviewed-cmd",
         string reviewedArgs = "--reviewed-arg",
-        string role = "reviewer",
         int timeoutMs = 10000)
     {
         _settingsService.UpdateSettings(
@@ -72,7 +71,7 @@ public class ReviewLauncherServiceTests : IDisposable
             "http://localhost:3000", new[] { "queue://res" }, 30000,
             reviewerCmd, reviewerArgs,
             reviewedCmd, reviewedArgs,
-            role, timeoutMs);
+            timeoutMs);
     }
 
     [Fact]
@@ -101,7 +100,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
 
         // Act
-        LauncherResult result = await service.LaunchAsync(reviewEvent, CancellationToken.None);
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
 
         // Assert
         result.Success.Should().BeTrue();
@@ -139,12 +138,12 @@ public class ReviewLauncherServiceTests : IDisposable
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
 
         // Act & Assert
-        Task<LauncherResult> firstRunTask = service.LaunchAsync(reviewEvent, CancellationToken.None);
+        Task<LauncherResult> firstRunTask = service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
 
         // Wait a small delay to make sure the first run has set _isRunning to true
         await Task.Delay(100);
 
-        LauncherResult secondResult = await service.LaunchAsync(reviewEvent, CancellationToken.None);
+        LauncherResult secondResult = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
         secondResult.Success.Should().BeFalse();
         secondResult.ErrorMessage.Should().Contain("already running");
 
@@ -178,7 +177,7 @@ public class ReviewLauncherServiceTests : IDisposable
         using var cts = new CancellationTokenSource();
 
         // Act
-        Task<LauncherResult> launchTask = service.LaunchAsync(reviewEvent, cts.Token);
+        Task<LauncherResult> launchTask = service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, cts.Token);
 
         await Task.Delay(100);
         cts.Cancel();
@@ -216,7 +215,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
 
         // Act
-        LauncherResult result = await service.LaunchAsync(reviewEvent, CancellationToken.None);
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
 
         // Assert
         result.Success.Should().BeFalse();
@@ -225,26 +224,25 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("queue://review/re-review-requests", "reviewer", "reviewer-cmd")]
-    [InlineData("queue://review/queue", "reviewer", "reviewer-cmd")]
-    [InlineData("queue://review/queue", "reviewed", "reviewed-cmd")]
-    public async Task LaunchAsync_ShouldSelectCorrectSlotBySourceAndRole(
-        string source, string role, string expectedCmd)
+    [InlineData("reviewer", "reviewer-cmd")]
+    [InlineData("reviewed", "reviewed-cmd")]
+    public async Task LaunchAsync_ShouldSelectCorrectSlotByRole(
+        string roleName, string expectedCmd)
     {
         // Arrange
+        LauncherRole role = roleName == "reviewer" ? LauncherRole.Reviewer : LauncherRole.Reviewed;
         var reviewEvent = new ReviewEvent
         {
             EventId = "test-slot",
             Repository = "scottlz0310/squirrel-notifier",
             PrNumber = 52,
             PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
-            Source = source,
+            Source = "queue://review/queue",
         };
 
         ConfigureSettings(
             reviewerCmd: "reviewer-cmd", reviewerArgs: "--reviewer-arg",
-            reviewedCmd: "reviewed-cmd", reviewedArgs: "--reviewed-arg",
-            role: role);
+            reviewedCmd: "reviewed-cmd", reviewedArgs: "--reviewed-arg");
 
         Mock<IProcessInstance> mockProcess = CreateMockProcess(0, string.Empty, string.Empty);
         ProcessStartInfo? capturedPsi = null;
@@ -257,7 +255,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
 
         // Act
-        await service.LaunchAsync(reviewEvent, CancellationToken.None);
+        await service.LaunchAsync(reviewEvent, role, CancellationToken.None);
 
         // Assert
         capturedPsi.Should().NotBeNull();
@@ -265,32 +263,31 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("queue://review/re-review-requests", "reviewer", "reviewer-cmd", "--reviewer-arg")]
-    [InlineData("queue://review/queue", "reviewer", "reviewer-cmd", "--reviewer-arg")]
-    [InlineData("queue://review/queue", "reviewed", "reviewed-cmd", "--reviewed-arg")]
-    public void BuildCommandLine_ShouldSelectCorrectSlotBySourceAndRole(
-        string source, string role, string expectedCmd, string expectedArg)
+    [InlineData("reviewer", "reviewer-cmd", "--reviewer-arg")]
+    [InlineData("reviewed", "reviewed-cmd", "--reviewed-arg")]
+    public void BuildCommandLine_ShouldSelectCorrectSlotByRole(
+        string roleName, string expectedCmd, string expectedArg)
     {
         // Arrange
+        LauncherRole role = roleName == "reviewer" ? LauncherRole.Reviewer : LauncherRole.Reviewed;
         var reviewEvent = new ReviewEvent
         {
             EventId = "test-copy",
             Repository = "scottlz0310/squirrel-notifier",
             PrNumber = 52,
             PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
-            Source = source,
+            Source = "queue://review/queue",
         };
 
         ConfigureSettings(
             reviewerCmd: "reviewer-cmd", reviewerArgs: "--reviewer-arg",
-            reviewedCmd: "reviewed-cmd", reviewedArgs: "--reviewed-arg",
-            role: role);
+            reviewedCmd: "reviewed-cmd", reviewedArgs: "--reviewed-arg");
 
         var mockRunner = new Mock<IProcessRunner>();
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
 
         // Act
-        string commandLine = service.BuildCommandLine(reviewEvent);
+        string commandLine = service.BuildCommandLine(reviewEvent, role);
 
         // Assert
         commandLine.Should().Be($"{expectedCmd} {expectedArg}");
@@ -313,14 +310,13 @@ public class ReviewLauncherServiceTests : IDisposable
 
         ConfigureSettings(
             reviewerCmd: "claude",
-            reviewerArgs: "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            role: "reviewer");
+            reviewerArgs: "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"");
 
         var mockRunner = new Mock<IProcessRunner>();
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
 
         // Act
-        string commandLine = service.BuildCommandLine(reviewEvent);
+        string commandLine = service.BuildCommandLine(reviewEvent, LauncherRole.Reviewer);
 
         // Assert
         commandLine.Should().Be("claude -p \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\"");

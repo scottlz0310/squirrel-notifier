@@ -17,5 +17,5 @@ internal interface INotificationService
 
     event System.EventHandler? OpenAppRequested;
 
-    event System.EventHandler<string>? LaunchReviewRequested;
+    event System.EventHandler<LaunchReviewRequest>? LaunchReviewRequested;
 }

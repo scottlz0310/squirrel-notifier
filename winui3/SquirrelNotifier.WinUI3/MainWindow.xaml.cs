@@ -130,8 +130,6 @@ internal sealed partial class MainWindow : Window
         ReviewerArgumentsBox.Text = settings.ReviewerLauncherArguments;
         ReviewedPathBox.Text = settings.ReviewedLauncherCommandPath;
         ReviewedArgumentsBox.Text = settings.ReviewedLauncherArguments;
-        ReviewerRoleRadio.IsChecked = settings.LauncherRole != "reviewed";
-        ReviewedRoleRadio.IsChecked = settings.LauncherRole == "reviewed";
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
 
         ReasonComboBox.ItemsSource = _enqueueReviewReasons;
@@ -685,16 +683,6 @@ internal sealed partial class MainWindow : Window
         SaveCurrentSettings();
     }
 
-    private void OnLauncherRoleChanged(object sender, RoutedEventArgs e)
-    {
-        if (_isInitializing)
-        {
-            return;
-        }
-
-        SaveCurrentSettings();
-    }
-
     private void SaveCurrentSettings()
     {
         try
@@ -718,7 +706,6 @@ internal sealed partial class MainWindow : Window
             string reviewerArguments = ReviewerArgumentsBox.Text;
             string reviewedPath = ReviewedPathBox.Text;
             string reviewedArguments = ReviewedArgumentsBox.Text;
-            string launcherRole = ReviewedRoleRadio.IsChecked == true ? "reviewed" : "reviewer";
             int launcherTimeoutMs = double.IsNaN(LauncherTimeoutBox.Value) ? 300000 : (int)LauncherTimeoutBox.Value;
 
             _settingsService.UpdateSettings(
@@ -731,7 +718,6 @@ internal sealed partial class MainWindow : Window
                 reviewerArguments,
                 reviewedPath,
                 reviewedArguments,
-                launcherRole,
                 launcherTimeoutMs);
         }
         catch
@@ -884,14 +870,14 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private void OnLaunchReviewRequested(object? sender, string eventId)
+    private void OnLaunchReviewRequested(object? sender, Models.LaunchReviewRequest request)
     {
         _ = DispatcherQueue.TryEnqueue(async () =>
         {
             Models.ReviewEvent? targetEvent = null;
             foreach (Models.ReviewEvent ev in _reviewEvents)
             {
-                if (ev.EventId == eventId)
+                if (ev.EventId == request.EventId)
                 {
                     targetEvent = ev;
                     break;
@@ -900,33 +886,52 @@ internal sealed partial class MainWindow : Window
 
             if (targetEvent == null)
             {
-                await _loggingService.WriteAsync($"Launch request ignored: event with ID {eventId} not found in history.").ConfigureAwait(false);
+                await _loggingService.WriteAsync($"Launch request ignored: event with ID {request.EventId} not found in history.").ConfigureAwait(false);
                 return;
             }
 
             ShowWindowFromTray();
-            await ExecuteReviewAsync(targetEvent).ConfigureAwait(false);
+            await ExecuteReviewAsync(targetEvent, request.Role).ConfigureAwait(false);
         });
     }
 
-    private async void OnLaunchReviewClick(object sender, RoutedEventArgs e)
+    private async void OnLaunchReviewerClick(SplitButton sender, SplitButtonClickEventArgs args)
     {
-        if (sender is Button button && button.CommandParameter is Models.ReviewEvent reviewEvent)
+        if (sender.CommandParameter is Models.ReviewEvent reviewEvent)
         {
-            await ExecuteReviewAsync(reviewEvent).ConfigureAwait(false);
+            await ExecuteReviewAsync(reviewEvent, Models.LauncherRole.Reviewer).ConfigureAwait(false);
         }
     }
 
-    private void OnCopyLaunchCommandClick(object sender, RoutedEventArgs e)
+    private async void OnLaunchReviewedClick(SplitButton sender, SplitButtonClickEventArgs args)
     {
-        if (sender is not Button button || button.CommandParameter is not Models.ReviewEvent reviewEvent)
+        if (sender.CommandParameter is Models.ReviewEvent reviewEvent)
         {
-            return;
+            await ExecuteReviewAsync(reviewEvent, Models.LauncherRole.Reviewed).ConfigureAwait(false);
         }
+    }
 
+    private void OnCopyReviewerCommandClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem item && item.CommandParameter is Models.ReviewEvent reviewEvent)
+        {
+            CopyLaunchCommand(reviewEvent, Models.LauncherRole.Reviewer);
+        }
+    }
+
+    private void OnCopyReviewedCommandClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem item && item.CommandParameter is Models.ReviewEvent reviewEvent)
+        {
+            CopyLaunchCommand(reviewEvent, Models.LauncherRole.Reviewed);
+        }
+    }
+
+    private void CopyLaunchCommand(Models.ReviewEvent reviewEvent, Models.LauncherRole role)
+    {
         try
         {
-            string commandLine = _launcherService.BuildCommandLine(reviewEvent);
+            string commandLine = _launcherService.BuildCommandLine(reviewEvent, role);
 
             var dataPackage = new DataPackage();
             dataPackage.SetText(commandLine);
@@ -972,7 +977,7 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private async Task ExecuteReviewAsync(Models.ReviewEvent reviewEvent)
+    private async Task ExecuteReviewAsync(Models.ReviewEvent reviewEvent, Models.LauncherRole role)
     {
         if (_launcherService.IsRunning)
         {
@@ -1004,7 +1009,7 @@ internal sealed partial class MainWindow : Window
                 XamlRoot = Content.XamlRoot,
             };
 
-            Task<LauncherResult> launchTask = _launcherService.LaunchAsync(reviewEvent, cts.Token);
+            Task<LauncherResult> launchTask = _launcherService.LaunchAsync(reviewEvent, role, cts.Token);
             IAsyncOperation<ContentDialogResult> dialogTask = dialog.ShowAsync(ContentDialogPlacement.Popup);
 
             Task completedTask = await Task.WhenAny(launchTask, dialogTask.AsTask()).ConfigureAwait(true);
