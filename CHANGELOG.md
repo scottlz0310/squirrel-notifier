@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-06
+
 ### Added
 - レートリミット監視対象の CLI エージェントを Settings で選択できるようにした（#139）。「レートリミット状態」セクションに claude-code / agy（Antigravity CLI）のチェックボックスを追加し、選択したエージェントの statusline フックが書き出すローカル JSON ファイル（`%LOCALAPPDATA%\SquirrelNotifier\ratelimit-status\<agentId>.json`）を「更新」時に読み取って表示する。調査の結果 `ratelimit://` を提供する MCP サーバーは存在せず、レートリミット情報は各 CLI エージェント自身の statusline フックからローカルに取得する必要があることが判明したため、既存の MCP `resources/read` 経由の取得（`ratelimit://` URI、サーバー側の将来対応に備え維持）とは別に、ローカルファイル経由の取得経路を追加した。statusline スクリプト自体の拡張（レートリミット検知時のファイル書き出し）はユーザーの dotfiles 側で行うため、`docs/statusline-integration.md` と claude-code / agy 向けのサンプルスクリプトを追加した。エージェント定義は `RateLimitAgentCatalog` に集約し、将来の追加・削除が容易な構成にした。codex は statusline フックが外部コマンドに JSON を渡さず現時点で技術的に対応不可能なため、対応待ちとして選択不可の状態で表示する
 
@@ -142,7 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.1...v0.1.2
