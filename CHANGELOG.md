@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- レートリミット監視対象の CLI エージェントを Settings で選択できるようにした（#139）。「レートリミット状態」セクションに claude-code / agy（Antigravity CLI）のチェックボックスを追加し、選択したエージェントの statusline フックが書き出すローカル JSON ファイル（`%LOCALAPPDATA%\SquirrelNotifier\ratelimit-status\<agentId>.json`）を「更新」時に読み取って表示する。調査の結果 `ratelimit://` を提供する MCP サーバーは存在せず、レートリミット情報は各 CLI エージェント自身の statusline フックからローカルに取得する必要があることが判明したため、既存の MCP `resources/read` 経由の取得（`ratelimit://` URI、サーバー側の将来対応に備え維持）とは別に、ローカルファイル経由の取得経路を追加した。statusline スクリプト自体の拡張（レートリミット検知時のファイル書き出し）はユーザーの dotfiles 側で行うため、`docs/statusline-integration.md` と claude-code / agy 向けのサンプルスクリプトを追加した。エージェント定義は `RateLimitAgentCatalog` に集約し、将来の追加・削除が容易な構成にした。codex は statusline フックが外部コマンドに JSON を渡さず現時点で技術的に対応不可能なため、対応待ちとして選択不可の状態で表示する
+
 ### Changed
 - 起動ロールの設定切替を廃止し、イベント行で両ロールのアクションを提供するようにした（#127）
   - Settings の「起動ロール」ラジオボタンと settings.json の `launcherRole` を削除。ランチャースロットは「どのボタンを押したか」だけで決まるため、`re-review-requests` の reviewer 強制ロジックも不要になり削除
