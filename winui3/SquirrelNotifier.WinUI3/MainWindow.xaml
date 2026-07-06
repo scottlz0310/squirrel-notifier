@@ -174,7 +174,6 @@
                                     <StackPanel Grid.Column="0" Spacing="2">
                                         <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap" FontWeight="Medium"/>
                                         <HyperlinkButton Content="{x:Bind PrCaption}"
-                                                         AutomationProperties.Name="PRを開く"
                                                          Click="OnOpenPrClick"
                                                          CommandParameter="{x:Bind PrUrl}"
                                                          FontSize="11"
