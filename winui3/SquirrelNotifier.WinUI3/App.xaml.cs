@@ -38,22 +38,30 @@ public partial class App : Application
             _ = _loggingService.WriteAsync($"[WARN] CacheService の初期化に失敗。キャッシュなしで起動します: {ex.Message}");
         }
 
-        bool notificationRegistered = false;
+        // 実行中プロセスで通知アクティベーションを受け取るには、NotificationInvoked の
+        // 購読を Register() より前に行う必要がある（#130）。
+        // https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/notifications/app-notifications/app-notifications-quickstart
+        try
+        {
+            _notificationService.Initialize();
+        }
+        catch (System.Runtime.InteropServices.COMException ex) when (ex.Message.Contains("Insights.Resource.dll", StringComparison.Ordinal))
+        {
+            // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題。
+            // Register() と同条件で発生しうるため、ここで捕捉せず起動クラッシュさせない。
+            _ = _loggingService.WriteAsync($"[WARN] NotificationService.Initialize() 失敗（{ex.HResult:X8}）: {ex.Message}");
+        }
+
+        _notificationService.OpenAppRequested += OnOpenAppRequested;
+
         try
         {
             AppNotificationManager.Default.Register();
-            notificationRegistered = true;
         }
         catch (System.Runtime.InteropServices.COMException ex) when (ex.Message.Contains("Insights.Resource.dll", StringComparison.Ordinal))
         {
             // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題
             _ = _loggingService.WriteAsync($"[WARN] AppNotificationManager.Register() 失敗（{ex.HResult:X8}）: {ex.Message}");
-        }
-
-        if (notificationRegistered)
-        {
-            _notificationService.Initialize();
-            _notificationService.OpenAppRequested += OnOpenAppRequested;
         }
 
         _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, cacheService: _cacheService);
@@ -65,9 +73,15 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        Microsoft.Windows.AppLifecycle.AppActivationArguments activationArgs =
+            Microsoft.Windows.AppLifecycle.AppInstance.GetCurrent().GetActivatedEventArgs();
+        bool isNotificationActivation =
+            activationArgs.Kind == Microsoft.Windows.AppLifecycle.ExtendedActivationKind.AppNotification;
+
         // Check for command-line arguments
         string[] commandLineArgs = Environment.GetCommandLineArgs();
-        bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
+        bool showWindow = isNotificationActivation
+            || (!commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t"));
 
         _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, _rateLimitReminderService, showWindow);
         _window.Closed += OnWindowClosed;
@@ -82,6 +96,14 @@ public partial class App : Application
         Program.Reactivated += OnReactivated;
 
         _subscriptionService.Start();
+
+        // アプリ未起動時に通知ボタンから起動された場合、NotificationInvoked は発火しない
+        // ため、起動引数（openUrl / launchReview / openApp）をここで処理する（#130）
+        if (isNotificationActivation
+            && activationArgs.Data is Microsoft.Windows.AppNotifications.AppNotificationActivatedEventArgs notificationArgs)
+        {
+            _notificationService.HandleActivation(notificationArgs);
+        }
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)

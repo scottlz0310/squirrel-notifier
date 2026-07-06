@@ -106,6 +106,14 @@ internal sealed class NotificationService : INotificationService
 
     private void OnNotificationInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
     {
+        HandleActivation(args);
+    }
+
+    // アプリ未起動時に通知ボタンから新プロセスが起動された場合は NotificationInvoked が
+    // 発火しないため、起動時アクティベーション引数（AppActivationArguments.Data）にも
+    // 同じ処理を適用できるように公開している。
+    public void HandleActivation(AppNotificationActivatedEventArgs args)
+    {
         if (args.Arguments.TryGetValue("action", out string? action))
         {
             if (action == "openUrl" && args.Arguments.TryGetValue("url", out string? url))

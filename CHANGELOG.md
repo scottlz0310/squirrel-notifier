@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- レビューイベントのトースト通知で「アプリを開く」等のボタンを押しても反応しない不具合を修正。実行中プロセスで通知アクティベーションを受け取るには `NotificationInvoked` ハンドラの登録を `AppNotificationManager.Register()` より前に行う必要があるため、購読順序を入れ替えた。また、アプリ未起動時に通知ボタンから新プロセスが起動された場合は `NotificationInvoked` が発火しないため、`OnLaunched` で activation kind が `AppNotification` の場合に起動引数（`openUrl` / `launchReview` / `openApp`）を処理し、ウィンドウを表示するようにした（#130）。レビュー対応として、`NotificationService.Initialize()` を `Register()` より前に呼ぶよう順序を変えたことで、self-contained モードで `Insights.Resource.dll` が見つからない環境では `Initialize()` 側でも同じ `COMException` が発生しうるため、`Register()` と同条件で捕捉して警告ログに落とし、起動クラッシュを防ぐようにした
+
 ## [0.2.0] - 2026-07-05
 
 ### Fixed
