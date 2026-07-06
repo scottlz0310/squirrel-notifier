@@ -144,7 +144,7 @@ internal sealed partial class MainWindow : Window
         {
             var option = new Models.RateLimitAgentOption(definition.Id, definition.DisplayName, definition.IsAvailable)
             {
-                IsMonitored = settings.RateLimitMonitoredAgentIds.Contains(definition.Id),
+                IsMonitored = definition.IsAvailable && settings.RateLimitMonitoredAgentIds.Contains(definition.Id),
             };
             option.PropertyChanged += OnRateLimitAgentOptionChanged;
             _rateLimitAgentOptions.Add(option);
@@ -611,7 +611,9 @@ internal sealed partial class MainWindow : Window
         var fetchedLimits = new List<Models.RateLimitInfo>();
 
         // 1. ローカルファイル経由（statusline フック連携、#139）
-        List<Models.RateLimitAgentOption> monitoredAgents = _rateLimitAgentOptions.Where(o => o.IsMonitored).ToList();
+        // IsAvailable=false（codex 等、対応待ち）は settings.json の手動編集等で IsMonitored=true に
+        // なっていてもローカルファイル読み取りの対象にしない。
+        List<Models.RateLimitAgentOption> monitoredAgents = _rateLimitAgentOptions.Where(o => o.IsMonitored && o.IsAvailable).ToList();
         foreach (Models.RateLimitAgentOption agent in monitoredAgents)
         {
             try
@@ -639,29 +641,31 @@ internal sealed partial class MainWindow : Window
             .Where(uri => uri.StartsWith(Services.RateLimitStatusParser.UriScheme, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        // MCP 側の取得に失敗しても、既にローカルファイル経由で取得済みの結果は破棄せず
+        // 部分成功として表示する（#139 レビュー対応）。
         if (rateLimitUris.Count > 0)
         {
             string gatewayUrl = GatewayUrlBox.Text;
             if (!Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? endpoint))
             {
                 await ShowAlertDialogAsync("設定エラー", "Gateway URL が正しくありません。先に Gateway URL を設定してください。");
-                return;
             }
-
-            string? token = Environment.GetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN");
-            var probe = new Services.McpResourceProbe();
-
-            foreach (string uri in rateLimitUris)
+            else
             {
-                try
+                string? token = Environment.GetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN");
+                var probe = new Services.McpResourceProbe();
+
+                foreach (string uri in rateLimitUris)
                 {
-                    string json = await probe.ReadResourceTextAsync(endpoint, token, uri, CancellationToken.None).ConfigureAwait(true);
-                    fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, uri));
-                }
-                catch (Exception ex)
-                {
-                    await ShowAlertDialogAsync("取得エラー", Services.McpResourceProbe.GetUserMessage(ex));
-                    return;
+                    try
+                    {
+                        string json = await probe.ReadResourceTextAsync(endpoint, token, uri, CancellationToken.None).ConfigureAwait(true);
+                        fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, uri));
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowAlertDialogAsync("取得エラー", Services.McpResourceProbe.GetUserMessage(ex));
+                    }
                 }
             }
         }
