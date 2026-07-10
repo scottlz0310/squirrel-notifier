@@ -45,6 +45,7 @@ internal sealed partial class MainWindow : Window
     private bool _hasShownErrorBalloon;
     private bool _isAutoStartToggling;
     private bool _isSyncingLauncherPresetSelection;
+    private bool _isApplyingLauncherPreset;
     private CancellationTokenSource? _copyFeedbackCts;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
@@ -411,7 +412,7 @@ internal sealed partial class MainWindow : Window
 
     private void OnSettingChanged(object sender, TextChangedEventArgs e)
     {
-        if (_isInitializing)
+        if (_isInitializing || _isApplyingLauncherPreset)
         {
             return;
         }
@@ -444,7 +445,7 @@ internal sealed partial class MainWindow : Window
         ApplyLauncherPreset(ReviewedPresetComboBox, ReviewedPathBox, ReviewedArgumentsBox, static d => d.ReviewedArgumentsTemplate);
     }
 
-    private static void ApplyLauncherPreset(ComboBox comboBox, TextBox pathBox, TextBox argumentsBox, Func<Models.LauncherAgentDefinition, string> argumentsTemplateSelector)
+    private void ApplyLauncherPreset(ComboBox comboBox, TextBox pathBox, TextBox argumentsBox, Func<Models.LauncherAgentDefinition, string> argumentsTemplateSelector)
     {
         if (comboBox.SelectedItem is not Models.LauncherAgentDefinition selected
             || selected.Id == Models.LauncherAgentCatalog.CustomPresetId)
@@ -452,8 +453,23 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        pathBox.Text = selected.Command;
-        argumentsBox.Text = argumentsTemplateSelector(selected);
+        // path / arguments の反映中は TextChanged 経由の SaveCurrentSettings を抑止し、
+        // 両方反映し終えた後で一度だけ再判定・保存する。反映中に保存すると、arguments が
+        // たまたま反映先プリセットの値と一致している場合に arguments 側の TextChanged が
+        // 発火せず（値が変わらないため）、path のみ変更された中間状態（= custom 判定）の
+        // まま presetId が固定されてしまう（#149 レビュー対応）.
+        _isApplyingLauncherPreset = true;
+        try
+        {
+            pathBox.Text = selected.Command;
+            argumentsBox.Text = argumentsTemplateSelector(selected);
+        }
+        finally
+        {
+            _isApplyingLauncherPreset = false;
+        }
+
+        SaveCurrentSettings();
     }
 
     // combo box の選択を command / arguments の実値から再判定した presetId へ同期する。
