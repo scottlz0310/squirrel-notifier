@@ -19,6 +19,8 @@ internal interface IProcessInstance : IDisposable
 
     StreamReader StandardError { get; }
 
+    StreamWriter StandardInput { get; }
+
     void Kill(bool entireProcessTree);
 
     Task WaitForExitAsync(CancellationToken cancellationToken);

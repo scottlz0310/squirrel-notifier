@@ -44,6 +44,7 @@ internal sealed partial class MainWindow : Window
     private bool _isCheckingForUpdates;
     private bool _hasShownErrorBalloon;
     private bool _isAutoStartToggling;
+    private bool _isSyncingLauncherPresetSelection;
     private CancellationTokenSource? _copyFeedbackCts;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
@@ -136,6 +137,11 @@ internal sealed partial class MainWindow : Window
         ReviewedPathBox.Text = settings.ReviewedLauncherCommandPath;
         ReviewedArgumentsBox.Text = settings.ReviewedLauncherArguments;
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
+
+        ReviewerPresetComboBox.ItemsSource = Models.LauncherAgentCatalog.AllWithCustomOption;
+        ReviewedPresetComboBox.ItemsSource = Models.LauncherAgentCatalog.AllWithCustomOption;
+        UpdateLauncherPresetComboBoxSelection(ReviewerPresetComboBox, settings.ReviewerLauncherPresetId);
+        UpdateLauncherPresetComboBoxSelection(ReviewedPresetComboBox, settings.ReviewedLauncherPresetId);
 
         ReasonComboBox.ItemsSource = _enqueueReviewReasons;
         ReasonComboBox.SelectedIndex = 0;
@@ -411,6 +417,66 @@ internal sealed partial class MainWindow : Window
         }
 
         SaveCurrentSettings();
+    }
+
+    // プリセット選択（#149）: ComboBox で選んだプリセットの command / arguments を
+    // テキストボックスへ反映する。反映後の TextChanged から SaveCurrentSettings が呼ばれ、
+    // 実際に永続化されるプリセット ID は（選択操作ではなく）その時点のテキスト内容から
+    // LauncherAgentCatalog.ResolvePresetId で再判定する。自由編集でプリセットと乖離した場合に
+    // 「カスタム」表示へ自然に戻すため.
+    private void OnReviewerPresetSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializing || _isSyncingLauncherPresetSelection)
+        {
+            return;
+        }
+
+        ApplyLauncherPreset(ReviewerPresetComboBox, ReviewerPathBox, ReviewerArgumentsBox, static d => d.ReviewerArgumentsTemplate);
+    }
+
+    private void OnReviewedPresetSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializing || _isSyncingLauncherPresetSelection)
+        {
+            return;
+        }
+
+        ApplyLauncherPreset(ReviewedPresetComboBox, ReviewedPathBox, ReviewedArgumentsBox, static d => d.ReviewedArgumentsTemplate);
+    }
+
+    private static void ApplyLauncherPreset(ComboBox comboBox, TextBox pathBox, TextBox argumentsBox, Func<Models.LauncherAgentDefinition, string> argumentsTemplateSelector)
+    {
+        if (comboBox.SelectedItem is not Models.LauncherAgentDefinition selected
+            || selected.Id == Models.LauncherAgentCatalog.CustomPresetId)
+        {
+            return;
+        }
+
+        pathBox.Text = selected.Command;
+        argumentsBox.Text = argumentsTemplateSelector(selected);
+    }
+
+    // combo box の選択を command / arguments の実値から再判定した presetId へ同期する。
+    // SelectionChanged のフィルイン処理を再帰させないよう _isSyncingLauncherPresetSelection で防護する.
+    private void UpdateLauncherPresetComboBoxSelection(ComboBox comboBox, string presetId)
+    {
+        Models.LauncherAgentDefinition? match = Models.LauncherAgentCatalog.AllWithCustomOption
+            .FirstOrDefault(d => d.Id == presetId);
+
+        if (Equals(comboBox.SelectedItem, match))
+        {
+            return;
+        }
+
+        _isSyncingLauncherPresetSelection = true;
+        try
+        {
+            comboBox.SelectedItem = match;
+        }
+        finally
+        {
+            _isSyncingLauncherPresetSelection = false;
+        }
     }
 
     private async void OnAutoDetectGatewayUrlClick(object sender, RoutedEventArgs e)
@@ -766,6 +832,11 @@ internal sealed partial class MainWindow : Window
             string reviewedArguments = ReviewedArgumentsBox.Text;
             int launcherTimeoutMs = double.IsNaN(LauncherTimeoutBox.Value) ? 300000 : (int)LauncherTimeoutBox.Value;
 
+            string reviewerPresetId = Models.LauncherAgentCatalog.ResolvePresetId(reviewerPath, reviewerArguments, Models.LauncherRole.Reviewer);
+            string reviewedPresetId = Models.LauncherAgentCatalog.ResolvePresetId(reviewedPath, reviewedArguments, Models.LauncherRole.Reviewed);
+            UpdateLauncherPresetComboBoxSelection(ReviewerPresetComboBox, reviewerPresetId);
+            UpdateLauncherPresetComboBoxSelection(ReviewedPresetComboBox, reviewedPresetId);
+
             _settingsService.UpdateSettings(
                 commandPath,
                 arguments,
@@ -776,7 +847,9 @@ internal sealed partial class MainWindow : Window
                 reviewerArguments,
                 reviewedPath,
                 reviewedArguments,
-                launcherTimeoutMs);
+                launcherTimeoutMs,
+                reviewerPresetId,
+                reviewedPresetId);
         }
         catch
         {

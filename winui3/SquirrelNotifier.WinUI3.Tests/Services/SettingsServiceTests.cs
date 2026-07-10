@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
 
@@ -119,9 +120,11 @@ public class SettingsServiceTests : IDisposable
         string reviewerArgs = "--reviewer-arg",
         string reviewedCmd = "reviewed-cmd",
         string reviewedArgs = "--reviewed-arg",
-        int launcherTimeout = 150000)
+        int launcherTimeout = 150000,
+        string reviewerPresetId = "custom",
+        string reviewedPresetId = "custom")
     {
-        _settingsService.UpdateSettings(cmd, args, url, uris ?? _defaultUris, timeout, reviewerCmd, reviewerArgs, reviewedCmd, reviewedArgs, launcherTimeout);
+        _settingsService.UpdateSettings(cmd, args, url, uris ?? _defaultUris, timeout, reviewerCmd, reviewerArgs, reviewedCmd, reviewedArgs, launcherTimeout, reviewerPresetId, reviewedPresetId);
     }
 
     [Fact]
@@ -142,6 +145,8 @@ public class SettingsServiceTests : IDisposable
         _settingsService.Settings.ReviewedLauncherCommandPath.Should().Be("reviewed-cmd");
         _settingsService.Settings.ReviewedLauncherArguments.Should().Be("--reviewed-arg");
         _settingsService.Settings.LauncherTimeoutMs.Should().Be(150000);
+        _settingsService.Settings.ReviewerLauncherPresetId.Should().Be("custom");
+        _settingsService.Settings.ReviewedLauncherPresetId.Should().Be("custom");
     }
 
     [Fact]
@@ -171,6 +176,14 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public void UpdateSettings_ShouldThrowForEmptyReviewedCommandPath()
         => FluentActions.Invoking(() => UpdateSettingsDefault(reviewedCmd: "")).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForEmptyReviewerPresetId()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(reviewerPresetId: "")).Should().Throw<ArgumentException>();
+
+    [Fact]
+    public void UpdateSettings_ShouldThrowForEmptyReviewedPresetId()
+        => FluentActions.Invoking(() => UpdateSettingsDefault(reviewedPresetId: "")).Should().Throw<ArgumentException>();
 
     [Theory]
     [InlineData(0)]
@@ -408,5 +421,132 @@ public class SettingsServiceTests : IDisposable
         {
             Directory.Delete(settingsDir, true);
         }
+    }
+
+    [Fact]
+    public void LauncherPresetsMigration_ShouldSetClaudePreset_WhenSettingsMatchClaudeDefaults()
+    {
+        // Arrange: 既定の claude command/arguments のまま LauncherPresetsMigrated が未実施の設定
+        LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierPresetMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "settings.json");
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = claude.Command,
+            ReviewerLauncherArguments = claude.ReviewerArgumentsTemplate,
+            ReviewedLauncherCommandPath = claude.Command,
+            ReviewedLauncherArguments = claude.ReviewedArgumentsTemplate,
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = false,
+        };
+        File.WriteAllText(settingsPath, System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert
+            service.Settings.ReviewerLauncherPresetId.Should().Be("claude");
+            service.Settings.ReviewedLauncherPresetId.Should().Be("claude");
+            service.Settings.LauncherPresetsMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void LauncherPresetsMigration_ShouldSetCustomPreset_WhenSettingsAreCustomized()
+    {
+        // Arrange: プリセットのどれとも一致しないカスタム command/arguments
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierPresetMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "settings.json");
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "my-custom-tool",
+            ReviewerLauncherArguments = "--custom",
+            ReviewedLauncherCommandPath = "my-custom-tool",
+            ReviewedLauncherArguments = "--custom",
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = false,
+        };
+        File.WriteAllText(settingsPath, System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert
+            service.Settings.ReviewerLauncherPresetId.Should().Be(LauncherAgentCatalog.CustomPresetId);
+            service.Settings.ReviewedLauncherPresetId.Should().Be(LauncherAgentCatalog.CustomPresetId);
+            service.Settings.LauncherPresetsMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void LauncherPresetsMigration_ShouldSkipWhenAlreadyMigrated()
+    {
+        // Arrange: 既に移行済みで、実際の command/arguments とは矛盾する presetId を持つ設定
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierPresetMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "settings.json");
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "my-custom-tool",
+            ReviewerLauncherArguments = "--custom",
+            ReviewerLauncherPresetId = "codex",
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = true,
+        };
+        File.WriteAllText(settingsPath, System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert: 既に移行済みなので再判定されず、矛盾していても上書きされない
+            service.Settings.ReviewerLauncherPresetId.Should().Be("codex");
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("claude", "claude-code")]
+    [InlineData("codex", "codex")]
+    [InlineData("agy", "agy")]
+    [InlineData("copilot", null)]
+    public void ResolveLauncherRateLimitAgentId_ShouldReturnMappedId_ForKnownPresets(string presetId, string? expectedRateLimitAgentId)
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+        _settingsService.UpdateSettings(
+            "cmd", "args", "http://localhost:3000", new[] { "queue://res" }, 30000,
+            definition.Command, definition.ReviewerArgumentsTemplate,
+            definition.Command, definition.ReviewedArgumentsTemplate,
+            300000, presetId, presetId);
+
+        _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewer).Should().Be(expectedRateLimitAgentId);
+        _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewed).Should().Be(expectedRateLimitAgentId);
+    }
+
+    [Fact]
+    public void ResolveLauncherRateLimitAgentId_ShouldReturnNull_ForCustomPreset()
+    {
+        UpdateSettingsDefault(reviewerPresetId: "custom", reviewedPresetId: "custom");
+
+        _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewer).Should().BeNull();
+        _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewed).Should().BeNull();
     }
 }

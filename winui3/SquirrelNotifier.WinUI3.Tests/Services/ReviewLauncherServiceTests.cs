@@ -44,6 +44,7 @@ public class ReviewLauncherServiceTests : IDisposable
         mockProcess.SetupGet(p => p.ExitCode).Returns(exitCode);
         mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stdout))));
         mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stderr))));
+        mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
 
         if (delayMs > 0)
         {
@@ -71,7 +72,8 @@ public class ReviewLauncherServiceTests : IDisposable
             "http://localhost:3000", new[] { "queue://res" }, 30000,
             reviewerCmd, reviewerArgs,
             reviewedCmd, reviewedArgs,
-            timeoutMs);
+            timeoutMs,
+            "custom", "custom");
     }
 
     [Fact]

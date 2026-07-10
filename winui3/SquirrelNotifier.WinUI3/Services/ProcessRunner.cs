@@ -34,6 +34,8 @@ internal sealed class ProcessInstance : IProcessInstance
 
     public StreamReader StandardError => _process.StandardError;
 
+    public StreamWriter StandardInput => _process.StandardInput;
+
     public void Kill(bool entireProcessTree)
     {
         _process.Kill(entireProcessTree);
