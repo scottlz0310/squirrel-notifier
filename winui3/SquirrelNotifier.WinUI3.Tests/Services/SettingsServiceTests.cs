@@ -189,10 +189,33 @@ public class SettingsServiceTests : IDisposable
     [InlineData(0)]
     [InlineData(-100)]
     [InlineData(300001)]
-    public void UpdateSettings_ShouldThrowArgumentOutOfRangeExceptionForInvalidTimeout(int invalidTimeout)
+    public void UpdateSettings_ShouldThrowArgumentOutOfRangeExceptionForInvalidNotificationTimeout(int invalidTimeout)
     {
         FluentActions.Invoking(() => UpdateSettingsDefault(timeout: invalidTimeout)).Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    // launcher timeout は長時間レビューサイクルを考慮し、通知タイムアウトとは別に上限 2 時間（#143）
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-100)]
+    [InlineData(7200001)]
+    public void UpdateSettings_ShouldThrowArgumentOutOfRangeExceptionForInvalidLauncherTimeout(int invalidTimeout)
+    {
         FluentActions.Invoking(() => UpdateSettingsDefault(launcherTimeout: invalidTimeout)).Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void UpdateSettings_ShouldAcceptLauncherTimeoutUpToTwoHours()
+    {
+        UpdateSettingsDefault(launcherTimeout: 7200000);
+
+        _settingsService.Settings.LauncherTimeoutMs.Should().Be(7200000);
+    }
+
+    [Fact]
+    public void Settings_ShouldDefaultLauncherTimeoutToThirtyMinutes()
+    {
+        new AppSettings().LauncherTimeoutMs.Should().Be(1800000);
     }
 
     [Fact]

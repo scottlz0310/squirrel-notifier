@@ -3,8 +3,10 @@
 // </copyright>
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -322,5 +324,205 @@ public class ReviewLauncherServiceTests : IDisposable
 
         // Assert
         commandLine.Should().Be("claude -p \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\"");
+    }
+
+    // ---- #143: 実行イベントのストリーミング ----
+
+    // イベント時刻の DI を検証するための固定時刻プロバイダー
+    private sealed class FixedTimeProvider : TimeProvider
+    {
+        public static readonly DateTimeOffset FixedNow = new(2026, 7, 11, 12, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => FixedNow;
+    }
+
+    private static ReviewEvent CreateReviewEvent(string eventId = "test-stream") => new()
+    {
+        EventId = eventId,
+        Repository = "scottlz0310/squirrel-notifier",
+        PrNumber = 52,
+        PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+        Source = "queue://review/queue",
+    };
+
+    // stdout を実行中に逐次供給できる mock process。実プロセス同様、Kill でパイプが閉じて
+    // 読み取り側が EOF / IOException で終了する挙動を再現する.
+    private Mock<IProcessInstance> CreatePipeMockProcess(out StreamWriter stdoutWriter, out TaskCompletionSource exitTcs)
+    {
+        var server = new AnonymousPipeServerStream(PipeDirection.Out);
+        var client = new AnonymousPipeClientStream(PipeDirection.In, server.ClientSafePipeHandle);
+        stdoutWriter = new StreamWriter(server, new UTF8Encoding(false)) { AutoFlush = true };
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        exitTcs = tcs;
+
+        var mockProcess = new Mock<IProcessInstance>();
+        mockProcess.SetupGet(p => p.ExitCode).Returns(0);
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(client));
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+        mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
+        mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken t) => tcs.Task.WaitAsync(t));
+        mockProcess.Setup(p => p.Kill(It.IsAny<bool>())).Callback(server.Dispose);
+        return mockProcess;
+    }
+
+    [Fact]
+    public async Task StartSession_ShouldStreamStdoutAndProgressBeforeProcessExit()
+    {
+        // Arrange
+        const string progressLine = "@squirrel-progress {\"schemaVersion\":1,\"phaseIndex\":3,\"totalPhases\":8,\"phaseLabel\":\"修正\",\"message\":\"accept 2件\"}";
+        const string malformedLine = "@squirrel-progress {broken";
+
+        ConfigureSettings();
+        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out StreamWriter stdout, out TaskCompletionSource exitTcs);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object, new FixedTimeProvider());
+
+        // Act
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent(), LauncherRole.Reviewer, CancellationToken.None);
+
+        using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<AgentExecutionEvent> events = session.ReadEventsAsync(readTimeout.Token).GetAsyncEnumerator();
+
+        // Assert: 通常ログはプロセス終了前に届く（#143 AC）
+        await stdout.WriteLineAsync("plain log line");
+        (await events.MoveNextAsync()).Should().BeTrue();
+        events.Current.Kind.Should().Be(AgentExecutionEventKind.Stdout);
+        events.Current.Text.Should().Be("plain log line");
+        events.Current.Timestamp.Should().Be(FixedTimeProvider.FixedNow);
+        session.Completion.IsCompleted.Should().BeFalse("プロセス終了前に stdout が購読側へ届くこと");
+
+        // 構造化 progress event は型付きモデルへ変換される
+        await stdout.WriteLineAsync(progressLine);
+        (await events.MoveNextAsync()).Should().BeTrue();
+        events.Current.Kind.Should().Be(AgentExecutionEventKind.Progress);
+        events.Current.Progress.Should().NotBeNull();
+        events.Current.Progress!.PhaseIndex.Should().Be(3);
+        events.Current.Progress.TotalPhases.Should().Be(8);
+        events.Current.Progress.PhaseLabel.Should().Be("修正");
+
+        // malformed な progress 行は通常ログとして流れ、実行は失敗しない
+        await stdout.WriteLineAsync(malformedLine);
+        (await events.MoveNextAsync()).Should().BeTrue();
+        events.Current.Kind.Should().Be(AgentExecutionEventKind.Stdout);
+        events.Current.Text.Should().Be(malformedLine);
+
+        // EOF + プロセス終了 → terminal event で列挙が終端する
+        stdout.Dispose();
+        exitTcs.SetResult();
+
+        (await events.MoveNextAsync()).Should().BeTrue();
+        events.Current.Kind.Should().Be(AgentExecutionEventKind.Completed);
+        events.Current.Outcome.Should().Be(AgentExecutionOutcome.Succeeded);
+        events.Current.Result.Should().NotBeNull();
+        events.Current.Result!.ExitCode.Should().Be(0);
+        (await events.MoveNextAsync()).Should().BeFalse("terminal event の後にイベントは無い");
+
+        // LauncherResult の集約 stdout は progress 行も含めた全行を保持する（既存セマンティクス維持）
+        LauncherResult result = await session.Completion;
+        result.Success.Should().BeTrue();
+        result.Stdout.Should().Be($"plain log line\n{progressLine}\n{malformedLine}");
+    }
+
+    [Fact]
+    public async Task StartSession_ShouldEmitCancelledTerminalEvent_WhenCancelled()
+    {
+        // Arrange: Kill のコールバックがパイプを閉じるため、writer 側の後始末は不要
+        ConfigureSettings();
+        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out _, out _);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        using var cts = new CancellationTokenSource();
+
+        // Act
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-cancel"), LauncherRole.Reviewer, cts.Token);
+        await Task.Delay(100);
+        cts.Cancel();
+
+        LauncherResult result = await session.Completion;
+
+        // Assert: キャンセルは terminal event（Cancelled）として通知され、reader task も残存しない
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("cancelled by user");
+        mockProcess.Verify(p => p.Kill(true), Times.Once);
+
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent e in session.ReadEventsAsync())
+        {
+            events.Add(e);
+        }
+
+        events.Should().ContainSingle(e => e.Kind == AgentExecutionEventKind.Completed)
+            .Which.Outcome.Should().Be(AgentExecutionOutcome.Cancelled);
+    }
+
+    [Fact]
+    public async Task StartSession_ShouldEmitTimedOutTerminalEvent_WhenTimedOut()
+    {
+        // Arrange
+        ConfigureSettings(timeoutMs: 200);
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Slow...", "", delayMs: 5000);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-timeout"), LauncherRole.Reviewer, CancellationToken.None);
+        LauncherResult result = await session.Completion;
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("timed out");
+
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent e in session.ReadEventsAsync())
+        {
+            events.Add(e);
+        }
+
+        events.Should().ContainSingle(e => e.Kind == AgentExecutionEventKind.Completed)
+            .Which.Outcome.Should().Be(AgentExecutionOutcome.TimedOut);
+    }
+
+    [Fact]
+    public async Task StartSession_ShouldReturnFailedSession_WhenAlreadyRunning()
+    {
+        // Arrange
+        ConfigureSettings();
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Running...", "", delayMs: 1000);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act: 1 本目の実行中に 2 本目のセッションを開始する
+        Task<LauncherResult> firstRun = service.LaunchAsync(CreateReviewEvent("test-stream-busy-1"), LauncherRole.Reviewer, CancellationToken.None);
+        await Task.Delay(100);
+        AgentExecutionSession second = service.StartSession(CreateReviewEvent("test-stream-busy-2"), LauncherRole.Reviewer, CancellationToken.None);
+
+        // Assert: 同時実行抑止は即座に Failed の terminal event を持つセッションになる
+        LauncherResult secondResult = await second.Completion;
+        secondResult.Success.Should().BeFalse();
+        secondResult.ErrorMessage.Should().Contain("already running");
+
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent e in second.ReadEventsAsync())
+        {
+            events.Add(e);
+        }
+
+        events.Should().ContainSingle().Which.Outcome.Should().Be(AgentExecutionOutcome.Failed);
+
+        (await firstRun).Success.Should().BeTrue();
     }
 }

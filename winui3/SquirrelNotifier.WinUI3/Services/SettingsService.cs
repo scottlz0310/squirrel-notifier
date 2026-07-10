@@ -299,9 +299,11 @@ internal sealed class SettingsService
             throw new ArgumentException("Reviewed launcher command path cannot be empty", nameof(reviewedLauncherCommandPath));
         }
 
-        if (launcherTimeoutMs <= 0 || launcherTimeoutMs > 300000)
+        // レビューサイクルは 5 分を大きく超えるため、通知タイムアウト（上限 300000ms）とは
+        // 別に上限 2 時間まで許容する（#143）
+        if (launcherTimeoutMs <= 0 || launcherTimeoutMs > 7200000)
         {
-            throw new ArgumentOutOfRangeException(nameof(launcherTimeoutMs), "Launcher timeout must be between 1 and 300000 ms");
+            throw new ArgumentOutOfRangeException(nameof(launcherTimeoutMs), "Launcher timeout must be between 1 and 7200000 ms");
         }
 
         if (string.IsNullOrWhiteSpace(reviewerLauncherPresetId))
@@ -371,7 +373,8 @@ internal sealed class AppSettings
 
     public bool LauncherPresetsMigrated { get; set; }
 
-    public int LauncherTimeoutMs { get; set; } = 300000;
+    // 長時間のレビューサイクル（30 分超もありうる）を 5 分で強制終了しないよう既定 30 分（#143）
+    public int LauncherTimeoutMs { get; set; } = 1800000;
 
     public string LastSkippedVersion { get; set; } = string.Empty;
 

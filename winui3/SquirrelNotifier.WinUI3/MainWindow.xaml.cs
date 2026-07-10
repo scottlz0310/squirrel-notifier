@@ -846,7 +846,7 @@ internal sealed partial class MainWindow : Window
             string reviewerArguments = ReviewerArgumentsBox.Text;
             string reviewedPath = ReviewedPathBox.Text;
             string reviewedArguments = ReviewedArgumentsBox.Text;
-            int launcherTimeoutMs = double.IsNaN(LauncherTimeoutBox.Value) ? 300000 : (int)LauncherTimeoutBox.Value;
+            int launcherTimeoutMs = double.IsNaN(LauncherTimeoutBox.Value) ? 1800000 : (int)LauncherTimeoutBox.Value;
 
             string reviewerPresetId = Models.LauncherAgentCatalog.ResolvePresetId(reviewerPath, reviewerArguments, Models.LauncherRole.Reviewer);
             string reviewedPresetId = Models.LauncherAgentCatalog.ResolvePresetId(reviewedPath, reviewedArguments, Models.LauncherRole.Reviewed);
