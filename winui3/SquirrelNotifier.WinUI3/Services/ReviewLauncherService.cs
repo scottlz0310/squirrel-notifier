@@ -87,6 +87,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,
                 StandardOutputEncoding = System.Text.Encoding.UTF8,
                 StandardErrorEncoding = System.Text.Encoding.UTF8,
             };
@@ -106,6 +107,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
                 _activeProcess = _processRunner.Start(psi);
             }
+
+            // codex exec 等、スキル呼び出し機構を持たずプロンプト全文を引数で受け取るエージェントは
+            // stdin の EOF を待って停止することがあるため、標準入力を即座に閉じて EOF を通知する.
+            _activeProcess.StandardInput.Close();
 
             // Start reading stdout / stderr as tasks to avoid deadlock
             Task<string> stdoutTask = _activeProcess.StandardOutput.ReadToEndAsync(combinedToken);

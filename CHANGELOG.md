@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- reviewer / reviewed launcher スロットの実行エージェントを claude 固定から、claude / codex / agy / copilot のプリセットから選択できるようにした（#149）。`LauncherAgentCatalog` にエージェントごとの既定コマンド・引数テンプレート（codex / agy / copilot はスキル呼び出し機構を持たないため、プロンプト全文をテンプレートに埋め込む方式）と、レートリミット監視 agentId（`RateLimitAgentCatalog`）への対応付けを集約した。Settings UI にスロットごとのプリセット選択 ComboBox を追加し、選択時に command / arguments を既定値で埋める一方、従来どおりの自由編集も維持。保存時に現在の command / arguments を各プリセットの既定値と突き合わせて一致状況を判定し、どれとも一致しなければ「カスタム」として扱う。既存ユーザーの設定は一回限りの migration（`LauncherPresetsMigrated`）で移行時点の一致状況から初期プリセットを判定する。`SettingsService.ResolveLauncherRateLimitAgentId(LauncherRole)` により、launcher スロットからレートリミット監視 agentId を解決できるようにし、Auto-Pause（#147）が利用できるようにした。各エージェントへの MCP サーバー接続設定自体は Mcp-Docker の責務であり squirrel-notifier のスコープ外であることを `docs/launcher-agent-presets.md` に明記した。また、codex 等スキル機構を持たないエージェントが標準入力の EOF 待ちでハングする既知の問題（[openai/codex#20919](https://github.com/openai/codex/issues/20919)）を回避するため、`ReviewLauncherService` は起動直後に標準入力を閉じるようにした
+
 ## [0.3.0] - 2026-07-06
 
 ### Added

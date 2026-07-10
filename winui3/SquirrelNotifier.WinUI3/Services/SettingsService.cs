@@ -4,6 +4,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
@@ -62,6 +63,19 @@ internal sealed class SettingsService
             }
 
             _settings.LauncherSlotsMigrated = true;
+            SaveSettings();
+        }
+
+        // launcher スロットの command / arguments がどのエージェントプリセットと一致するかを
+        // 一回だけ判定して記録する（#149）。一致しない場合は「カスタム」として扱う.
+        if (!_settings.LauncherPresetsMigrated)
+        {
+            _settings.ReviewerLauncherPresetId = LauncherAgentCatalog.ResolvePresetId(
+                _settings.ReviewerLauncherCommandPath, _settings.ReviewerLauncherArguments, LauncherRole.Reviewer);
+            _settings.ReviewedLauncherPresetId = LauncherAgentCatalog.ResolvePresetId(
+                _settings.ReviewedLauncherCommandPath, _settings.ReviewedLauncherArguments, LauncherRole.Reviewed);
+
+            _settings.LauncherPresetsMigrated = true;
             SaveSettings();
         }
 
@@ -224,6 +238,22 @@ internal sealed class SettingsService
         SaveSettings();
     }
 
+    /// <summary>
+    /// 指定した launcher スロットに現在選択されているプリセットの rateLimitAgentId を解決する（#149）。
+    /// 「カスタム」設定、またはレートリミット取得手段が無いプリセット（copilot 等）の場合は
+    /// <see langword="null"/> を返す（Auto-Pause の gate 対象外として扱う #147）.
+    /// </summary>
+    /// <param name="role">解決対象の launcher スロット.</param>
+    /// <returns>対応する rateLimitAgentId。無い場合は <see langword="null"/>.</returns>
+    public string? ResolveLauncherRateLimitAgentId(LauncherRole role)
+    {
+        string presetId = role == LauncherRole.Reviewer
+            ? _settings.ReviewerLauncherPresetId
+            : _settings.ReviewedLauncherPresetId;
+
+        return LauncherAgentCatalog.Find(presetId)?.RateLimitAgentId;
+    }
+
     public void UpdateSettings(
         string commandPath,
         string arguments,
@@ -234,7 +264,9 @@ internal sealed class SettingsService
         string reviewerLauncherArguments,
         string reviewedLauncherCommandPath,
         string reviewedLauncherArguments,
-        int launcherTimeoutMs)
+        int launcherTimeoutMs,
+        string reviewerLauncherPresetId,
+        string reviewedLauncherPresetId)
     {
         if (string.IsNullOrWhiteSpace(commandPath))
         {
@@ -272,6 +304,16 @@ internal sealed class SettingsService
             throw new ArgumentOutOfRangeException(nameof(launcherTimeoutMs), "Launcher timeout must be between 1 and 300000 ms");
         }
 
+        if (string.IsNullOrWhiteSpace(reviewerLauncherPresetId))
+        {
+            throw new ArgumentException("Reviewer launcher preset id cannot be empty", nameof(reviewerLauncherPresetId));
+        }
+
+        if (string.IsNullOrWhiteSpace(reviewedLauncherPresetId))
+        {
+            throw new ArgumentException("Reviewed launcher preset id cannot be empty", nameof(reviewedLauncherPresetId));
+        }
+
         _settings.SubscriberCommandPath = commandPath;
         _settings.SubscriberArguments = arguments;
         _settings.GatewayUrl = gatewayUrl;
@@ -283,6 +325,8 @@ internal sealed class SettingsService
         _settings.ReviewedLauncherCommandPath = reviewedLauncherCommandPath;
         _settings.ReviewedLauncherArguments = reviewedLauncherArguments;
         _settings.LauncherTimeoutMs = launcherTimeoutMs;
+        _settings.ReviewerLauncherPresetId = reviewerLauncherPresetId;
+        _settings.ReviewedLauncherPresetId = reviewedLauncherPresetId;
         SaveSettings();
     }
 }
@@ -318,6 +362,14 @@ internal sealed class AppSettings
     public string ReviewedLauncherArguments { get; set; } = "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
 
     public bool LauncherSlotsMigrated { get; set; }
+
+    // launcher スロットに選択されているエージェントプリセット ID（LauncherAgentCatalog 参照）。
+    // 自由編集でどのプリセットとも一致しなくなった場合は LauncherAgentCatalog.CustomPresetId になる.
+    public string ReviewerLauncherPresetId { get; set; } = "claude";
+
+    public string ReviewedLauncherPresetId { get; set; } = "claude";
+
+    public bool LauncherPresetsMigrated { get; set; }
 
     public int LauncherTimeoutMs { get; set; } = 300000;
 
