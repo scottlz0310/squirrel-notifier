@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- ライブログウィンドウへレートリミット燃料ゲージを統合した（#146）。実行中の launcher に対応する agentId を最優先し、同一エージェント内では使用率が最大の枠を既定表示する。複数 agent / limit は ComboBox で手動切替でき、使用率・残量・リセット時刻・観測時刻・鮮度・実行前後の Delta を同一領域で確認できる。70% 以上を注意、90% 以上を危険としてテキストと InfoBar で明示し、stale・欠損・旧スキーマ・不整合な agentId は「取得不可」の正常系として扱う。Delta は開始／終了 snapshot が有効な場合のみ表示し、それ以外は取得不可の理由を表示する
 - レートリミットスキーマを使用率・鮮度・Delta対応へ拡張した（#145）。`RateLimitStatusPayload` / `RateLimitInfo` に `schemaVersion` / `agentId` / `observedAt` / `limits[].usedPercentage` を追加（agy の `remaining_fraction` はサンプルスクリプト側で使用率へ正規化）。`schemaVersion` 等を持たない旧形式（resetAt-only）の payload は引き続き通知予約用途で読み取れるが、使用率・Delta・freshness 判定の対象外として扱う。新スキーマの snapshot 取得には `RateLimitSnapshotService`、2つの snapshot 間の使用率差分（Delta）計算には `RateLimitDeltaCalculator` を追加し、`RateLimitDeltaUnavailableReason`（欠損・stale・reset 境界跨ぎ・usedPercentage 欠損等）により「取得不可」を例外ではなく正常系として扱う。snapshot の鮮度判定は `RateLimitFreshnessPolicy` が担い、閾値は Settings の `RateLimitFreshnessThresholdMinutes`（既定15分）で変更できる。**設計上の制約**: launcher が起動するのは `claude -p` 等のヘッドレス実行であり statusline はインタラクティブセッションの表示機構のため、ヘッドレス実行前後で fresh な snapshot が得られず Delta が「取得不可」になることが多い。Delta は best-effort と位置づけ、ヘッドレス実行でも確実に snapshot を更新する手段（Stop/SessionEnd hooks 等）は技術的前提が未検証のため別 Issue で検証してから対応する。claude-code / agy のサンプルスクリプトと `docs/statusline-integration.md` を新スキーマへ更新した
 
 ### Added

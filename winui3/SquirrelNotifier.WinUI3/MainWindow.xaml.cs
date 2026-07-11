@@ -1163,11 +1163,24 @@ internal sealed partial class MainWindow : Window
                 _settingsService.Settings.LiveLogAutoCloseEnabled,
                 SecretMasker.CreateDefault());
 
+            AppSettings settings = _settingsService.Settings;
+            string? activeAgentId = _settingsService.ResolveLauncherRateLimitAgentId(role);
+            TimeSpan freshnessThreshold = TimeSpan.FromMinutes(settings.RateLimitFreshnessThresholdMinutes);
+            ViewModels.RateLimitGaugeViewModel rateLimitGaugeViewModel = new(freshnessThreshold);
+            RateLimitSessionMonitor rateLimitSessionMonitor = new(
+                new RateLimitSnapshotService(_rateLimitFileService),
+                new RateLimitDeltaCalculator(),
+                settings.RateLimitMonitoredAgentIds,
+                activeAgentId,
+                freshnessThreshold);
+            IReadOnlyList<Models.RateLimitSnapshot> startSnapshots = await rateLimitSessionMonitor.CaptureStartAsync(CancellationToken.None);
+            rateLimitGaugeViewModel.Update(settings.RateLimitMonitoredAgentIds, startSnapshots, activeAgentId, []);
+
             AgentExecutionSession session = _launcherService.StartSession(reviewEvent, role, CancellationToken.None);
 
             // 実行の進捗とログはライブログウィンドウ（#144）が逐次表示する。lifecycle
             // （成功時自動クローズ・失敗時保持・クローズ時キャンセル）はウィンドウ側の責務
-            var window = new AgentExecutionWindow(session, viewModel, _launcherService.Cancel);
+            var window = new AgentExecutionWindow(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor, _launcherService.Cancel);
             _agentExecutionWindow = window;
             window.Closed += (_, _) =>
             {
