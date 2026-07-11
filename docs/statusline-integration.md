@@ -66,7 +66,7 @@ squirrel-notifier はレビューセッション開始時点と終了時点の 2
 - snapshot は観測時刻（`observedAt`）が現在時刻から Settings の「freshness 閾値」（既定 15 分、変更可）以内でなければ fresh とみなされない
 - 開始・終了の間でリセット境界を跨いだ場合（`resetAt` が変化した場合）も Delta は算出しない（負値や実態と無関係な大量消費として誤表示することを防ぐため）
 
-ヘッドレス実行でも確実に snapshot を更新する手段（Stop / SessionEnd 等のフックの活用）は調査中であり、技術的な検証が取れ次第、別途サンプルを追加する予定。
+Claude Code の `Stop` / `SessionEnd` hook は、ヘッドレス実行後の snapshot 更新手段には使えない。公式の hook 入力仕様に `rate_limits` は含まれず、Claude Code v2.1.207 の `SessionEnd` 実測でも `cwd`、`hook_event_name`、`prompt_id`、`reason`、`session_id`、`transcript_path` だけが渡された（#159）。`Stop` は通常応答の完了時のみ発火し、API エラー時は `StopFailure` が発火する。したがって、ヘッドレス実行の Delta は引き続き best-effort とし、取得不可を正常系として扱う。
 
 ## エージェント別の実データ構造とサンプル
 
