@@ -668,6 +668,35 @@ public class SettingsServiceTests : IDisposable
         reloaded.Settings.LiveLogAutoCloseEnabled.Should().BeFalse();
     }
 
+    [Fact]
+    public void Settings_ShouldDefaultRateLimitFreshnessThresholdToFifteenMinutes()
+    {
+        new AppSettings().RateLimitFreshnessThresholdMinutes.Should().Be(15);
+    }
+
+    [Fact]
+    public void UpdateRateLimitFreshnessThresholdMinutes_ShouldPersistValue()
+    {
+        // Act
+        _settingsService.UpdateRateLimitFreshnessThresholdMinutes(30);
+
+        // Assert
+        _settingsService.Settings.RateLimitFreshnessThresholdMinutes.Should().Be(30);
+
+        var reloaded = new SettingsService(_settingsDirectory, pnpmBinDir: string.Empty);
+        reloaded.Settings.RateLimitFreshnessThresholdMinutes.Should().Be(30);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(-100)]
+    public void UpdateRateLimitFreshnessThresholdMinutes_ShouldThrowForNonPositiveValues(int minutes)
+    {
+        FluentActions.Invoking(() => _settingsService.UpdateRateLimitFreshnessThresholdMinutes(minutes))
+            .Should().Throw<ArgumentOutOfRangeException>();
+    }
+
     [Theory]
     [InlineData("claude", "claude-code")]
     [InlineData("codex", "codex")]
