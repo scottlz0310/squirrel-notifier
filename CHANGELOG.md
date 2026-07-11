@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-11
+
 ### Added
 - Codex のレートリミットを App Server 経由で取得できるようにした（#163、spike #157）。`codex app-server`（stdio JSON-RPC）を snapshot 取得時にオンデマンド起動し、`account/rateLimits/read` の結果を共通スキーマへ正規化する（`rateLimitsByLimitId` 優先・`rateLimits` フォールバック、`{limitId}:primary` / `{limitId}:secondary` の安定 ID、`windowDurationMins` からのラベル導出）。statusline 連携が不要になり、レートリミット監視対象として codex を選択できる。App Server 経由の snapshot は取得時刻が観測時刻になるため常に fresh であり、ヘッドレス実行でも Delta と Auto-Pause の解除判定が機能する。未ログイン・起動失敗・タイムアウト・JSON-RPC error は「取得不可」の正常系として扱い、レビュー実行を妨げない。認証ファイルの読み取り・TUI 出力のパース・consume 系 API の呼び出しは行わない
 - `LauncherAgentDefinition` に progress event 対応度（`ProgressEventSupport`）を追加した（#151）。#143 で確定した contract では consumer 側の挙動は「構造化イベントを出力する統合が存在するか」のみで決まるため `Structured` / `None` の 2 値とし、claude は `Structured`（スキルへの progress スニペット組み込みが存在）、codex / agy / copilot / カスタム設定は `None`。ライブログウィンドウは未対応プリセットの実行開始時に「進捗表示に未対応（ログのみ）」であることを明示し、イベントが来ないことを異常に見せない。対応度は初期表示のヒントであり、`None` でも `@squirrel-progress` イベントを受信すれば phase 表示へ切り替わる（カスタム構成の producer を妨げない）
 - 危険水域で新規エージェント起動を停止する Auto-Pause を追加した（#147）。起動する launcher スロットのプリセットに対応する agent（#149 の rateLimitAgentId）の fresh な snapshot を起動直前に評価し、いずれかの limit の使用率が 95% 以上なら Paused へ遷移して新規起動を拒否する。gate は agent 単位で独立し、rateLimitAgentId を持たないプリセット（copilot / カスタム）は常に許可する。解除は fresh な snapshot で 95% 未満を確認した場合のみで、stale / missing data や resetAt 通過だけでは解除しない。Paused の理由（agent・limit・使用率・観測時刻・リセット時刻）は起動時ダイアログ・メイン UI・ライブログウィンドウに表示し、確認ダイアログ付きの「今回だけ起動を強行」で 1 回だけ override できる。実行中プロセス・MCP subscription・thread-owl queue には作用しない。運用手順は `docs/auto-pause.md` を参照
 - ライブログウィンドウへレートリミット燃料ゲージを統合した（#146）。実行中の launcher に対応する agentId を最優先し、同一エージェント内では使用率が最大の枠を既定表示する。複数 agent / limit は ComboBox で手動切替でき、使用率・残量・リセット時刻・観測時刻・鮮度・実行前後の Delta を同一領域で確認できる。70% 以上を注意、90% 以上を危険としてテキストと InfoBar で明示し、stale・欠損・旧スキーマ・不整合な agentId・snapshot ファイルの読み取り失敗は「取得不可」の正常系として扱い、レビュー実行本体を中断しない。Delta は開始／終了 snapshot が有効な場合のみ表示し、それ以外は取得不可の理由を表示する
-- レートリミットスキーマを使用率・鮮度・Delta対応へ拡張した（#145）。`RateLimitStatusPayload` / `RateLimitInfo` に `schemaVersion` / `agentId` / `observedAt` / `limits[].usedPercentage` を追加（agy の `remaining_fraction` はサンプルスクリプト側で使用率へ正規化）。`schemaVersion` 等を持たない旧形式（resetAt-only）の payload は引き続き通知予約用途で読み取れるが、使用率・Delta・freshness 判定の対象外として扱う。新スキーマの snapshot 取得には `RateLimitSnapshotService`、2つの snapshot 間の使用率差分（Delta）計算には `RateLimitDeltaCalculator` を追加し、`RateLimitDeltaUnavailableReason`（欠損・stale・reset 境界跨ぎ・usedPercentage 欠損等）により「取得不可」を例外ではなく正常系として扱う。snapshot の鮮度判定は `RateLimitFreshnessPolicy` が担い、閾値は Settings の `RateLimitFreshnessThresholdMinutes`（既定15分）で変更できる。**設計上の制約**: launcher が起動するのは `claude -p` 等のヘッドレス実行であり statusline はインタラクティブセッションの表示機構のため、ヘッドレス実行前後で fresh な snapshot が得られず Delta が「取得不可」になることが多い。Delta は best-effort と位置づけ、ヘッドレス実行でも確実に snapshot を更新する手段（Stop/SessionEnd hooks 等）は技術的前提が未検証のため別 Issue で検証してから対応する。claude-code / agy のサンプルスクリプトと `docs/statusline-integration.md` を新スキーマへ更新した
+- レートリミットスキーマを使用率・鮮度・Delta対応へ拡張した（#145）。`RateLimitStatusPayload` / `RateLimitInfo` に `schemaVersion` / `agentId` / `observedAt` / `limits[].usedPercentage` を追加（agy の `remaining_fraction` はサンプルスクリプト側で使用率へ正規化）。`schemaVersion` 等を持たない旧形式（resetAt-only）の payload は引き続き通知予約用途で読み取れるが、使用率・Delta・freshness 判定の対象外として扱う。新スキーマの snapshot 取得には `RateLimitSnapshotService`、2つの snapshot 間の使用率差分（Delta）計算には `RateLimitDeltaCalculator` を追加し、`RateLimitDeltaUnavailableReason`（欠損・stale・reset 境界跨ぎ・usedPercentage 欠損等）により「取得不可」を例外ではなく正常系として扱う。snapshot の鮮度判定は `RateLimitFreshnessPolicy` が担い、閾値は Settings の `RateLimitFreshnessThresholdMinutes`（既定15分）で変更できる。**設計上の制約**: launcher が起動するのは `claude -p` 等のヘッドレス実行であり statusline はインタラクティブセッションの表示機構のため、ヘッドレス実行前後で fresh な snapshot が得られず Delta が「取得不可」になることが多い。Delta は best-effort と位置づけ、Claude Code の `Stop` / `SessionEnd` hooks も rate-limit snapshot を渡さないため代替経路にできない（#159）。claude-code / agy のサンプルスクリプトと `docs/statusline-integration.md` を新スキーマへ更新した
 
 ### Added
 - エージェント実行ライブログウィンドウを追加した（#144 第2弾）。「レビューする」「レビューに対応」の実行時に、従来のモーダルダイアログ（実行中 ContentDialog + 終了後の結果ダイアログ）に代えて専用サブウィンドウを表示し、stdout / stderr / progress を色分けした逐次ログ、phase 進捗（ProgressBar、非対応ランチャーは indeterminate）、Verdict と terminal 状態（InfoBar）をリアルタイム表示する。ウィンドウは現在モニターの work area 内・右下へ DPI を考慮して配置され、最前面ピン留めトグルを持つ。成功時は 3 秒後に自動クローズ（Settings の「ライブログ自動クローズ」トグルで無効化可能）、失敗・キャンセル・タイムアウト時は診断のため保持する。「キャンセル」ボタンと実行中のウィンドウクローズで実行をキャンセルできる（従来ダイアログのキャンセル動作を踏襲）。イベント反映は DispatcherQueue への coalescing バッチ化で UI 更新頻度を抑制する
@@ -169,7 +171,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.2...v0.1.3
