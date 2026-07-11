@@ -5,7 +5,8 @@
 namespace SquirrelNotifier.WinUI3.Models;
 
 /// <summary>
-/// statusline フック経由でレートリミット状態をローカルファイルに書き出せる CLI エージェントの定義.
+/// レートリミット状態を取得できる CLI エージェントの定義。取得経路はエージェントにより異なる
+/// （claude-code / agy は statusline フック由来のローカルファイル、codex は App Server 直読み #163）.
 /// </summary>
 internal sealed record RateLimitAgentDefinition(string Id, string DisplayName, bool IsAvailable);
 
@@ -20,9 +21,8 @@ internal static class RateLimitAgentCatalog
         new RateLimitAgentDefinition("claude-code", "claude-code", IsAvailable: true),
         new RateLimitAgentDefinition("agy", "agy (Antigravity CLI)", IsAvailable: true),
 
-        // codex は statusline フックが外部コマンドに JSON を渡さず、notify にも
-        // rate limit フィールドが無いため、現時点ではローカルファイル経由の取得が不可能.
-        // 参照: https://github.com/openai/codex/issues/16037, /issues/20310
-        new RateLimitAgentDefinition("codex", "codex (対応待ち)", IsAvailable: false),
+        // codex は statusline フックが外部コマンドに JSON を渡さないためローカルファイル経由は
+        // 不可能だが、App Server（account/rateLimits/read）経由で取得できる（spike #157 / #163）.
+        new RateLimitAgentDefinition("codex", "codex", IsAvailable: true),
     ];
 }

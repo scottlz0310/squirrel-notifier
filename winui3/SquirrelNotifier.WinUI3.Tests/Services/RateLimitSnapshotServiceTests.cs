@@ -2,9 +2,12 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Threading;
 using FluentAssertions;
+using Moq;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
@@ -77,5 +80,45 @@ public class RateLimitSnapshotServiceTests : IDisposable
         Action act = () => _ = new RateLimitSnapshotService(null!);
 
         act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task CaptureAsync_Codex_ShouldUseAppServerClientInsteadOfLocalFile()
+    {
+        // ローカルファイルを一切用意していなくても App Server 経路から取得できる（#163）
+        string stdout =
+            "{\"id\":1,\"result\":{}}\n" +
+            "{\"id\":2,\"result\":{\"rateLimits\":{\"limitId\":\"codex\"," +
+            "\"primary\":{\"usedPercent\":55,\"windowDurationMins\":300,\"resetsAt\":1783768226}}}}\n";
+        var process = new Mock<IProcessInstance>();
+        process.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stdout))));
+        process.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+        process.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        var service = new RateLimitSnapshotService(
+            new RateLimitFileService(_settingsDirectory),
+            new CodexAppServerRateLimitClient(runner.Object));
+
+        RateLimitSnapshot? result = await service.CaptureAsync(RateLimitSnapshotService.CodexAgentId, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.AgentId.Should().Be("codex");
+        result.Limits.Should().ContainSingle().Which.UsedPercentage.Should().Be(55);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_Codex_ShouldReturnNull_WhenAppServerIsUnavailable()
+    {
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Throws(new System.ComponentModel.Win32Exception("codex not found"));
+        var service = new RateLimitSnapshotService(
+            new RateLimitFileService(_settingsDirectory),
+            new CodexAppServerRateLimitClient(runner.Object));
+
+        RateLimitSnapshot? result = await service.CaptureAsync(RateLimitSnapshotService.CodexAgentId, CancellationToken.None);
+
+        result.Should().BeNull();
     }
 }

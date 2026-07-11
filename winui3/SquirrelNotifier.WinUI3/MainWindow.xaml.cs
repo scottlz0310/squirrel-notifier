@@ -39,6 +39,7 @@ internal sealed partial class MainWindow : Window
     private readonly EnqueueReviewService _enqueueReviewService;
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitFileService _rateLimitFileService;
+    private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate = new();
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
@@ -124,6 +125,7 @@ internal sealed partial class MainWindow : Window
         _enqueueReviewService = enqueueReviewService;
         _rateLimitReminderService = rateLimitReminderService;
         _rateLimitFileService = rateLimitFileService;
+        _rateLimitSnapshotService = new RateLimitSnapshotService(rateLimitFileService);
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -714,14 +716,36 @@ internal sealed partial class MainWindow : Window
     {
         var fetchedLimits = new List<Models.RateLimitInfo>();
 
-        // 1. ローカルファイル経由（statusline フック連携、#139）
-        // IsAvailable=false（codex 等、対応待ち）は settings.json の手動編集等で IsMonitored=true に
-        // なっていてもローカルファイル読み取りの対象にしない。
+        // 1. ローカルファイル経由（statusline フック連携、#139）または App Server 経由（codex、#163）
+        // IsAvailable=false は settings.json の手動編集等で IsMonitored=true に
+        // なっていても読み取りの対象にしない。
         List<Models.RateLimitAgentOption> monitoredAgents = _rateLimitAgentOptions.Where(o => o.IsMonitored && o.IsAvailable).ToList();
         foreach (Models.RateLimitAgentOption agent in monitoredAgents)
         {
             try
             {
+                if (agent.Id == RateLimitSnapshotService.CodexAgentId)
+                {
+                    // codex は statusline を持たないため App Server（account/rateLimits/read）から取得する
+                    Models.RateLimitSnapshot? snapshot = await _rateLimitSnapshotService.CaptureAsync(agent.Id, CancellationToken.None).ConfigureAwait(true);
+                    if (snapshot == null)
+                    {
+                        await ShowAlertDialogAsync(
+                            "レートリミット情報を取得できません",
+                            $"{agent.DisplayName} のレートリミット情報を Codex App Server から取得できませんでした。codex にログイン済みか確認してください。");
+                        continue;
+                    }
+
+                    string sourceUri = Services.RateLimitFileService.BuildSourceIdentifier(agent.Id);
+                    foreach (Models.RateLimitInfo info in snapshot.Limits)
+                    {
+                        info.SourceUri = sourceUri;
+                        fetchedLimits.Add(info);
+                    }
+
+                    continue;
+                }
+
                 string? json = await _rateLimitFileService.ReadAgentStatusAsync(agent.Id, CancellationToken.None).ConfigureAwait(true);
                 if (json == null)
                 {
@@ -1185,7 +1209,7 @@ internal sealed partial class MainWindow : Window
             TimeSpan freshnessThreshold = TimeSpan.FromMinutes(settings.RateLimitFreshnessThresholdMinutes);
             ViewModels.RateLimitGaugeViewModel rateLimitGaugeViewModel = new(freshnessThreshold);
             RateLimitSessionMonitor rateLimitSessionMonitor = new(
-                new RateLimitSnapshotService(_rateLimitFileService),
+                _rateLimitSnapshotService,
                 new RateLimitDeltaCalculator(),
                 settings.RateLimitMonitoredAgentIds,
                 activeAgentId,
