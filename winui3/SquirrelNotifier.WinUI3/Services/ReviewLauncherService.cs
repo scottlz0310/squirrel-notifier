@@ -22,6 +22,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private readonly object _lock = new();
 
     private bool _isRunning;
+    private bool _cancelRequested;
     private IProcessInstance? _activeProcess;
     private CancellationTokenSource? _activeCts;
 
@@ -75,6 +76,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             }
 
             _isRunning = true;
+            _cancelRequested = false;
         }
 
         // RunSessionAsync は例外をすべて terminal event に変換するため fire-and-forget で安全
@@ -86,6 +88,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     {
         lock (_lock)
         {
+            // Cancel() は内部 CTS だけを cancel し、呼び出し元の cancellationToken には
+            // 伝播しない。timeout（内部 CTS の CancelAfter）と区別して terminal event を
+            // Cancelled に分類できるよう、手動キャンセルの発生をフラグで記録する.
+            _cancelRequested = true;
             _activeCts?.Cancel();
             KillActiveProcess();
         }
@@ -188,7 +194,14 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
         catch (OperationCanceledException)
         {
-            bool cancelledByUser = cancellationToken.IsCancellationRequested;
+            bool cancelledByUser;
+            lock (_lock)
+            {
+                // 呼び出し元トークン経由（cancellationToken）と Cancel() 経由（_cancelRequested）の
+                // どちらも user-cancel。どちらでもなければ内部 CTS の CancelAfter による timeout.
+                cancelledByUser = cancellationToken.IsCancellationRequested || _cancelRequested;
+            }
+
             string reason = cancelledByUser ? "cancelled by user" : "timed out";
             await LogAsync($"Review process was {reason}.").ConfigureAwait(false);
 

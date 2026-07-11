@@ -464,6 +464,41 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task StartSession_ShouldEmitCancelledTerminalEvent_WhenCancelMethodInvoked()
+    {
+        // Arrange: Cancel() は内部 CTS のみを cancel し、呼び出し元トークンは cancel されない経路。
+        // timeout（TimedOut）に誤分類されないことを固定する（#143 レビュー対応）
+        ConfigureSettings();
+        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out _, out _);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-cancel-method"), LauncherRole.Reviewer, CancellationToken.None);
+        await Task.Delay(100);
+        service.Cancel();
+
+        LauncherResult result = await session.Completion;
+
+        // Assert: Cancel() 自身と OCE ハンドラの両方が Kill を呼ぶため AtLeastOnce で検証
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("cancelled by user");
+        mockProcess.Verify(p => p.Kill(true), Times.AtLeastOnce);
+
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent e in session.ReadEventsAsync())
+        {
+            events.Add(e);
+        }
+
+        events.Should().ContainSingle(e => e.Kind == AgentExecutionEventKind.Completed)
+            .Which.Outcome.Should().Be(AgentExecutionOutcome.Cancelled);
+    }
+
+    [Fact]
     public async Task StartSession_ShouldEmitTimedOutTerminalEvent_WhenTimedOut()
     {
         // Arrange
