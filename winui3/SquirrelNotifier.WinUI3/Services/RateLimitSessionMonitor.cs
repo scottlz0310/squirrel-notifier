@@ -46,6 +46,8 @@ internal sealed class RateLimitSessionMonitor
 
     public string? ActiveAgentId => _activeAgentId;
 
+    public TimeSpan FreshnessThreshold => _freshnessThreshold;
+
     public async Task<IReadOnlyList<RateLimitSnapshot>> CaptureStartAsync(CancellationToken cancellationToken)
     {
         _startCapturedAt = _timeProvider.GetUtcNow();

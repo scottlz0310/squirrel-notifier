@@ -34,6 +34,7 @@ internal sealed partial class AgentExecutionWindow : Window
     private readonly AgentExecutionSession _session;
     private readonly RateLimitGaugeViewModel _rateLimitGaugeViewModel;
     private readonly RateLimitSessionMonitor _rateLimitSessionMonitor;
+    private readonly AutoPauseGate _autoPauseGate;
     private readonly Action _cancelAction;
     private readonly CancellationTokenSource _readCts = new();
     private readonly object _pendingLock = new();
@@ -49,18 +50,21 @@ internal sealed partial class AgentExecutionWindow : Window
         AgentExecutionViewModel viewModel,
         RateLimitGaugeViewModel rateLimitGaugeViewModel,
         RateLimitSessionMonitor rateLimitSessionMonitor,
+        AutoPauseGate autoPauseGate,
         Action cancelAction)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(rateLimitGaugeViewModel);
         ArgumentNullException.ThrowIfNull(rateLimitSessionMonitor);
+        ArgumentNullException.ThrowIfNull(autoPauseGate);
         ArgumentNullException.ThrowIfNull(cancelAction);
 
         _session = session;
         ViewModel = viewModel;
         _rateLimitGaugeViewModel = rateLimitGaugeViewModel;
         _rateLimitSessionMonitor = rateLimitSessionMonitor;
+        _autoPauseGate = autoPauseGate;
         _cancelAction = cancelAction;
 
         InitializeComponent();
@@ -73,6 +77,7 @@ internal sealed partial class AgentExecutionWindow : Window
         LogListView.ItemsSource = viewModel.LogLines;
         RateLimitSelector.ItemsSource = _rateLimitGaugeViewModel.Options;
         SyncRateLimitGauge();
+        SyncAutoPauseInfoBar();
 
         nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         Microsoft.UI.WindowId windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
@@ -181,6 +186,14 @@ internal sealed partial class AgentExecutionWindow : Window
                         _rateLimitSessionMonitor.ActiveAgentId,
                         update.Deltas);
                     SyncRateLimitGauge();
+
+                    // この実行で危険水域へ達した場合の Paused 遷移（および回復による解除）を
+                    // 終了時 snapshot で評価する。gate の StateChanged がメイン UI 側も更新する
+                    _autoPauseGate.Evaluate(
+                        _rateLimitSessionMonitor.ActiveAgentId,
+                        update.Snapshots,
+                        _rateLimitSessionMonitor.FreshnessThreshold);
+                    SyncAutoPauseInfoBar();
                 });
             }
         }
@@ -221,6 +234,20 @@ internal sealed partial class AgentExecutionWindow : Window
         };
         RateLimitTimingTextBlock.Text = _rateLimitGaugeViewModel.TimingText;
         RateLimitDeltaTextBlock.Text = _rateLimitGaugeViewModel.DeltaText;
+    }
+
+    private void SyncAutoPauseInfoBar()
+    {
+        AutoPausedLimit? paused = _autoPauseGate.PausedLimits
+            .FirstOrDefault(limit => limit.AgentId == _rateLimitSessionMonitor.ActiveAgentId);
+        if (paused is null)
+        {
+            AutoPauseInfoBar.IsOpen = false;
+            return;
+        }
+
+        AutoPauseInfoBar.Message = $"{paused.BuildReasonText()}。fresh なレートリミット情報で使用率 95% 未満を確認すると自動解除されます。";
+        AutoPauseInfoBar.IsOpen = true;
     }
 
     private void ShowTerminalState()

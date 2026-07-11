@@ -39,6 +39,7 @@ internal sealed partial class MainWindow : Window
     private readonly EnqueueReviewService _enqueueReviewService;
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitFileService _rateLimitFileService;
+    private readonly AutoPauseGate _autoPauseGate = new();
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
     private bool _isCheckingForUpdates;
@@ -46,6 +47,7 @@ internal sealed partial class MainWindow : Window
     private bool _isAutoStartToggling;
     private bool _isSyncingLauncherPresetSelection;
     private bool _isApplyingLauncherPreset;
+    private bool _isReviewStartPending;
 
     // ライブログウィンドウ（#144）のマネージド参照。保持しないと ExecuteReviewAsync 終了後に
     // Window ラッパーが GC 対象になり、失敗時に診断用として開き続けるべきウィンドウが死ぬ。
@@ -97,6 +99,10 @@ internal sealed partial class MainWindow : Window
         bool showWindow = true)
     {
         InitializeComponent();
+
+        // Auto-Pause（#147）の状態はセッション終了時（ライブログウィンドウ側の評価）にも
+        // 変わるため、イベント経由でメイン UI の表示へ反映する
+        _autoPauseGate.StateChanged += (_, _) => UpdateAutoPauseInfoBar();
 
         // Set window size (WinUI3 requires this in code)
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -1142,6 +1148,15 @@ internal sealed partial class MainWindow : Window
 
     private async Task ExecuteReviewAsync(Models.ReviewEvent reviewEvent, Models.LauncherRole role)
     {
+        // Auto-Pause 確認ダイアログ等の await 中は IsRunning がまだ false のため、起動ボタンの
+        // 連打で本メソッドが再入し ContentDialog の多重表示（WinUI3 では例外）になる。
+        // 再入はダイアログを出さず黙って無視する — ここでダイアログを出すこと自体が
+        // 多重表示例外の原因になるため（#147 レビュー指摘）
+        if (_isReviewStartPending)
+        {
+            return;
+        }
+
         if (_launcherService.IsRunning)
         {
             ContentDialog dialog = new ContentDialog
@@ -1155,6 +1170,7 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
+        _isReviewStartPending = true;
         try
         {
             string roleLabel = role == Models.LauncherRole.Reviewer ? "レビューする" : "レビューに対応";
@@ -1176,11 +1192,21 @@ internal sealed partial class MainWindow : Window
             IReadOnlyList<Models.RateLimitSnapshot> startSnapshots = await rateLimitSessionMonitor.CaptureStartAsync(CancellationToken.None);
             rateLimitGaugeViewModel.Update(settings.RateLimitMonitoredAgentIds, startSnapshots, activeAgentId, []);
 
+            // Auto-Pause gate（#147）: 起動する launcher スロットの agent が危険水域なら
+            // 新規起動を拒否する。実行中プロセス・MCP subscription・queue には作用しない
+            AutoPauseDecision autoPauseDecision = _autoPauseGate.Evaluate(activeAgentId, startSnapshots, freshnessThreshold);
+            UpdateAutoPauseInfoBar();
+            if (autoPauseDecision.Status == AutoPauseStatus.Paused
+                && !await ConfirmAutoPauseOverrideAsync(autoPauseDecision.PausedLimit!))
+            {
+                return;
+            }
+
             AgentExecutionSession session = _launcherService.StartSession(reviewEvent, role, CancellationToken.None);
 
             // 実行の進捗とログはライブログウィンドウ（#144）が逐次表示する。lifecycle
             // （成功時自動クローズ・失敗時保持・クローズ時キャンセル）はウィンドウ側の責務
-            var window = new AgentExecutionWindow(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor, _launcherService.Cancel);
+            var window = new AgentExecutionWindow(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor, _autoPauseGate, _launcherService.Cancel);
             _agentExecutionWindow = window;
             window.Closed += (_, _) =>
             {
@@ -1202,6 +1228,45 @@ internal sealed partial class MainWindow : Window
             };
             await errDialog.ShowAsync(ContentDialogPlacement.Popup);
         }
+        finally
+        {
+            // StartSession 成功後の同時実行抑止は _launcherService.IsRunning が担う
+            _isReviewStartPending = false;
+        }
+    }
+
+    // 誤操作で常用されないよう既定ボタンはキャンセル側にする（#147 手動 override の設計論点）
+    private async Task<bool> ConfirmAutoPauseOverrideAsync(AutoPausedLimit pausedLimit)
+    {
+        ContentDialog dialog = new ContentDialog
+        {
+            Title = "レートリミット Auto-Pause 中",
+            Content = $"{pausedLimit.BuildReasonText()}\n\n"
+                + "新規エージェント起動を停止しています。fresh なレートリミット情報で使用率 95% 未満を確認すると自動解除されます。\n"
+                + "「今回だけ起動を強行」を選ぶと Paused 状態を維持したままこの 1 回のみ起動します。",
+            SecondaryButtonText = "今回だけ起動を強行",
+            CloseButtonText = "キャンセル",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot,
+        };
+        ContentDialogResult result = await dialog.ShowAsync(ContentDialogPlacement.Popup);
+        return result == ContentDialogResult.Secondary;
+    }
+
+    private void UpdateAutoPauseInfoBar()
+    {
+        IReadOnlyList<AutoPausedLimit> pausedLimits = _autoPauseGate.PausedLimits;
+        if (pausedLimits.Count == 0)
+        {
+            AutoPauseInfoBar.IsOpen = false;
+            return;
+        }
+
+        AutoPauseInfoBar.Message =
+            string.Join(Environment.NewLine, pausedLimits.Select(paused => paused.BuildReasonText()))
+            + Environment.NewLine
+            + "fresh なレートリミット情報で使用率 95% 未満を確認すると自動解除されます。";
+        AutoPauseInfoBar.IsOpen = true;
     }
 
     private async void OnEnqueueReviewClick(object sender, RoutedEventArgs e)

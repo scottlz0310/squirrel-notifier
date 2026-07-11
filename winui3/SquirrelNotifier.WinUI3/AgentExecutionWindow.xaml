@@ -55,6 +55,11 @@
             <TextBlock x:Name="RateLimitDeltaTextBlock"
                        FontSize="12"
                        TextWrapping="Wrap"/>
+            <InfoBar x:Name="AutoPauseInfoBar"
+                     IsOpen="False"
+                     IsClosable="False"
+                     Severity="Warning"
+                     Title="Auto-Pause 中（新規エージェント起動を停止）"/>
         </StackPanel>
 
         <InfoBar Grid.Row="3"
