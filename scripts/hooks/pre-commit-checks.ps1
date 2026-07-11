@@ -71,6 +71,9 @@ if ($null -eq $stagedFiles -or $stagedFiles.Count -eq 0) {
 }
 
 $binaryExtensions = @(".png", ".jpg", ".jpeg", ".gif", ".ico", ".zip", ".pdf", ".dll", ".exe")
+
+# shebang / 文字列比較の正しさのため LF 固定とするファイル種別（.gitattributes の eol=lf と対応、#145）
+$lfOnlyExtensions = @(".sh")
 $failed = $false
 
 # A. Case conflict check
@@ -147,19 +150,33 @@ foreach ($file in $stagedFiles) {
         $rawBytes = [System.IO.File]::ReadAllBytes((Resolve-Path $file).Path)
         if ($rawBytes.Length -eq 0) { continue }
 
-        # Line endings check (CRLF unified)
-        $hasLFWithoutCR = $false
-        for ($i = 0; $i -lt $rawBytes.Length; $i++) {
-            if ($rawBytes[$i] -eq 10) { # LF (\n)
-                if ($i -eq 0 -or $rawBytes[$i-1] -ne 13) { # Not CR (\r)
-                    $hasLFWithoutCR = $true
+        # Line endings check (CRLF unified、.sh 等 LF 固定の拡張子は対象外)
+        if ($lfOnlyExtensions -contains $ext) {
+            $hasCRLF = $false
+            for ($i = 0; $i -lt $rawBytes.Length; $i++) {
+                if ($rawBytes[$i] -eq 13 -and $i + 1 -lt $rawBytes.Length -and $rawBytes[$i + 1] -eq 10) { # CR LF
+                    $hasCRLF = $true
                     break
                 }
             }
-        }
-        if ($hasLFWithoutCR) {
-            Write-Host "ERROR: Non-CRLF (LF-only) line endings detected in '$file'. Only CRLF is allowed." -ForegroundColor Red
-            $failed = $true
+            if ($hasCRLF) {
+                Write-Host "ERROR: CRLF line endings detected in '$file'. This file type must use LF only." -ForegroundColor Red
+                $failed = $true
+            }
+        } else {
+            $hasLFWithoutCR = $false
+            for ($i = 0; $i -lt $rawBytes.Length; $i++) {
+                if ($rawBytes[$i] -eq 10) { # LF (\n)
+                    if ($i -eq 0 -or $rawBytes[$i-1] -ne 13) { # Not CR (\r)
+                        $hasLFWithoutCR = $true
+                        break
+                    }
+                }
+            }
+            if ($hasLFWithoutCR) {
+                Write-Host "ERROR: Non-CRLF (LF-only) line endings detected in '$file'. Only CRLF is allowed." -ForegroundColor Red
+                $failed = $true
+            }
         }
 
         # End of file newline check

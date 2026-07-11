@@ -112,4 +112,41 @@ public class RateLimitInfoTests
 
         act.Should().Throw<ArgumentException>();
     }
+
+    [Fact]
+    public void Validate_WithNullUsedPercentage_ShouldNotThrow()
+    {
+        var info = new RateLimitInfo { Id = "5h", Label = "5時間制限", ResetAt = DateTimeOffset.Now, UsedPercentage = null };
+
+        Action act = info.Validate;
+
+        act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(73.5)]
+    [InlineData(100)]
+    public void Validate_WithValidUsedPercentage_ShouldNotThrow(double usedPercentage)
+    {
+        var info = new RateLimitInfo { Id = "5h", Label = "5時間制限", ResetAt = DateTimeOffset.Now, UsedPercentage = usedPercentage };
+
+        Action act = info.Validate;
+
+        act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData(-0.1)]
+    [InlineData(-100)]
+    [InlineData(100.1)]
+    [InlineData(1000)]
+    public void Validate_WithOutOfRangeUsedPercentage_ShouldThrow(double usedPercentage)
+    {
+        var info = new RateLimitInfo { Id = "5h", Label = "5時間制限", ResetAt = DateTimeOffset.Now, UsedPercentage = usedPercentage };
+
+        Action act = info.Validate;
+
+        act.Should().Throw<ArgumentException>();
+    }
 }

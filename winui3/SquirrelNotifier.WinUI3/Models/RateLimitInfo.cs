@@ -21,6 +21,11 @@ internal sealed class RateLimitInfo : INotifyPropertyChanged
     [JsonPropertyName("resetAt")]
     public DateTimeOffset ResetAt { get; set; }
 
+    // 使用率（0〜100）。旧スキーマ（resetAt のみ）の payload には存在しないため null 許容とし、
+    // 「未知」を「0%」と誤読しないようにする（#145）.
+    [JsonPropertyName("usedPercentage")]
+    public double? UsedPercentage { get; set; }
+
     [JsonIgnore]
     public string SourceUri { get; set; } = string.Empty;
 
@@ -67,6 +72,11 @@ internal sealed class RateLimitInfo : INotifyPropertyChanged
         if (ResetAt == default)
         {
             throw new ArgumentException("ResetAt must be a valid timestamp.");
+        }
+
+        if (UsedPercentage is < 0 or > 100)
+        {
+            throw new ArgumentException("UsedPercentage must be between 0 and 100.");
         }
     }
 

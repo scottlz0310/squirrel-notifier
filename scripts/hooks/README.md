@@ -15,7 +15,7 @@
 - ファイル末尾の改行のチェック (end-of-file-fixer: SVG などを除くテキストファイル)
 - コンフリクトマーカー (`<<<<<<<`, `=======`, `>>>>>>>`) の検出 (check-merge-conflict)
 - プライベートキーや秘密情報の漏洩検知 (detect-private-key)
-- 改行コードのチェック (mixed-line-ending: CRLF 統一)
+- 改行コードのチェック (mixed-line-ending: CRLF 統一。`.sh` は shebang / 文字列比較の正しさのため LF 固定を要求)
 - YAML ファイルのタブインデント検知 (check-yaml)
 
 ---

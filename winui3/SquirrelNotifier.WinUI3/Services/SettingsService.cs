@@ -254,6 +254,21 @@ internal sealed class SettingsService
         SaveSettings();
     }
 
+    /// <summary>
+    /// レートリミットスナップショットを fresh とみなす経過時間の閾値（分）を更新する（#145）.
+    /// </summary>
+    /// <param name="minutes">1 分以上の閾値.</param>
+    public void UpdateRateLimitFreshnessThresholdMinutes(int minutes)
+    {
+        if (minutes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minutes), "Freshness threshold must be at least 1 minute");
+        }
+
+        _settings.RateLimitFreshnessThresholdMinutes = minutes;
+        SaveSettings();
+    }
+
     public void UpdateLiveLogAutoCloseEnabled(bool enabled)
     {
         _settings.LiveLogAutoCloseEnabled = enabled;
@@ -410,4 +425,8 @@ internal sealed class AppSettings
     // ローカルの statusline スクリプトがレートリミット状態を書き出すエージェント ID
     // （RateLimitAgentCatalog 参照）のうち、監視対象として選択されているもの
     public List<string> RateLimitMonitoredAgentIds { get; set; } = new();
+
+    // レートリミットスナップショットを fresh とみなす経過時間の閾値（分）。Delta 算出と
+    // Auto-Pause（#147）の両方が参照する（#145）
+    public int RateLimitFreshnessThresholdMinutes { get; set; } = RateLimitFreshnessPolicy.DefaultThresholdMinutes;
 }

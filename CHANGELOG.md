@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- レートリミットスキーマを使用率・鮮度・Delta対応へ拡張した（#145）。`RateLimitStatusPayload` / `RateLimitInfo` に `schemaVersion` / `agentId` / `observedAt` / `limits[].usedPercentage` を追加（agy の `remaining_fraction` はサンプルスクリプト側で使用率へ正規化）。`schemaVersion` 等を持たない旧形式（resetAt-only）の payload は引き続き通知予約用途で読み取れるが、使用率・Delta・freshness 判定の対象外として扱う。新スキーマの snapshot 取得には `RateLimitSnapshotService`、2つの snapshot 間の使用率差分（Delta）計算には `RateLimitDeltaCalculator` を追加し、`RateLimitDeltaUnavailableReason`（欠損・stale・reset 境界跨ぎ・usedPercentage 欠損等）により「取得不可」を例外ではなく正常系として扱う。snapshot の鮮度判定は `RateLimitFreshnessPolicy` が担い、閾値は Settings の `RateLimitFreshnessThresholdMinutes`（既定15分）で変更できる。**設計上の制約**: launcher が起動するのは `claude -p` 等のヘッドレス実行であり statusline はインタラクティブセッションの表示機構のため、ヘッドレス実行前後で fresh な snapshot が得られず Delta が「取得不可」になることが多い。Delta は best-effort と位置づけ、ヘッドレス実行でも確実に snapshot を更新する手段（Stop/SessionEnd hooks 等）は技術的前提が未検証のため別 Issue で検証してから対応する。claude-code / agy のサンプルスクリプトと `docs/statusline-integration.md` を新スキーマへ更新した
+
+### Added
 - エージェント実行ライブログウィンドウを追加した（#144 第2弾）。「レビューする」「レビューに対応」の実行時に、従来のモーダルダイアログ（実行中 ContentDialog + 終了後の結果ダイアログ）に代えて専用サブウィンドウを表示し、stdout / stderr / progress を色分けした逐次ログ、phase 進捗（ProgressBar、非対応ランチャーは indeterminate）、Verdict と terminal 状態（InfoBar）をリアルタイム表示する。ウィンドウは現在モニターの work area 内・右下へ DPI を考慮して配置され、最前面ピン留めトグルを持つ。成功時は 3 秒後に自動クローズ（Settings の「ライブログ自動クローズ」トグルで無効化可能）、失敗・キャンセル・タイムアウト時は診断のため保持する。「キャンセル」ボタンと実行中のウィンドウクローズで実行をキャンセルできる（従来ダイアログのキャンセル動作を踏襲）。イベント反映は DispatcherQueue への coalescing バッチ化で UI 更新頻度を抑制する
 
 ### Added
