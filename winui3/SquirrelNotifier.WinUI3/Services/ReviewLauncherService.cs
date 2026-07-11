@@ -62,6 +62,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         ArgumentNullException.ThrowIfNull(reviewEvent);
 
         var session = new AgentExecutionSession(_timeProvider);
+        CancellationTokenSource cts;
 
         lock (_lock)
         {
@@ -77,10 +78,18 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
             _isRunning = true;
             _cancelRequested = false;
+
+            // StartSession 直後（fire-and-forget の RunSessionAsync がプロセスを起動する前）の
+            // Cancel() が無視されないよう、CTS はここで生成して _activeCts に公開しておく。
+            // Cancel() は同じ lock 内で _activeCts を cancel するため、StartSession が戻った
+            // 時点以降のキャンセルは必ず combinedToken（プロセス起動前の
+            // ThrowIfCancellationRequested）に届く.
+            cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _activeCts = cts;
         }
 
         // RunSessionAsync は例外をすべて terminal event に変換するため fire-and-forget で安全
-        _ = RunSessionAsync(session, reviewEvent, role, cancellationToken);
+        _ = RunSessionAsync(session, reviewEvent, role, cts, cancellationToken);
         return session;
     }
 
@@ -112,7 +121,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         return CommandLineFormatter.Format(commandPath, args);
     }
 
-    private async Task RunSessionAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken)
+    private async Task RunSessionAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, CancellationTokenSource cts, CancellationToken cancellationToken)
     {
         Task<string>? stdoutTask = null;
         Task<string>? stderrTask = null;
@@ -125,9 +134,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             (string commandPath, string argumentsTemplate) = ResolveLauncherSlot(settings, role);
             int timeoutMs = settings.LauncherTimeoutMs;
 
-            _activeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _activeCts.CancelAfter(timeoutMs);
-            CancellationToken combinedToken = _activeCts.Token;
+            // CTS 自体は StartSession が生成済み（開始前キャンセルのレース対策）。
+            // timeout の起点はここ（設定読み取り後）から.
+            cts.CancelAfter(timeoutMs);
+            CancellationToken combinedToken = cts.Token;
 
             string resolvedPath = SettingsService.ResolveCommandPath(commandPath);
             if (string.IsNullOrWhiteSpace(resolvedPath))

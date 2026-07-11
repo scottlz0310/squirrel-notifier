@@ -499,6 +499,41 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task StartSession_ShouldNotStartProcess_WhenCancelledImmediatelyAfterStartSession()
+    {
+        // Arrange: StartSession 直後（fire-and-forget の RunSessionAsync がプロセスを起動する前）に
+        // Cancel() を呼ぶ開始前レース。CTS は StartSession 内で生成済みのため cancel が
+        // combinedToken に届き、プロセスは起動されず Cancelled で終端する（#143 レビュー対応）
+        ConfigureSettings();
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "should not run", "");
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act: StartSession が戻った直後に同期的に Cancel する
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-cancel-before-start"), LauncherRole.Reviewer, CancellationToken.None);
+        service.Cancel();
+
+        LauncherResult result = await session.Completion;
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("cancelled by user");
+        mockRunner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Never);
+
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent e in session.ReadEventsAsync())
+        {
+            events.Add(e);
+        }
+
+        events.Should().ContainSingle(e => e.Kind == AgentExecutionEventKind.Completed)
+            .Which.Outcome.Should().Be(AgentExecutionOutcome.Cancelled);
+    }
+
+    [Fact]
     public async Task StartSession_ShouldEmitTimedOutTerminalEvent_WhenTimedOut()
     {
         // Arrange
