@@ -723,4 +723,32 @@ public class SettingsServiceTests : IDisposable
         _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewer).Should().BeNull();
         _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewed).Should().BeNull();
     }
+
+    [Theory]
+    [InlineData("claude", "Structured")]
+    [InlineData("codex", "None")]
+    [InlineData("agy", "None")]
+    [InlineData("copilot", "None")]
+    public void ResolveLauncherProgressEventSupport_ShouldReturnMappedSupport_ForKnownPresets(string presetId, string expectedSupportName)
+    {
+        ProgressEventSupport expectedSupport = Enum.Parse<ProgressEventSupport>(expectedSupportName);
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+        _settingsService.UpdateSettings(
+            "cmd", "args", "http://localhost:3000", new[] { "queue://res" }, 30000,
+            definition.Command, definition.ReviewerArgumentsTemplate,
+            definition.Command, definition.ReviewedArgumentsTemplate,
+            300000, presetId, presetId);
+
+        _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewer).Should().Be(expectedSupport);
+        _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewed).Should().Be(expectedSupport);
+    }
+
+    [Fact]
+    public void ResolveLauncherProgressEventSupport_ShouldReturnNone_ForCustomPreset()
+    {
+        UpdateSettingsDefault(reviewerPresetId: "custom", reviewedPresetId: "custom");
+
+        _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewer).Should().Be(ProgressEventSupport.None);
+        _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewed).Should().Be(ProgressEventSupport.None);
+    }
 }
