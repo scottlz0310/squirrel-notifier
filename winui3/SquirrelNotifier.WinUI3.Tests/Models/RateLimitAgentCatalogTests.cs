@@ -19,9 +19,10 @@ public class RateLimitAgentCatalogTests
     }
 
     [Fact]
-    public void All_ShouldContainCodexAsUnavailable()
+    public void All_ShouldContainCodexAsAvailable()
     {
-        RateLimitAgentCatalog.All.Should().Contain(a => a.Id == "codex" && !a.IsAvailable);
+        // App Server 経由の取得経路（#163）により利用可能
+        RateLimitAgentCatalog.All.Should().Contain(a => a.Id == "codex" && a.IsAvailable);
     }
 
     [Fact]
