@@ -74,7 +74,23 @@ internal sealed class RateLimitSessionMonitor
             .Select(id => id!)
             .Distinct(StringComparer.Ordinal))
         {
-            RateLimitSnapshot? snapshot = await _snapshotService.CaptureAsync(agentId, cancellationToken).ConfigureAwait(false);
+            RateLimitSnapshot? snapshot;
+            try
+            {
+                snapshot = await _snapshotService.CaptureAsync(agentId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // ゲージは「取得不可」を正常系とする best-effort 機能のため、snapshot ファイルの
+                // 読み取り失敗（ロック・削除レース等）を当該 agent の取得不可として扱い、
+                // レビュー実行本体や他 agent の取得を中断しない（#146）
+                continue;
+            }
+
             if (snapshot is not null && snapshot.AgentId == agentId)
             {
                 snapshots.Add(snapshot);

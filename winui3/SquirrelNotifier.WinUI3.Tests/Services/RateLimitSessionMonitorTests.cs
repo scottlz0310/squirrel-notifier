@@ -51,6 +51,33 @@ public sealed class RateLimitSessionMonitorTests : IDisposable
         snapshots.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task CaptureStartAsync_ShouldSkipAgentWhenSnapshotReadFails()
+    {
+        await WriteSnapshotAsync("claude-code", 40);
+        await WriteSnapshotAsync("agy", 55);
+        RateLimitSessionMonitor monitor = CreateMonitor(["claude-code", "agy"], "claude-code");
+        string lockedPath = Path.Combine(_settingsDirectory, "ratelimit-status", "claude-code.json");
+        using FileStream exclusiveLock = new(lockedPath, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        IReadOnlyList<RateLimitSnapshot> snapshots = await monitor.CaptureStartAsync(CancellationToken.None);
+
+        snapshots.Should().ContainSingle(snapshot => snapshot.AgentId == "agy");
+    }
+
+    [Fact]
+    public async Task CaptureStartAsync_ShouldPropagateCancellation()
+    {
+        await WriteSnapshotAsync("claude-code", 40);
+        RateLimitSessionMonitor monitor = CreateMonitor(["claude-code"], "claude-code");
+        using CancellationTokenSource cts = new();
+        await cts.CancelAsync();
+
+        Func<Task> act = () => monitor.CaptureStartAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_settingsDirectory))
