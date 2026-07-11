@@ -33,7 +33,7 @@ public class RateLimitDeltaCalculatorTests
     {
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(null, null, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(null, null, _now, _threshold);
 
         results.Should().BeEmpty();
     }
@@ -44,7 +44,7 @@ public class RateLimitDeltaCalculatorTests
         RateLimitSnapshot start = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", _now.AddHours(5), 50));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, null, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, null, _now, _threshold);
 
         results.Should().ContainSingle();
         results[0].IsAvailable.Should().BeFalse();
@@ -58,20 +58,42 @@ public class RateLimitDeltaCalculatorTests
         RateLimitSnapshot end = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", _now.AddHours(5), 70));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(null, end, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(null, end, _now, _threshold);
 
         results.Should().ContainSingle();
         results[0].UnavailableReason.Should().Be(RateLimitDeltaUnavailableReason.MissingStartSnapshot);
     }
 
     [Fact]
+    public void Compute_StartSnapshotOlderThanThresholdRelativeToNow_ButFreshAtCaptureTime_ShouldReturnDelta()
+    {
+        // レビュー対応: 既定 launcher timeout（30分）相当の長時間レビューでも、開始スナップショットが
+        // 「開始しようとした時刻」において fresh であれば Delta を算出できることを固定する。
+        // 「now」基準で判定すると、レビューサイクルの長さそのもので常に stale 判定されてしまっていた
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(30);
+        DateTimeOffset resetAt = _now.AddHours(5);
+        RateLimitSnapshot start = CreateSnapshot(sessionStart, CreateLimit("5h", "5時間枠", resetAt, 50));
+        RateLimitSnapshot end = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", resetAt, 73));
+        RateLimitDeltaCalculator calculator = CreateCalculator();
+
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
+
+        results.Should().ContainSingle();
+        results[0].IsAvailable.Should().BeTrue();
+        results[0].DeltaPercentage.Should().Be(23);
+    }
+
+    [Fact]
     public void Compute_StartSnapshotStale_ShouldReturnStartSnapshotStale()
     {
-        RateLimitSnapshot start = CreateSnapshot(_now - TimeSpan.FromMinutes(20), CreateLimit("5h", "5時間枠", _now.AddHours(5), 50));
+        // セッション開始しようとした時点で、既に取得済みの snapshot 自体が古かったケース
+        // （statusline が長時間発火していなかった等）
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(5);
+        RateLimitSnapshot start = CreateSnapshot(sessionStart - TimeSpan.FromMinutes(20), CreateLimit("5h", "5時間枠", _now.AddHours(5), 50));
         RateLimitSnapshot end = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", _now.AddHours(5), 70));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
 
         results.Should().ContainSingle();
         results[0].UnavailableReason.Should().Be(RateLimitDeltaUnavailableReason.StartSnapshotStale);
@@ -80,11 +102,12 @@ public class RateLimitDeltaCalculatorTests
     [Fact]
     public void Compute_EndSnapshotStale_ShouldReturnEndSnapshotStale()
     {
-        RateLimitSnapshot start = CreateSnapshot(_now - TimeSpan.FromMinutes(5), CreateLimit("5h", "5時間枠", _now.AddHours(5), 50));
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(5);
+        RateLimitSnapshot start = CreateSnapshot(sessionStart, CreateLimit("5h", "5時間枠", _now.AddHours(5), 50));
         RateLimitSnapshot end = CreateSnapshot(_now - TimeSpan.FromMinutes(20), CreateLimit("5h", "5時間枠", _now.AddHours(5), 70));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
 
         results.Should().ContainSingle();
         results[0].UnavailableReason.Should().Be(RateLimitDeltaUnavailableReason.EndSnapshotStale);
@@ -93,12 +116,13 @@ public class RateLimitDeltaCalculatorTests
     [Fact]
     public void Compute_ValidFreshSnapshots_ShouldReturnDelta()
     {
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(10);
         DateTimeOffset resetAt = _now.AddHours(5);
-        RateLimitSnapshot start = CreateSnapshot(_now - TimeSpan.FromMinutes(10), CreateLimit("5h", "5時間枠", resetAt, 50));
+        RateLimitSnapshot start = CreateSnapshot(sessionStart, CreateLimit("5h", "5時間枠", resetAt, 50));
         RateLimitSnapshot end = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", resetAt, 73));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
 
         results.Should().ContainSingle();
         results[0].IsAvailable.Should().BeTrue();
@@ -109,11 +133,12 @@ public class RateLimitDeltaCalculatorTests
     public void Compute_ResetBoundaryCrossed_ShouldNotComputeDelta()
     {
         // resetAt が変化している = 開始・終了の間でリセットが発生している
-        RateLimitSnapshot start = CreateSnapshot(_now - TimeSpan.FromMinutes(10), CreateLimit("5h", "5時間枠", _now.AddMinutes(5), 95));
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(10);
+        RateLimitSnapshot start = CreateSnapshot(sessionStart, CreateLimit("5h", "5時間枠", _now.AddMinutes(5), 95));
         RateLimitSnapshot end = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", _now.AddHours(5), 10));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
 
         results.Should().ContainSingle();
         results[0].UnavailableReason.Should().Be(RateLimitDeltaUnavailableReason.ResetBoundaryCrossed);
@@ -123,12 +148,13 @@ public class RateLimitDeltaCalculatorTests
     [Fact]
     public void Compute_LimitMissingInStart_ShouldReturnLimitMissingInStart()
     {
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(10);
         DateTimeOffset resetAt = _now.AddHours(5);
-        RateLimitSnapshot start = CreateSnapshot(_now - TimeSpan.FromMinutes(10), CreateLimit("7d", "週次枠", resetAt, 20));
+        RateLimitSnapshot start = CreateSnapshot(sessionStart, CreateLimit("7d", "週次枠", resetAt, 20));
         RateLimitSnapshot end = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", resetAt, 30));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
 
         results.Should().ContainSingle();
         results[0].LimitId.Should().Be("5h");
@@ -141,12 +167,13 @@ public class RateLimitDeltaCalculatorTests
     [InlineData(null, null)]
     public void Compute_UsedPercentageMissing_ShouldReturnUsedPercentageMissing(double? startPct, double? endPct)
     {
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(10);
         DateTimeOffset resetAt = _now.AddHours(5);
-        RateLimitSnapshot start = CreateSnapshot(_now - TimeSpan.FromMinutes(10), CreateLimit("5h", "5時間枠", resetAt, startPct));
+        RateLimitSnapshot start = CreateSnapshot(sessionStart, CreateLimit("5h", "5時間枠", resetAt, startPct));
         RateLimitSnapshot end = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", resetAt, endPct));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
 
         results.Should().ContainSingle();
         results[0].UnavailableReason.Should().Be(RateLimitDeltaUnavailableReason.UsedPercentageMissing);
@@ -155,9 +182,10 @@ public class RateLimitDeltaCalculatorTests
     [Fact]
     public void Compute_MultipleLimits_ShouldEvaluateEachIndependently()
     {
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(10);
         DateTimeOffset resetAt = _now.AddHours(5);
         RateLimitSnapshot start = CreateSnapshot(
-            _now - TimeSpan.FromMinutes(10),
+            sessionStart,
             CreateLimit("5h", "5時間枠", resetAt, 50),
             CreateLimit("7d", "週次枠", resetAt, null));
         RateLimitSnapshot end = CreateSnapshot(
@@ -166,10 +194,34 @@ public class RateLimitDeltaCalculatorTests
             CreateLimit("7d", "週次枠", resetAt, 40));
         RateLimitDeltaCalculator calculator = CreateCalculator();
 
-        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, _threshold);
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
 
         results.Should().HaveCount(2);
         results.Should().ContainSingle(r => r.LimitId == "5h" && r.DeltaPercentage == 10);
         results.Should().ContainSingle(r => r.LimitId == "7d" && r.UnavailableReason == RateLimitDeltaUnavailableReason.UsedPercentageMissing);
+    }
+
+    [Fact]
+    public void Compute_DuplicateIdInStartSnapshot_ShouldNotThrow_AndUseFirstOccurrence()
+    {
+        // レビュー対応: 外部入力（malformed payload 等）が同一 id を複数含んでいても
+        // ToDictionary の ArgumentException で落ちず、正常系として算出できることを固定する
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(10);
+        DateTimeOffset resetAt = _now.AddHours(5);
+        RateLimitSnapshot start = CreateSnapshot(
+            sessionStart,
+            CreateLimit("5h", "5時間枠(1)", resetAt, 40),
+            CreateLimit("5h", "5時間枠(2・重複ID)", resetAt, 90));
+        RateLimitSnapshot end = CreateSnapshot(_now, CreateLimit("5h", "5時間枠", resetAt, 70));
+        RateLimitDeltaCalculator calculator = CreateCalculator();
+
+        Action act = () => calculator.Compute(start, end, sessionStart, _threshold);
+
+        act.Should().NotThrow();
+
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
+        results.Should().ContainSingle();
+        results[0].IsAvailable.Should().BeTrue();
+        results[0].DeltaPercentage.Should().Be(30); // 70 - 40（最初に出現したエントリを採用）
     }
 }
