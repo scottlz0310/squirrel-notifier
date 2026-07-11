@@ -9,7 +9,7 @@
     mc:Ignorable="d"
     Title="エージェント実行">
     <Grid Padding="12"
-          RowDefinitions="Auto,Auto,Auto,*,Auto"
+          RowDefinitions="Auto,Auto,Auto,Auto,*,Auto"
           RowSpacing="8">
         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
             <TextBlock Grid.Column="0"
@@ -36,12 +36,33 @@
                        TextWrapping="Wrap"/>
         </StackPanel>
 
-        <InfoBar Grid.Row="2"
+        <StackPanel Grid.Row="2" Spacing="4">
+            <TextBlock Text="レートリミット"
+                       FontWeight="SemiBold"/>
+            <ComboBox x:Name="RateLimitSelector"
+                      DisplayMemberPath="DisplayName"
+                      AutomationProperties.Name="表示するレートリミット枠"
+                      SelectionChanged="OnRateLimitSelectionChanged"/>
+            <ProgressBar x:Name="RateLimitProgressBar"
+                         Minimum="0"
+                         Maximum="100"/>
+            <InfoBar x:Name="RateLimitInfoBar"
+                     IsOpen="True"
+                     IsClosable="False"/>
+            <TextBlock x:Name="RateLimitTimingTextBlock"
+                       FontSize="12"
+                       TextWrapping="Wrap"/>
+            <TextBlock x:Name="RateLimitDeltaTextBlock"
+                       FontSize="12"
+                       TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <InfoBar Grid.Row="3"
                  x:Name="ResultInfoBar"
                  IsOpen="False"
                  IsClosable="False"/>
 
-        <ListView Grid.Row="3"
+        <ListView Grid.Row="4"
                   x:Name="LogListView"
                   SelectionMode="None"
                   Background="{ThemeResource ControlFillColorDefaultBrush}"
@@ -66,7 +87,7 @@
             </ListView.ItemTemplate>
         </ListView>
 
-        <StackPanel Grid.Row="4"
+        <StackPanel Grid.Row="5"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Spacing="8">

@@ -27,11 +27,13 @@ namespace SquirrelNotifier.WinUI3;
 internal sealed partial class AgentExecutionWindow : Window
 {
     private const int _windowWidthLogical = 480;
-    private const int _windowHeightLogical = 380;
+    private const int _windowHeightLogical = 520;
     private const int _placementMarginPhysical = 16;
     private static readonly TimeSpan _autoCloseDelay = TimeSpan.FromSeconds(3);
 
     private readonly AgentExecutionSession _session;
+    private readonly RateLimitGaugeViewModel _rateLimitGaugeViewModel;
+    private readonly RateLimitSessionMonitor _rateLimitSessionMonitor;
     private readonly Action _cancelAction;
     private readonly CancellationTokenSource _readCts = new();
     private readonly object _pendingLock = new();
@@ -42,14 +44,23 @@ internal sealed partial class AgentExecutionWindow : Window
     private bool _isClosed;
     private DispatcherQueueTimer? _autoCloseTimer;
 
-    public AgentExecutionWindow(AgentExecutionSession session, AgentExecutionViewModel viewModel, Action cancelAction)
+    public AgentExecutionWindow(
+        AgentExecutionSession session,
+        AgentExecutionViewModel viewModel,
+        RateLimitGaugeViewModel rateLimitGaugeViewModel,
+        RateLimitSessionMonitor rateLimitSessionMonitor,
+        Action cancelAction)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(viewModel);
+        ArgumentNullException.ThrowIfNull(rateLimitGaugeViewModel);
+        ArgumentNullException.ThrowIfNull(rateLimitSessionMonitor);
         ArgumentNullException.ThrowIfNull(cancelAction);
 
         _session = session;
         ViewModel = viewModel;
+        _rateLimitGaugeViewModel = rateLimitGaugeViewModel;
+        _rateLimitSessionMonitor = rateLimitSessionMonitor;
         _cancelAction = cancelAction;
 
         InitializeComponent();
@@ -60,6 +71,8 @@ internal sealed partial class AgentExecutionWindow : Window
         TitleText.Text = viewModel.Title;
         StatusTextBlock.Text = viewModel.StatusText;
         LogListView.ItemsSource = viewModel.LogLines;
+        RateLimitSelector.ItemsSource = _rateLimitGaugeViewModel.Options;
+        SyncRateLimitGauge();
 
         nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         Microsoft.UI.WindowId windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
@@ -148,8 +161,66 @@ internal sealed partial class AgentExecutionWindow : Window
         if (ViewModel.IsCompleted && !_terminalHandled)
         {
             _terminalHandled = true;
+            _ = CaptureEndRateLimitSnapshotAsync();
             ShowTerminalState();
         }
+    }
+
+    private async Task CaptureEndRateLimitSnapshotAsync()
+    {
+        try
+        {
+            RateLimitSessionUpdate update = await _rateLimitSessionMonitor.CaptureEndAsync(_readCts.Token).ConfigureAwait(false);
+            if (!_isClosed)
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    _rateLimitGaugeViewModel.Update(
+                        _rateLimitSessionMonitor.MonitoredAgentIds,
+                        update.Snapshots,
+                        _rateLimitSessionMonitor.ActiveAgentId,
+                        update.Deltas);
+                    SyncRateLimitGauge();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // ウィンドウを閉じた後の snapshot 取得中断。実行本体の状態には影響しない
+        }
+        catch (Exception ex)
+        {
+            if (!_isClosed)
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    _rateLimitGaugeViewModel.SetUnavailable($"レートリミット情報を取得できませんでした: {ex.Message}");
+                    SyncRateLimitGauge();
+                });
+            }
+        }
+    }
+
+    private void SyncRateLimitGauge()
+    {
+        if (!ReferenceEquals(RateLimitSelector.SelectedItem, _rateLimitGaugeViewModel.SelectedOption))
+        {
+            RateLimitSelector.SelectedItem = _rateLimitGaugeViewModel.SelectedOption;
+        }
+
+        RateLimitProgressBar.IsIndeterminate = _rateLimitGaugeViewModel.Severity == RateLimitGaugeSeverity.Unknown;
+        RateLimitProgressBar.Value = _rateLimitGaugeViewModel.ProgressValue;
+        RateLimitInfoBar.Title = _rateLimitGaugeViewModel.StatusText;
+        RateLimitInfoBar.Message = _rateLimitGaugeViewModel.UsageText;
+        RateLimitInfoBar.Severity = _rateLimitGaugeViewModel.Severity switch
+        {
+            RateLimitGaugeSeverity.Normal => InfoBarSeverity.Success,
+            RateLimitGaugeSeverity.Warning => InfoBarSeverity.Warning,
+            RateLimitGaugeSeverity.Critical => InfoBarSeverity.Error,
+            _ => InfoBarSeverity.Informational,
+        };
+        RateLimitTimingTextBlock.Text = _rateLimitGaugeViewModel.TimingText;
+        RateLimitDeltaTextBlock.Text = _rateLimitGaugeViewModel.DeltaText;
     }
 
     private void ShowTerminalState()
@@ -191,6 +262,12 @@ internal sealed partial class AgentExecutionWindow : Window
 
     private void OnCancelClick(object sender, RoutedEventArgs e)
         => _cancelAction();
+
+    private void OnRateLimitSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _rateLimitGaugeViewModel.Select(RateLimitSelector.SelectedItem as RateLimitGaugeOption);
+        SyncRateLimitGauge();
+    }
 
     private void OnCloseClick(object sender, RoutedEventArgs e)
         => Close();
