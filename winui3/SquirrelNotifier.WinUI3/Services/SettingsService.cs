@@ -291,6 +291,21 @@ internal sealed class SettingsService
         return LauncherAgentCatalog.Find(presetId)?.RateLimitAgentId;
     }
 
+    /// <summary>
+    /// 指定した launcher スロットに現在選択されているプリセットの progress event 対応度を解決する（#151）。
+    /// 「カスタム」設定など不明なプリセットは <see cref="ProgressEventSupport.None"/> として扱う.
+    /// </summary>
+    /// <param name="role">解決対象の launcher スロット.</param>
+    /// <returns>対応する progress event 対応度.</returns>
+    public ProgressEventSupport ResolveLauncherProgressEventSupport(LauncherRole role)
+    {
+        string presetId = role == LauncherRole.Reviewer
+            ? _settings.ReviewerLauncherPresetId
+            : _settings.ReviewedLauncherPresetId;
+
+        return LauncherAgentCatalog.Find(presetId)?.ProgressEventSupport ?? ProgressEventSupport.None;
+    }
+
     public void UpdateSettings(
         string commandPath,
         string arguments,

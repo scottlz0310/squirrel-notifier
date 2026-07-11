@@ -57,6 +57,28 @@ public class AgentExecutionViewModelTests
     }
 
     [Fact]
+    public void InitialState_ShouldExplainMissingProgressSupport_WhenAgentDoesNotSupportProgressEvents()
+    {
+        AgentExecutionViewModel vm = new(
+            "owner/repo#1（レビューする）", true, new SecretMasker([]), ProgressEventSupport.None);
+
+        vm.StatusText.Should().Contain("進捗表示に未対応");
+        vm.IsIndeterminate.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Apply_Progress_ShouldSwitchToPhaseDisplay_EvenWhenAgentIsMarkedUnsupported()
+    {
+        AgentExecutionViewModel vm = new(
+            "owner/repo#1（レビューする）", true, new SecretMasker([]), ProgressEventSupport.None);
+
+        vm.Apply(ProgressEvent(0, 4, "収集"));
+
+        vm.IsIndeterminate.Should().BeFalse();
+        vm.StatusText.Should().Be("Phase 1/4: 収集");
+    }
+
+    [Fact]
     public void Apply_Stdout_ShouldAppendSanitizedAndMaskedLine()
     {
         AgentExecutionViewModel vm = CreateViewModel(autoCloseEnabled: true, "local-secret");

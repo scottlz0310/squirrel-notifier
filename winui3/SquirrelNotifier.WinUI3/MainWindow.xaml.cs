@@ -1177,7 +1177,8 @@ internal sealed partial class MainWindow : Window
             var viewModel = new ViewModels.AgentExecutionViewModel(
                 $"{reviewEvent.Repository}#{reviewEvent.PrNumber}（{roleLabel}）",
                 _settingsService.Settings.LiveLogAutoCloseEnabled,
-                SecretMasker.CreateDefault());
+                SecretMasker.CreateDefault(),
+                _settingsService.ResolveLauncherProgressEventSupport(role));
 
             AppSettings settings = _settingsService.Settings;
             string? activeAgentId = _settingsService.ResolveLauncherRateLimitAgentId(role);

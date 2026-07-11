@@ -30,6 +30,25 @@ public class LauncherAgentCatalogTests
         definition!.RateLimitAgentId.Should().Be(expectedRateLimitAgentId);
     }
 
+    [Theory]
+    [InlineData("claude", "Structured")]
+    [InlineData("codex", "None")]
+    [InlineData("agy", "None")]
+    [InlineData("copilot", "None")]
+    public void All_ShouldMapExpectedProgressEventSupport(string presetId, string expectedSupport)
+    {
+        LauncherAgentDefinition? definition = LauncherAgentCatalog.Find(presetId);
+
+        definition.Should().NotBeNull();
+        definition!.ProgressEventSupport.Should().Be(Enum.Parse<ProgressEventSupport>(expectedSupport));
+    }
+
+    [Fact]
+    public void CustomPreset_ShouldNotSupportProgressEvents()
+    {
+        LauncherAgentCatalog.CustomPreset.ProgressEventSupport.Should().Be(ProgressEventSupport.None);
+    }
+
     [Fact]
     public void Find_ShouldReturnNull_ForUnknownId()
     {

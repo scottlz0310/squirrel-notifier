@@ -34,12 +34,23 @@ internal sealed class AgentExecutionViewModel : INotifyPropertyChanged
     private string? _verdict;
     private AgentExecutionOutcome? _outcome;
 
-    public AgentExecutionViewModel(string title, bool autoCloseEnabled, SecretMasker masker)
+    public AgentExecutionViewModel(
+        string title,
+        bool autoCloseEnabled,
+        SecretMasker masker,
+        ProgressEventSupport progressEventSupport = ProgressEventSupport.Structured)
     {
         ArgumentNullException.ThrowIfNull(masker);
         Title = title ?? string.Empty;
         _autoCloseEnabled = autoCloseEnabled;
         _masker = masker;
+
+        // 対応度はあくまで初期表示のヒント。None でも progress event を受信したら
+        // ApplyProgress が phase 表示へ切り替える（カスタム構成の producer を妨げない #151）
+        if (progressEventSupport == ProgressEventSupport.None)
+        {
+            _statusText = "実行中...（このエージェントは進捗表示に未対応です。ログのみ表示します）";
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

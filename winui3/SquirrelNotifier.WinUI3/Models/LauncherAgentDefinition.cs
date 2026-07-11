@@ -5,6 +5,20 @@
 namespace SquirrelNotifier.WinUI3.Models;
 
 /// <summary>
+/// エージェントプリセットの progress event contract（#143、<c>docs/progress-event-contract.md</c>）
+/// への対応度（#151）。consumer 側の挙動は「構造化イベントを出力する統合が存在するか」のみで
+/// 決まるため 2 値とし、将来 producer 統合の形が増えた場合に値を追加する.
+/// </summary>
+internal enum ProgressEventSupport
+{
+    /// <summary>構造化 progress event を出力する統合が無い。phase 表示のない indeterminate 表示になる.</summary>
+    None,
+
+    /// <summary>@squirrel-progress マーカー行を出力する統合（スキル組み込み等）が存在する.</summary>
+    Structured,
+}
+
+/// <summary>
 /// reviewer / reviewed launcher スロットへ既定のコマンド・引数テンプレートを提供する
 /// 実行エージェントの定義（#149）。.
 /// </summary>
@@ -17,13 +31,18 @@ namespace SquirrelNotifier.WinUI3.Models;
 /// レートリミット監視エージェント ID（<see cref="RateLimitAgentCatalog"/> の Id）への対応付け。
 /// 取得手段が無いエージェントは <see langword="null"/>.
 /// </param>
+/// <param name="ProgressEventSupport">
+/// progress event contract への対応度（#151）。省略時は <see cref="ProgressEventSupport.None"/>
+/// （新規プリセットは安全側の未対応扱い）.
+/// </param>
 internal sealed record LauncherAgentDefinition(
     string Id,
     string DisplayName,
     string Command,
     string ReviewerArgumentsTemplate,
     string ReviewedArgumentsTemplate,
-    string? RateLimitAgentId);
+    string? RateLimitAgentId,
+    ProgressEventSupport ProgressEventSupport = ProgressEventSupport.None);
 
 /// <summary>
 /// launcher スロットに選択できる実行エージェントのプリセット一覧（#149）.
@@ -43,6 +62,9 @@ internal static class LauncherAgentCatalog
     public static readonly LauncherAgentDefinition CustomPreset = new(
         CustomPresetId, "カスタム", string.Empty, string.Empty, string.Empty, null);
 
+    // claude はスキル定義への progress スニペット組み込み（docs/samples/skill-progress-snippet.md）
+    // により @squirrel-progress を出力できる。codex / agy / copilot はスキル機構が無く
+    // 構造化イベントの producer 統合が未整備のため None（indeterminate 表示）とする.
     public static readonly IReadOnlyList<LauncherAgentDefinition> All =
     [
         new LauncherAgentDefinition(
@@ -51,7 +73,8 @@ internal static class LauncherAgentCatalog
             "claude",
             "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
             "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
-            "claude-code"),
+            "claude-code",
+            ProgressEventSupport.Structured),
 
         // codex / agy / copilot はスキル呼び出し機構を持たないため、プロンプト全文を
         // テンプレートに埋め込む（MCP サーバー接続設定自体は Mcp-Docker の責務）.
