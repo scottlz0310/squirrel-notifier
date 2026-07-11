@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -17,9 +18,11 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private readonly SettingsService _settingsService;
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
+    private readonly TimeProvider _timeProvider;
     private readonly object _lock = new();
 
     private bool _isRunning;
+    private bool _cancelRequested;
     private IProcessInstance? _activeProcess;
     private CancellationTokenSource? _activeCts;
 
@@ -37,43 +40,105 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     public ReviewLauncherService(
         SettingsService settingsService,
         LoggingService loggingService,
-        IProcessRunner? processRunner = null)
+        IProcessRunner? processRunner = null,
+        TimeProvider? timeProvider = null)
     {
         _settingsService = settingsService;
         _loggingService = loggingService;
         _processRunner = processRunner ?? new ProcessRunner();
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken)
     {
+        AgentExecutionSession session = StartSession(reviewEvent, role, cancellationToken);
+        return await session.Completion.ConfigureAwait(false);
+    }
+
+    // 実行を開始し、イベント購読用のセッションを即座に返す（#143）。
+    // 実行結果は session.Completion で待機できる。LaunchAsync はこのメソッドの薄いラッパー.
+    public AgentExecutionSession StartSession(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(reviewEvent);
+
+        var session = new AgentExecutionSession(_timeProvider);
+        CancellationTokenSource cts;
 
         lock (_lock)
         {
             if (_isRunning)
             {
-                return new LauncherResult
+                session.Complete(AgentExecutionOutcome.Failed, new LauncherResult
                 {
                     Success = false,
                     ErrorMessage = "A review action is already running.",
-                };
+                });
+                return session;
             }
 
             _isRunning = true;
+            _cancelRequested = false;
+
+            // StartSession 直後（fire-and-forget の RunSessionAsync がプロセスを起動する前）の
+            // Cancel() が無視されないよう、CTS はここで生成して _activeCts に公開しておく。
+            // Cancel() は同じ lock 内で _activeCts を cancel するため、StartSession が戻った
+            // 時点以降のキャンセルは必ず combinedToken（プロセス起動前の
+            // ThrowIfCancellationRequested）に届く.
+            cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _activeCts = cts;
         }
 
-        await LogAsync($"User requested review execution for PR: {reviewEvent.Repository}#{reviewEvent.PrNumber} (role={role})").ConfigureAwait(false);
+        // RunSessionAsync は例外をすべて terminal event に変換するため fire-and-forget で安全
+        _ = RunSessionAsync(session, reviewEvent, role, cts, cancellationToken);
+        return session;
+    }
+
+    public void Cancel()
+    {
+        lock (_lock)
+        {
+            // Cancel() は内部 CTS だけを cancel し、呼び出し元の cancellationToken には
+            // 伝播しない。timeout（内部 CTS の CancelAfter）と区別して terminal event を
+            // Cancelled に分類できるよう、手動キャンセルの発生をフラグで記録する.
+            _cancelRequested = true;
+            _activeCts?.Cancel();
+            KillActiveProcess();
+        }
+    }
+
+    // 起動せずに、実際に LaunchAsync が実行するのと同じスロット選択・引数展開を適用した
+    // コマンド文字列を組み立てる（クリップボードコピー用）。コマンドパスは
+    // ResolveCommandPath で解決した絶対パスではなく、設定値そのもの（例: "claude"）を使う。
+    // ユーザーが自分のターミナルへ貼り付けて実行する用途では、そちらの方が可搬性が高く分かりやすいため。
+    public string BuildCommandLine(ReviewEvent reviewEvent, LauncherRole role)
+    {
+        ArgumentNullException.ThrowIfNull(reviewEvent);
 
         AppSettings settings = _settingsService.Settings;
         (string commandPath, string argumentsTemplate) = ResolveLauncherSlot(settings, role);
-        int timeoutMs = settings.LauncherTimeoutMs;
+        List<string> args = LauncherArgumentBuilder.BuildArguments(argumentsTemplate, reviewEvent);
 
-        _activeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _activeCts.CancelAfter(timeoutMs);
-        CancellationToken combinedToken = _activeCts.Token;
+        return CommandLineFormatter.Format(commandPath, args);
+    }
+
+    private async Task RunSessionAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, CancellationTokenSource cts, CancellationToken cancellationToken)
+    {
+        Task<string>? stdoutTask = null;
+        Task<string>? stderrTask = null;
 
         try
         {
+            await LogAsync($"User requested review execution for PR: {reviewEvent.Repository}#{reviewEvent.PrNumber} (role={role})").ConfigureAwait(false);
+
+            AppSettings settings = _settingsService.Settings;
+            (string commandPath, string argumentsTemplate) = ResolveLauncherSlot(settings, role);
+            int timeoutMs = settings.LauncherTimeoutMs;
+
+            // CTS 自体は StartSession が生成済み（開始前キャンセルのレース対策）。
+            // timeout の起点はここ（設定読み取り後）から.
+            cts.CancelAfter(timeoutMs);
+            CancellationToken combinedToken = cts.Token;
+
             string resolvedPath = SettingsService.ResolveCommandPath(commandPath);
             if (string.IsNullOrWhiteSpace(resolvedPath))
             {
@@ -93,7 +158,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             };
 
             // Build and add safe arguments
-            System.Collections.Generic.List<string> args = LauncherArgumentBuilder.BuildArguments(argumentsTemplate, reviewEvent);
+            List<string> args = LauncherArgumentBuilder.BuildArguments(argumentsTemplate, reviewEvent);
             foreach (string arg in args)
             {
                 psi.ArgumentList.Add(arg);
@@ -112,9 +177,11 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             // stdin の EOF を待って停止することがあるため、標準入力を即座に閉じて EOF を通知する.
             _activeProcess.StandardInput.Close();
 
-            // Start reading stdout / stderr as tasks to avoid deadlock
-            Task<string> stdoutTask = _activeProcess.StandardOutput.ReadToEndAsync(combinedToken);
-            Task<string> stderrTask = _activeProcess.StandardError.ReadToEndAsync(combinedToken);
+            // 実行中の逐次配信（#143）: 終了後一括の ReadToEndAsync ではなく行単位で読み取り、
+            // stdout / stderr の各ストリーム内の順序を維持したままセッションへ流す。
+            // WaitForExitAsync と並行して読み進めることでパイプ詰まりによる deadlock も回避する.
+            stdoutTask = PumpStdoutAsync(_activeProcess.StandardOutput, session, combinedToken);
+            stderrTask = PumpStderrAsync(_activeProcess.StandardError, session, combinedToken);
 
             await _activeProcess.WaitForExitAsync(combinedToken).ConfigureAwait(false);
 
@@ -125,38 +192,52 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
             await LogAsync($"Review process finished. ExitCode={exitCode}").ConfigureAwait(false);
 
-            return new LauncherResult
-            {
-                Success = exitCode == 0,
-                ExitCode = exitCode,
-                Stdout = stdout,
-                Stderr = stderr,
-            };
+            session.Complete(
+                exitCode == 0 ? AgentExecutionOutcome.Succeeded : AgentExecutionOutcome.Failed,
+                new LauncherResult
+                {
+                    Success = exitCode == 0,
+                    ExitCode = exitCode,
+                    Stdout = stdout,
+                    Stderr = stderr,
+                });
         }
         catch (OperationCanceledException)
         {
-            string reason = cancellationToken.IsCancellationRequested ? "cancelled by user" : "timed out";
+            bool cancelledByUser;
+            lock (_lock)
+            {
+                // 呼び出し元トークン経由（cancellationToken）と Cancel() 経由（_cancelRequested）の
+                // どちらも user-cancel。どちらでもなければ内部 CTS の CancelAfter による timeout.
+                cancelledByUser = cancellationToken.IsCancellationRequested || _cancelRequested;
+            }
+
+            string reason = cancelledByUser ? "cancelled by user" : "timed out";
             await LogAsync($"Review process was {reason}.").ConfigureAwait(false);
 
             KillActiveProcess();
+            await WaitForPumpsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
 
-            return new LauncherResult
-            {
-                Success = false,
-                ErrorMessage = $"Review process was {reason}.",
-            };
+            session.Complete(
+                cancelledByUser ? AgentExecutionOutcome.Cancelled : AgentExecutionOutcome.TimedOut,
+                new LauncherResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Review process was {reason}.",
+                });
         }
         catch (Exception ex)
         {
             await LogAsync($"Failed to run review process: {ex.Message}").ConfigureAwait(false);
 
             KillActiveProcess();
+            await WaitForPumpsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
 
-            return new LauncherResult
+            session.Complete(AgentExecutionOutcome.Failed, new LauncherResult
             {
                 Success = false,
                 ErrorMessage = ex.Message,
-            };
+            });
         }
         finally
         {
@@ -171,28 +252,64 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
     }
 
-    public void Cancel()
+    private static async Task<string> PumpStdoutAsync(StreamReader reader, AgentExecutionSession session, CancellationToken cancellationToken)
     {
-        lock (_lock)
+        var lines = new List<string>();
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string line)
         {
-            _activeCts?.Cancel();
-            KillActiveProcess();
+            lines.Add(line);
+
+            if (ProgressEventParser.TryParse(line, out AgentProgressEvent? progress))
+            {
+                session.PublishProgress(progress!);
+            }
+            else
+            {
+                // マーカー不一致・malformed JSON・未知 schemaVersion は通常ログとして流す（#143 AC）
+                session.PublishStdout(line);
+            }
         }
+
+        return string.Join('\n', lines);
     }
 
-    // 起動せずに、実際に LaunchAsync が実行するのと同じスロット選択・引数展開を適用した
-    // コマンド文字列を組み立てる（クリップボードコピー用）。コマンドパスは
-    // ResolveCommandPath で解決した絶対パスではなく、設定値そのもの（例: "claude"）を使う。
-    // ユーザーが自分のターミナルへ貼り付けて実行する用途では、そちらの方が可搬性が高く分かりやすいため。
-    public string BuildCommandLine(ReviewEvent reviewEvent, LauncherRole role)
+    private static async Task<string> PumpStderrAsync(StreamReader reader, AgentExecutionSession session, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(reviewEvent);
+        var lines = new List<string>();
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string line)
+        {
+            lines.Add(line);
+            session.PublishStderr(line);
+        }
 
-        AppSettings settings = _settingsService.Settings;
-        (string commandPath, string argumentsTemplate) = ResolveLauncherSlot(settings, role);
-        System.Collections.Generic.List<string> args = LauncherArgumentBuilder.BuildArguments(argumentsTemplate, reviewEvent);
+        return string.Join('\n', lines);
+    }
 
-        return CommandLineFormatter.Format(commandPath, args);
+    // キャンセル・タイムアウト・例外時に reader task を残存させないための後始末。
+    // プロセス kill / トークンキャンセルに伴う読み取り側の例外は正常な終了経路として扱う.
+    private static async Task WaitForPumpsAsync(Task<string>? stdoutTask, Task<string>? stderrTask)
+    {
+        foreach (Task<string>? pump in new[] { stdoutTask, stderrTask })
+        {
+            if (pump == null)
+            {
+                continue;
+            }
+
+            try
+            {
+                await pump.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
     }
 
     // スロットはユーザーが押したアクションのロールだけで決まる（#127）

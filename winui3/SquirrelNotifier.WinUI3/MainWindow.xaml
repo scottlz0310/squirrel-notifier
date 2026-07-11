@@ -98,7 +98,7 @@
                     <TextBox Grid.Row="10" Grid.Column="1" x:Name="ReviewedArgumentsBox" TextChanged="OnSettingChanged"/>
 
                     <TextBlock Grid.Row="11" Grid.Column="0" Text="Launcher Timeout:" VerticalAlignment="Center"/>
-                    <NumberBox Grid.Row="11" Grid.Column="1" x:Name="LauncherTimeoutBox" Minimum="1" Maximum="300000" ValueChanged="OnTimeoutChanged"/>
+                    <NumberBox Grid.Row="11" Grid.Column="1" x:Name="LauncherTimeoutBox" Minimum="1" Maximum="7200000" ValueChanged="OnTimeoutChanged"/>
 
                     <TextBlock Grid.Row="12" Grid.Column="0" Text="自動起動:" VerticalAlignment="Center"/>
                     <ToggleSwitch Grid.Row="12" Grid.Column="1" x:Name="AutoStartToggle"
