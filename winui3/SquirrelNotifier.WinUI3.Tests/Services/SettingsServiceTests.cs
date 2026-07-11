@@ -546,6 +546,109 @@ public class SettingsServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public void ReviewedLauncherSkillMigration_ShouldRewriteLegacyDefaultArguments()
+    {
+        // Arrange: 旧既定値（実在しない /thread-owl-review-cycle を呼ぶテンプレート）のままの設定
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierSkillMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewedLauncherCommandPath = "claude",
+            ReviewedLauncherArguments = "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = false,
+            ReviewedLauncherSkillMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert: 新既定値へ書き換わり、後続のプリセット判定でも claude と一致する
+            service.Settings.ReviewedLauncherArguments.Should().Be(LauncherAgentCatalog.Find("claude")!.ReviewedArgumentsTemplate);
+            service.Settings.ReviewedLauncherArguments.Should().Contain("/review-raven-thread-owl-cycle");
+            service.Settings.ReviewedLauncherPresetId.Should().Be("claude");
+            service.Settings.ReviewedLauncherSkillMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("claude", "-p custom-args")]
+    [InlineData("my-custom-tool", "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"")]
+    public void ReviewedLauncherSkillMigration_ShouldNotRewriteCustomizedSettings(string reviewedCmd, string reviewedArgs)
+    {
+        // Arrange: command / arguments のどちらかが旧既定値と異なる（カスタマイズ済み）設定
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierSkillMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewedLauncherCommandPath = reviewedCmd,
+            ReviewedLauncherArguments = reviewedArgs,
+            LauncherSlotsMigrated = true,
+            ReviewedLauncherSkillMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert: カスタマイズ済みの値は変更されない
+            service.Settings.ReviewedLauncherCommandPath.Should().Be(reviewedCmd);
+            service.Settings.ReviewedLauncherArguments.Should().Be(reviewedArgs);
+            service.Settings.ReviewedLauncherSkillMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void ReviewedLauncherSkillMigration_ShouldSkipWhenAlreadyMigrated()
+    {
+        // Arrange: migration 済みフラグが立っている場合は旧既定値でも書き換えない
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierSkillMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        const string legacyArgs = "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+        var seed = new AppSettings
+        {
+            ReviewedLauncherCommandPath = "claude",
+            ReviewedLauncherArguments = legacyArgs,
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = true,
+            ReviewedLauncherSkillMigrated = true,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            // Act
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            // Assert
+            service.Settings.ReviewedLauncherArguments.Should().Be(legacyArgs);
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void Settings_ShouldDefaultReviewedLauncherArgumentsToExistingSkillName()
+    {
+        new AppSettings().ReviewedLauncherArguments.Should().Contain("/review-raven-thread-owl-cycle");
+    }
+
     [Theory]
     [InlineData("claude", "claude-code")]
     [InlineData("codex", "codex")]

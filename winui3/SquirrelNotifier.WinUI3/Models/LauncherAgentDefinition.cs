@@ -50,7 +50,7 @@ internal static class LauncherAgentCatalog
             "claude",
             "claude",
             "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
+            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
             "claude-code"),
 
         // codex / agy / copilot はスキル呼び出し機構を持たないため、プロンプト全文を

@@ -66,6 +66,22 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // reviewed launcher の旧既定値は実在しないスキル名（/thread-owl-review-cycle）を呼んでいた（#150）。
+        // 旧既定値のまま使っているユーザーのみ修正後の既定値へ一回だけ移行する（カスタマイズ済みの
+        // 値は変更しない）。後続の LauncherPresetsMigrated 判定が新しいカタログ値と一致するよう、
+        // この migration はプリセット判定より先に実行する.
+        if (!_settings.ReviewedLauncherSkillMigrated)
+        {
+            const string legacyReviewedLauncherArgs = "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+            if (_settings.ReviewedLauncherCommandPath == "claude" && _settings.ReviewedLauncherArguments == legacyReviewedLauncherArgs)
+            {
+                _settings.ReviewedLauncherArguments = LauncherAgentCatalog.Find("claude")!.ReviewedArgumentsTemplate;
+            }
+
+            _settings.ReviewedLauncherSkillMigrated = true;
+            SaveSettings();
+        }
+
         // launcher スロットの command / arguments がどのエージェントプリセットと一致するかを
         // 一回だけ判定して記録する（#149）。一致しない場合は「カスタム」として扱う.
         if (!_settings.LauncherPresetsMigrated)
@@ -361,9 +377,12 @@ internal sealed class AppSettings
     // reviewed-side スロット
     public string ReviewedLauncherCommandPath { get; set; } = "claude";
 
-    public string ReviewedLauncherArguments { get; set; } = "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+    public string ReviewedLauncherArguments { get; set; } = "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
 
     public bool LauncherSlotsMigrated { get; set; }
+
+    // reviewed launcher 既定値のスキル名修正（#150）を既存ユーザーへ適用する一回限り migration のフラグ
+    public bool ReviewedLauncherSkillMigrated { get; set; }
 
     // launcher スロットに選択されているエージェントプリセット ID（LauncherAgentCatalog 参照）。
     // 自由編集でどのプリセットとも一致しなくなった場合は LauncherAgentCatalog.CustomPresetId になる.

@@ -45,7 +45,7 @@ public class LauncherAgentCatalogTests
 
     [Theory]
     [InlineData("claude", "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "claude")]
-    [InlineData("claude", "-p \"/thread-owl-review-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"", "reviewed", "claude")]
+    [InlineData("claude", "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"", "reviewed", "claude")]
     [InlineData("claude", "--something-else", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     [InlineData("unknown-cmd", "unknown-args", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     public void ResolvePresetId_ShouldMatchExactCommandAndArguments(string command, string arguments, string roleName, string expectedPresetId)

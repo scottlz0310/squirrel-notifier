@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- reviewed launcher 既定値のスキル呼び出し名が実在しない `/thread-owl-review-cycle` になっており、デフォルト設定のまま「レビューに対応」を実行しても意図したレビュー対応サイクルが起動しない不具合を修正した（#150）。`AppSettings.ReviewedLauncherArguments` の既定値と `LauncherAgentCatalog` の claude プリセットを実在するスキル名 `/review-raven-thread-owl-cycle` へ修正。旧既定値のまま使っている既存ユーザーは一回限りの migration（`ReviewedLauncherSkillMigrated`）で新既定値へ移行し、カスタマイズ済みの値は変更しない。この migration はプリセット判定（`LauncherPresetsMigrated`）より先に実行され、`ReviewedLauncherPresetId` が「カスタム」に誤判定されることを防ぐ
+
 ### Added
 - エージェント実行イベントのストリーミング基盤と構造化 progress event contract を導入した（#143）。`ReviewLauncherService` がプロセス終了後に stdout / stderr を一括取得していた方式を行単位の逐次読み取りへ変更し、`AgentExecutionSession` から stdout / stderr / progress / completed の型付きイベントを実行中に購読できるようにした（`IReviewLauncherService.StartSession`。既存の `LaunchAsync` と `LauncherResult` の意味は維持）。progress event は stdout に混在する行頭マーカー `@squirrel-progress ` 付きの 1 行 JSON（schemaVersion / phaseIndex / totalPhases / phaseLabel / message / verdict / timestamp）とし、phase はエージェント非依存の汎用構造（0 始まり index / total / label）で phase 数を固定しない。マーカー不一致・malformed JSON・未知 schemaVersion の行は通常ログとして安全に流し、実行は失敗させない。成功・失敗・キャンセル・タイムアウトは区別された terminal event として通知する。producer 側の統合は `docs/progress-event-contract.md` とスキル組み込み用スニペット `docs/samples/skill-progress-snippet.md` を参照（statusline 連携と同じく、スキル定義への適用はユーザーの dotfiles / skills 側で行う）
 
