@@ -649,6 +649,25 @@ public class SettingsServiceTests : IDisposable
         new AppSettings().ReviewedLauncherArguments.Should().Contain("/review-raven-thread-owl-cycle");
     }
 
+    [Fact]
+    public void Settings_ShouldDefaultLiveLogAutoCloseToEnabled()
+    {
+        new AppSettings().LiveLogAutoCloseEnabled.Should().BeTrue();
+    }
+
+    [Fact]
+    public void UpdateLiveLogAutoCloseEnabled_ShouldPersistValue()
+    {
+        // Act
+        _settingsService.UpdateLiveLogAutoCloseEnabled(false);
+
+        // Assert
+        _settingsService.Settings.LiveLogAutoCloseEnabled.Should().BeFalse();
+
+        var reloaded = new SettingsService(_settingsDirectory, pnpmBinDir: string.Empty);
+        reloaded.Settings.LiveLogAutoCloseEnabled.Should().BeFalse();
+    }
+
     [Theory]
     [InlineData("claude", "claude-code")]
     [InlineData("codex", "codex")]

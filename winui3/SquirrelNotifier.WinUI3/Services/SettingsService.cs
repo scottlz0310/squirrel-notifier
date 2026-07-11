@@ -254,6 +254,12 @@ internal sealed class SettingsService
         SaveSettings();
     }
 
+    public void UpdateLiveLogAutoCloseEnabled(bool enabled)
+    {
+        _settings.LiveLogAutoCloseEnabled = enabled;
+        SaveSettings();
+    }
+
     /// <summary>
     /// 指定した launcher スロットに現在選択されているプリセットの rateLimitAgentId を解決する（#149）。
     /// 「カスタム」設定、またはレートリミット取得手段が無いプリセット（copilot 等）の場合は
@@ -396,6 +402,10 @@ internal sealed class AppSettings
     public int LauncherTimeoutMs { get; set; } = 1800000;
 
     public string LastSkippedVersion { get; set; } = string.Empty;
+
+    // ライブログウィンドウ（#144）: 成功終了時に短い猶予の後で自動クローズするか。
+    // 失敗・キャンセル・タイムアウト時は設定に関わらず診断のため保持する
+    public bool LiveLogAutoCloseEnabled { get; set; } = true;
 
     // ローカルの statusline スクリプトがレートリミット状態を書き出すエージェント ID
     // （RateLimitAgentCatalog 参照）のうち、監視対象として選択されているもの
