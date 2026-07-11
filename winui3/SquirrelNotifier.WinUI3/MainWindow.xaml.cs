@@ -46,6 +46,11 @@ internal sealed partial class MainWindow : Window
     private bool _isAutoStartToggling;
     private bool _isSyncingLauncherPresetSelection;
     private bool _isApplyingLauncherPreset;
+
+    // ライブログウィンドウ（#144）のマネージド参照。保持しないと ExecuteReviewAsync 終了後に
+    // Window ラッパーが GC 対象になり、失敗時に診断用として開き続けるべきウィンドウが死ぬ。
+    // 同時実行抑止によりウィンドウは常に 1 つのため単一フィールドで足りる
+    private AgentExecutionWindow? _agentExecutionWindow;
     private CancellationTokenSource? _copyFeedbackCts;
 
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
@@ -1163,6 +1168,14 @@ internal sealed partial class MainWindow : Window
             // 実行の進捗とログはライブログウィンドウ（#144）が逐次表示する。lifecycle
             // （成功時自動クローズ・失敗時保持・クローズ時キャンセル）はウィンドウ側の責務
             var window = new AgentExecutionWindow(session, viewModel, _launcherService.Cancel);
+            _agentExecutionWindow = window;
+            window.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_agentExecutionWindow, window))
+                {
+                    _agentExecutionWindow = null;
+                }
+            };
             window.Activate();
         }
         catch (Exception ex)
