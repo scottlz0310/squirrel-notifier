@@ -138,6 +138,7 @@ internal sealed partial class MainWindow : Window
         ReviewedPathBox.Text = settings.ReviewedLauncherCommandPath;
         ReviewedArgumentsBox.Text = settings.ReviewedLauncherArguments;
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
+        LiveLogAutoCloseToggle.IsOn = settings.LiveLogAutoCloseEnabled;
 
         ReviewerPresetComboBox.ItemsSource = Models.LauncherAgentCatalog.AllWithCustomOption;
         ReviewedPresetComboBox.ItemsSource = Models.LauncherAgentCatalog.AllWithCustomOption;
@@ -418,6 +419,16 @@ internal sealed partial class MainWindow : Window
         }
 
         SaveCurrentSettings();
+    }
+
+    private void OnLiveLogAutoCloseToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        _settingsService.UpdateLiveLogAutoCloseEnabled(LiveLogAutoCloseToggle.IsOn);
     }
 
     // プリセット選択（#149）: ComboBox で選んだプリセットの command / arguments を
@@ -1141,78 +1152,18 @@ internal sealed partial class MainWindow : Window
 
         try
         {
-            using CancellationTokenSource cts = new CancellationTokenSource();
+            string roleLabel = role == Models.LauncherRole.Reviewer ? "レビューする" : "レビューに対応";
+            var viewModel = new ViewModels.AgentExecutionViewModel(
+                $"{reviewEvent.Repository}#{reviewEvent.PrNumber}（{roleLabel}）",
+                _settingsService.Settings.LiveLogAutoCloseEnabled,
+                SecretMasker.CreateDefault());
 
-            ProgressRing progressRing = new ProgressRing { IsActive = true, Margin = new Thickness(0, 16, 0, 0) };
-            StackPanel panel = new StackPanel();
-            panel.Children.Add(new TextBlock { Text = $"{reviewEvent.Repository}#{reviewEvent.PrNumber} のレビューを実行しています..." });
-            panel.Children.Add(progressRing);
+            AgentExecutionSession session = _launcherService.StartSession(reviewEvent, role, CancellationToken.None);
 
-            ContentDialog dialog = new ContentDialog
-            {
-                Title = "レビュー実行中",
-                Content = panel,
-                CloseButtonText = "キャンセル",
-                XamlRoot = Content.XamlRoot,
-            };
-
-            Task<LauncherResult> launchTask = _launcherService.LaunchAsync(reviewEvent, role, cts.Token);
-            IAsyncOperation<ContentDialogResult> dialogTask = dialog.ShowAsync(ContentDialogPlacement.Popup);
-
-            Task completedTask = await Task.WhenAny(launchTask, dialogTask.AsTask()).ConfigureAwait(true);
-
-            if (completedTask == launchTask)
-            {
-                dialog.Hide();
-                LauncherResult result = await launchTask.ConfigureAwait(true);
-
-                StackPanel resultPanel = new StackPanel { Spacing = 8 };
-                if (result.Success)
-                {
-                    resultPanel.Children.Add(new TextBlock { Text = "レビューの実行に成功しました。", FontWeight = Microsoft.UI.Text.FontWeights.Bold });
-                }
-                else
-                {
-                    string err = string.IsNullOrEmpty(result.ErrorMessage) ? "レビューが異常終了しました。" : result.ErrorMessage;
-                    resultPanel.Children.Add(new TextBlock
-                    {
-                        Text = $"エラー: {err}",
-                        Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red),
-                    });
-                }
-
-                if (result.ExitCode.HasValue)
-                {
-                    resultPanel.Children.Add(new TextBlock { Text = $"終了コード: {result.ExitCode}" });
-                }
-
-                if (!string.IsNullOrWhiteSpace(result.Stdout))
-                {
-                    resultPanel.Children.Add(new TextBlock { Text = "標準出力:", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                    resultPanel.Children.Add(new TextBox { Text = result.Stdout, TextWrapping = TextWrapping.Wrap, IsReadOnly = true, MaxHeight = 120, AcceptsReturn = true });
-                }
-
-                if (!string.IsNullOrWhiteSpace(result.Stderr))
-                {
-                    resultPanel.Children.Add(new TextBlock { Text = "標準エラー出力:", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                    resultPanel.Children.Add(new TextBox { Text = result.Stderr, TextWrapping = TextWrapping.Wrap, IsReadOnly = true, MaxHeight = 120, AcceptsReturn = true });
-                }
-
-                ContentDialog resultDialog = new ContentDialog
-                {
-                    Title = result.Success ? "レビュー実行成功" : "レビュー実行失敗",
-                    Content = resultPanel,
-                    CloseButtonText = "閉じる",
-                    XamlRoot = Content.XamlRoot,
-                };
-                await resultDialog.ShowAsync(ContentDialogPlacement.Popup);
-            }
-            else
-            {
-                cts.Cancel();
-                _launcherService.Cancel();
-                await launchTask.ConfigureAwait(true);
-            }
+            // 実行の進捗とログはライブログウィンドウ（#144）が逐次表示する。lifecycle
+            // （成功時自動クローズ・失敗時保持・クローズ時キャンセル）はウィンドウ側の責務
+            var window = new AgentExecutionWindow(session, viewModel, _launcherService.Cancel);
+            window.Activate();
         }
         catch (Exception ex)
         {

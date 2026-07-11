@@ -10,6 +10,14 @@
 - 成功終了時は短い猶予の後に自動クローズする（Settings の `LiveLogAutoCloseEnabled` で無効化可能）。失敗・キャンセル・タイムアウト時は診断のため保持する
 - ログは行数上限付きの rolling buffer（`AgentExecutionViewModel.MaxLogLines` = 1000 行）で管理し、長時間実行でも UI メモリが無制限に増加しない
 
+## ウィンドウの挙動（`AgentExecutionWindow`）
+
+- 通知またはイベント行からエージェントを起動した時点で表示され、現在モニターの work area 内・右下へ DPI を考慮して配置される（`WindowPlacementCalculator`）
+- 最前面ピン留めトグル（`OverlappedPresenter.IsAlwaysOnTop`）を提供する
+- セッションのイベントは DispatcherQueue へ集約反映（coalescing バッチ化）され、UI 更新頻度が抑制される
+- 「キャンセル」ボタン、および実行中のウィンドウクローズで実行をキャンセルする（バックグラウンド継続はしない）
+- 同時実行抑止（単一実行）は launcher 側で維持されており、ウィンドウも同時に 1 つのみ表示される
+
 ## ログのサニタイズ
 
 表示前に各行へ以下を適用する（`Helpers/AnsiControlSanitizer`）:

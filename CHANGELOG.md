@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- エージェント実行ライブログウィンドウを追加した（#144 第2弾）。「レビューする」「レビューに対応」の実行時に、従来のモーダルダイアログ（実行中 ContentDialog + 終了後の結果ダイアログ）に代えて専用サブウィンドウを表示し、stdout / stderr / progress を色分けした逐次ログ、phase 進捗（ProgressBar、非対応ランチャーは indeterminate）、Verdict と terminal 状態（InfoBar）をリアルタイム表示する。ウィンドウは現在モニターの work area 内・右下へ DPI を考慮して配置され、最前面ピン留めトグルを持つ。成功時は 3 秒後に自動クローズ（Settings の「ライブログ自動クローズ」トグルで無効化可能）、失敗・キャンセル・タイムアウト時は診断のため保持する。「キャンセル」ボタンと実行中のウィンドウクローズで実行をキャンセルできる（従来ダイアログのキャンセル動作を踏襲）。イベント反映は DispatcherQueue への coalescing バッチ化で UI 更新頻度を抑制する
+
+### Added
 - エージェント実行ライブログウィンドウ（#144）の表示ロジック層を追加した（第1弾。Window / XAML と MainWindow 統合は次の PR）。`AgentExecutionViewModel` が #143 の型付きイベントを表示状態（phase 進捗・Verdict・terminal 状態・ログ行）へ変換し、行数上限 1000 行の rolling buffer で長時間実行でも UI メモリを無制限に増やさない。表示前の各行には ANSI エスケープ・制御文字の除去（`AnsiControlSanitizer`）と機密値マスキング（`SecretMasker`）を適用する。マスキング対象は「既知トークン形式のパターン（GitHub PAT / sk- 系 API キー / Bearer ヘッダ）」と「squirrel-notifier 自身が参照する `MCP_PROBE_AUTH_TOKEN` の値」に明示的に限定し、ルール外の機密値は保護対象外であることを `docs/live-log-window.md` に明記した。あわせて work area 内右下へ clamp 配置する `WindowPlacementCalculator` と、成功時自動クローズの設定（`LiveLogAutoCloseEnabled`、既定有効）を追加した
 
 ### Fixed
