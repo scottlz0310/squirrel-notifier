@@ -36,6 +36,10 @@ internal enum RateLimitDeltaUnavailableReason
 
     /// <summary>開始・終了間で resetAt が変化しており、リセット境界を跨いでいる.</summary>
     ResetBoundaryCrossed,
+
+    /// <summary>開始・終了いずれかのスナップショット内で同一 limit id が複数存在し、
+    /// どちらの値が正しいか判断できない（malformed payload 等）.</summary>
+    DuplicateLimitId,
 }
 
 /// <summary>

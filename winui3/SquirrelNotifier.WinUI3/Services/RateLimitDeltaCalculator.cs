@@ -60,21 +60,37 @@ internal sealed class RateLimitDeltaCalculator
             return BuildUnavailable(end.Limits, RateLimitDeltaUnavailableReason.EndSnapshotStale);
         }
 
-        // 重複 id が渡された場合でも例外を送出せず、最初に出現したエントリを採用する（レビュー対応）。
-        // 「算出不可は例外ではなく正常系」という本クラスの契約は、外部入力（parse 結果や将来の
-        // 呼び出し元）の品質に関わらず維持する.
-        Dictionary<string, RateLimitInfo> startById = start.Limits
+        // 重複 id は「例外を出さない」だけでなく、どちらの値が正しいか判断できない以上
+        // 数値を返してはならない。開始・終了それぞれでグループ化し、重複がある limit id は
+        // DuplicateLimitId として Delta 不可にする（レビュー対応）.
+        Dictionary<string, List<RateLimitInfo>> startById = start.Limits
             .GroupBy(l => l.Id)
-            .ToDictionary(g => g.Key, g => g.First());
+            .ToDictionary(g => g.Key, g => g.ToList());
         var results = new List<RateLimitDeltaResult>();
 
-        foreach (RateLimitInfo endLimit in end.Limits)
+        foreach (IGrouping<string, RateLimitInfo> endGroup in end.Limits.GroupBy(l => l.Id))
         {
-            if (!startById.TryGetValue(endLimit.Id, out RateLimitInfo? startLimit))
+            RateLimitInfo endLimit = endGroup.First();
+
+            if (endGroup.Count() > 1)
+            {
+                results.Add(new RateLimitDeltaResult(endLimit.Id, endLimit.Label, null, RateLimitDeltaUnavailableReason.DuplicateLimitId));
+                continue;
+            }
+
+            if (!startById.TryGetValue(endLimit.Id, out List<RateLimitInfo>? startEntries))
             {
                 results.Add(new RateLimitDeltaResult(endLimit.Id, endLimit.Label, null, RateLimitDeltaUnavailableReason.LimitMissingInStart));
                 continue;
             }
+
+            if (startEntries.Count > 1)
+            {
+                results.Add(new RateLimitDeltaResult(endLimit.Id, endLimit.Label, null, RateLimitDeltaUnavailableReason.DuplicateLimitId));
+                continue;
+            }
+
+            RateLimitInfo startLimit = startEntries[0];
 
             // resetAt が変化している = 開始・終了の間でリセットが発生している。単純な差分は
             // 負値や実態と無関係な大量消費として誤表示されるため、算出しない.

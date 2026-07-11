@@ -202,10 +202,10 @@ public class RateLimitDeltaCalculatorTests
     }
 
     [Fact]
-    public void Compute_DuplicateIdInStartSnapshot_ShouldNotThrow_AndUseFirstOccurrence()
+    public void Compute_DuplicateIdInStartSnapshot_ShouldNotThrow_AndReturnDuplicateLimitId()
     {
-        // レビュー対応: 外部入力（malformed payload 等）が同一 id を複数含んでいても
-        // ToDictionary の ArgumentException で落ちず、正常系として算出できることを固定する
+        // レビュー対応: 例外を出さないだけでなく、どちらの値が正しいか判断できない以上
+        // 数値を返してはならない（先頭採用による恣意的な値の表示を防ぐ）
         DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(10);
         DateTimeOffset resetAt = _now.AddHours(5);
         RateLimitSnapshot start = CreateSnapshot(
@@ -221,7 +221,31 @@ public class RateLimitDeltaCalculatorTests
 
         IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
         results.Should().ContainSingle();
-        results[0].IsAvailable.Should().BeTrue();
-        results[0].DeltaPercentage.Should().Be(30); // 70 - 40（最初に出現したエントリを採用）
+        results[0].IsAvailable.Should().BeFalse();
+        results[0].UnavailableReason.Should().Be(RateLimitDeltaUnavailableReason.DuplicateLimitId);
+        results[0].DeltaPercentage.Should().BeNull();
+    }
+
+    [Fact]
+    public void Compute_DuplicateIdInEndSnapshot_ShouldNotThrow_AndReturnDuplicateLimitId()
+    {
+        // 終了 snapshot 側の重複も同様に扱う（レビュー対応）
+        DateTimeOffset sessionStart = _now - TimeSpan.FromMinutes(10);
+        DateTimeOffset resetAt = _now.AddHours(5);
+        RateLimitSnapshot start = CreateSnapshot(sessionStart, CreateLimit("5h", "5時間枠", resetAt, 40));
+        RateLimitSnapshot end = CreateSnapshot(
+            _now,
+            CreateLimit("5h", "5時間枠(1)", resetAt, 70),
+            CreateLimit("5h", "5時間枠(2・重複ID)", resetAt, 20));
+        RateLimitDeltaCalculator calculator = CreateCalculator();
+
+        Action act = () => calculator.Compute(start, end, sessionStart, _threshold);
+
+        act.Should().NotThrow();
+
+        IReadOnlyList<RateLimitDeltaResult> results = calculator.Compute(start, end, sessionStart, _threshold);
+        results.Should().ContainSingle();
+        results[0].UnavailableReason.Should().Be(RateLimitDeltaUnavailableReason.DuplicateLimitId);
+        results[0].DeltaPercentage.Should().BeNull();
     }
 }
