@@ -27,6 +27,13 @@
                     <Button Content="設定へ移動" Click="OnGoToSettingsClick"/>
                 </InfoBar.ActionButton>
             </InfoBar>
+            <InfoBar x:Name="NotificationDisabledInfoBar"
+                     Title="トースト通知が無効です"
+                     Message="開発ビルド（unpackaged 実行）では Windows のトースト通知を利用できません。イベントはアプリ内のイベント行でご確認ください。正規配布物（MSI / セットアップ Zip）ではこの制限は発生しない想定です。"
+                     Severity="Warning"
+                     IsOpen="False"
+                     IsClosable="True"
+                     Margin="0,4,0,0"/>
             <InfoBar x:Name="CopyFeedbackInfoBar"
                      Severity="Success"
                      IsOpen="False"

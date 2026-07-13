@@ -14,6 +14,7 @@ namespace SquirrelNotifier.WinUI3;
 public partial class App : Application
 {
     private MainWindow? _window;
+    private readonly bool _notificationRegistrationFailed;
     private readonly NotificationService _notificationService = new();
     private readonly LoggingService _loggingService = new();
     private readonly SettingsService _settingsService = new();
@@ -61,7 +62,10 @@ public partial class App : Application
         }
         catch (System.Runtime.InteropServices.COMException ex) when (ex.Message.Contains("Insights.Resource.dll", StringComparison.Ordinal))
         {
-            // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題
+            // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題（#169）。
+            // トースト通知が一切表示できなくなるため、MainWindow 側でトレイバルーンと
+            // InfoBar によるフォールバック通知を出す
+            _notificationRegistrationFailed = true;
             _ = _loggingService.WriteAsync($"[WARN] AppNotificationManager.Register() 失敗（{ex.HResult:X8}）: {ex.Message}");
         }
 
@@ -85,7 +89,7 @@ public partial class App : Application
         bool showWindow = isNotificationActivation
             || (!commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t"));
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, _rateLimitReminderService, _rateLimitFileService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, _rateLimitReminderService, _rateLimitFileService, showWindow, _notificationRegistrationFailed);
         _window.Closed += OnWindowClosed;
 
         _window.Activate();
