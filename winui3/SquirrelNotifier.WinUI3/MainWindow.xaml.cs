@@ -40,6 +40,7 @@ internal sealed partial class MainWindow : Window
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitFileService _rateLimitFileService;
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
+    private readonly RateLimitSnapshotResolver _rateLimitSnapshotResolver;
     private readonly AutoPauseGate _autoPauseGate = new();
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
@@ -126,6 +127,7 @@ internal sealed partial class MainWindow : Window
         _rateLimitReminderService = rateLimitReminderService;
         _rateLimitFileService = rateLimitFileService;
         _rateLimitSnapshotService = new RateLimitSnapshotService(rateLimitFileService);
+        _rateLimitSnapshotResolver = new RateLimitSnapshotResolver(_rateLimitSnapshotService);
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -716,6 +718,10 @@ internal sealed partial class MainWindow : Window
     {
         var fetchedLimits = new List<Models.RateLimitInfo>();
 
+        // Auto-Pause gate（#147/#167）の再評価に使う snapshot。表示取得と同じ操作内で
+        // 取得したものを再利用し、gate 用に同じ agent を二重取得しない（#167 レビュー対応）。
+        var capturedSnapshots = new Dictionary<string, Models.RateLimitSnapshot>(StringComparer.Ordinal);
+
         // 1. ローカルファイル経由（statusline フック連携、#139）または App Server 経由（codex、#163）
         // IsAvailable=false は settings.json の手動編集等で IsMonitored=true に
         // なっていても読み取りの対象にしない。
@@ -736,6 +742,8 @@ internal sealed partial class MainWindow : Window
                         continue;
                     }
 
+                    capturedSnapshots[agent.Id] = snapshot;
+
                     string sourceUri = Services.RateLimitFileService.BuildSourceIdentifier(agent.Id);
                     foreach (Models.RateLimitInfo info in snapshot.Limits)
                     {
@@ -753,6 +761,12 @@ internal sealed partial class MainWindow : Window
                         "レートリミット情報がありません",
                         $"{agent.DisplayName} のレートリミット情報がまだありません。statusline スクリプトの拡張が必要です。詳細は docs/statusline-integration.md を参照してください。");
                     continue;
+                }
+
+                Models.RateLimitSnapshot? parsedSnapshot = Services.RateLimitStatusParser.ParseSnapshot(json);
+                if (parsedSnapshot is not null)
+                {
+                    capturedSnapshots[agent.Id] = parsedSnapshot;
                 }
 
                 fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, Services.RateLimitFileService.BuildSourceIdentifier(agent.Id)));
@@ -812,6 +826,44 @@ internal sealed partial class MainWindow : Window
             info.IsReminderScheduled = _rateLimitReminderService.IsScheduled(info.ReminderKey);
             _rateLimits.Add(info);
         }
+
+        await RefreshAutoPauseGateAsync(capturedSnapshots).ConfigureAwait(true);
+    }
+
+    // Auto-Pause gate（#147）は起動試行時にしか再評価されず、「更新」で fresh な
+    // snapshot を取得しても 95% 未満への解除が反映されなかった（#167）。reviewer /
+    // reviewed 両スロットの rateLimitAgentId を、実行中プロセス・MCP subscription・
+    // queue には作用しない読み取り専用の再評価として反映する。snapshot の取得・
+    // 再利用ロジックは RateLimitSnapshotResolver に委譲する（#167 レビュー対応）.
+    private async Task RefreshAutoPauseGateAsync(IReadOnlyDictionary<string, Models.RateLimitSnapshot> capturedSnapshots)
+    {
+        AppSettings settings = _settingsService.Settings;
+        TimeSpan freshnessThreshold = TimeSpan.FromMinutes(settings.RateLimitFreshnessThresholdMinutes);
+        List<string> gateAgentIds = new[]
+            {
+                _settingsService.ResolveLauncherRateLimitAgentId(Models.LauncherRole.Reviewer),
+                _settingsService.ResolveLauncherRateLimitAgentId(Models.LauncherRole.Reviewed),
+            }
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (gateAgentIds.Count == 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<Models.RateLimitSnapshot> gateSnapshots = await _rateLimitSnapshotResolver
+            .ResolveAsync(gateAgentIds, capturedSnapshots, CancellationToken.None)
+            .ConfigureAwait(true);
+
+        foreach (string agentId in gateAgentIds)
+        {
+            _autoPauseGate.Evaluate(agentId, gateSnapshots, freshnessThreshold);
+        }
+
+        UpdateAutoPauseInfoBar();
     }
 
     private void OnRateLimitAgentOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
