@@ -812,6 +812,49 @@ internal sealed partial class MainWindow : Window
             info.IsReminderScheduled = _rateLimitReminderService.IsScheduled(info.ReminderKey);
             _rateLimits.Add(info);
         }
+
+        await RefreshAutoPauseGateAsync().ConfigureAwait(true);
+    }
+
+    // Auto-Pause gate（#147）は起動試行時にしか再評価されず、「更新」で fresh な
+    // snapshot を取得しても 95% 未満への解除が反映されなかった（#167）。reviewer /
+    // reviewed 両スロットの rateLimitAgentId を、実行中プロセス・MCP subscription・
+    // queue には作用しない読み取り専用の再評価として反映する.
+    private async Task RefreshAutoPauseGateAsync()
+    {
+        AppSettings settings = _settingsService.Settings;
+        TimeSpan freshnessThreshold = TimeSpan.FromMinutes(settings.RateLimitFreshnessThresholdMinutes);
+        List<string> gateAgentIds = new[]
+            {
+                _settingsService.ResolveLauncherRateLimitAgentId(Models.LauncherRole.Reviewer),
+                _settingsService.ResolveLauncherRateLimitAgentId(Models.LauncherRole.Reviewed),
+            }
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (gateAgentIds.Count == 0)
+        {
+            return;
+        }
+
+        var gateSnapshots = new List<Models.RateLimitSnapshot>();
+        foreach (string agentId in gateAgentIds)
+        {
+            Models.RateLimitSnapshot? snapshot = await _rateLimitSnapshotService.CaptureAsync(agentId, CancellationToken.None).ConfigureAwait(true);
+            if (snapshot is not null)
+            {
+                gateSnapshots.Add(snapshot);
+            }
+        }
+
+        foreach (string agentId in gateAgentIds)
+        {
+            _autoPauseGate.Evaluate(agentId, gateSnapshots, freshnessThreshold);
+        }
+
+        UpdateAutoPauseInfoBar();
     }
 
     private void OnRateLimitAgentOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
