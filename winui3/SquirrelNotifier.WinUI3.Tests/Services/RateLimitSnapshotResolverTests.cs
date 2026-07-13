@@ -39,6 +39,31 @@ public sealed class RateLimitSnapshotResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task ResolveAsync_ShouldExcludeCapturedSnapshotWhenAgentIdMismatches()
+    {
+        // capturedSnapshots のキー（agentId）と snapshot 自身の AgentId が食い違う場合、
+        // 辞書引きだけで採用すると別 agent の snapshot が混入する（レビュー指摘対応）。
+        RateLimitSnapshotResolver resolver = CreateResolver();
+        RateLimitSnapshot mismatched = CreateSnapshot("agy", 40);
+        var capturedSnapshots = new Dictionary<string, RateLimitSnapshot> { ["claude-code"] = mismatched };
+
+        IReadOnlyList<RateLimitSnapshot> resolved = await resolver.ResolveAsync(["claude-code"], capturedSnapshots, CancellationToken.None);
+
+        resolved.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldExcludeFetchedSnapshotWhenAgentIdMismatches()
+    {
+        await WriteSnapshotAsync("claude-code", 40, payloadAgentId: "agy");
+        RateLimitSnapshotResolver resolver = CreateResolver();
+
+        IReadOnlyList<RateLimitSnapshot> resolved = await resolver.ResolveAsync(["claude-code"], new Dictionary<string, RateLimitSnapshot>(), CancellationToken.None);
+
+        resolved.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ResolveAsync_ShouldSkipAgentWhenSnapshotReadFails()
     {
         await WriteSnapshotAsync("claude-code", 40);
@@ -85,12 +110,12 @@ public sealed class RateLimitSnapshotResolverTests : IDisposable
             _now,
             [new RateLimitInfo { Id = "five-hour", Label = "5時間枠", ResetAt = _now.AddHours(5), UsedPercentage = usedPercentage }]);
 
-    private async Task WriteSnapshotAsync(string agentId, double usedPercentage)
+    private async Task WriteSnapshotAsync(string agentId, double usedPercentage, string? payloadAgentId = null)
     {
         string directory = Path.Combine(_settingsDirectory, "ratelimit-status");
         Directory.CreateDirectory(directory);
         string json = $$"""
-            {"schemaVersion":1,"agentId":"{{agentId}}","observedAt":"{{_now:O}}","limits":[{"id":"five-hour","label":"5時間枠","resetAt":"{{_now.AddHours(5):O}}","usedPercentage":{{usedPercentage.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}]}
+            {"schemaVersion":1,"agentId":"{{payloadAgentId ?? agentId}}","observedAt":"{{_now:O}}","limits":[{"id":"five-hour","label":"5時間枠","resetAt":"{{_now.AddHours(5):O}}","usedPercentage":{{usedPercentage.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}]}
             """;
         await File.WriteAllTextAsync(Path.Combine(directory, $"{agentId}.json"), json);
     }

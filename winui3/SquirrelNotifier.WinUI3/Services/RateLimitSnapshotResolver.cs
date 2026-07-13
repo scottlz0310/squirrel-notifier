@@ -45,7 +45,16 @@ internal sealed class RateLimitSnapshotResolver
         {
             if (capturedSnapshots.TryGetValue(agentId, out RateLimitSnapshot? cached))
             {
-                resolved.Add(cached);
+                // agentId をキーにした辞書引きだけでは、payload 内の agentId が実際のファイル名
+                // （agentId）と食い違う場合に別 agent の snapshot が混入しうる。
+                // RateLimitSessionMonitor と同じ契約（snapshot.AgentId == agentId）で採用可否を判定する。
+                // ここでは表示取得済みの結果を再利用する方針（#167）を優先し、mismatch を検出しても
+                // 再取得はせず当該 agent の取得不可として扱う。
+                if (cached.AgentId == agentId)
+                {
+                    resolved.Add(cached);
+                }
+
                 continue;
             }
 
@@ -64,7 +73,7 @@ internal sealed class RateLimitSnapshotResolver
                 continue;
             }
 
-            if (snapshot is not null)
+            if (snapshot is not null && snapshot.AgentId == agentId)
             {
                 resolved.Add(snapshot);
             }
