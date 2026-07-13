@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-14
+
 ### Added
 - 開発ビルド（unpackaged 実行）で `AppNotificationManager.Register()` が `Insights.Resource.dll` 読み込み失敗（8007007E）で失敗した場合に、トレイバルーン通知と InfoBar（「トースト通知が無効です」）でフォールバック表示するようにした（#169）。従来は WARN ログのみでユーザーへのフィードバックがなく、トースト通知が無効なことに気づきにくかった。正規配布物（MSI / セットアップ Zip）ではこの制約は発生しない想定で、`README.md` の手動起動セクションに既知の制約として明記した
 - statusline snapshot が旧形式（`schemaVersion` 等を欠く resetAt-only）のままの場合に警告する InfoBar を追加した（#168）。旧形式はレートリミット一覧には引き続き表示されるため気づきにくいが、`RateLimitSnapshotService` は常に `null` を返すため Auto-Pause（#147）が silent に無効化されていた。`RateLimitStatusParser.IsLegacySchema` で検出し、「レートリミット状態」セクションの「更新」実行時に対象エージェント名を明示する。`docs/statusline-integration.md` に旧形式 → 新スキーマの移行手順を追記した
@@ -179,7 +181,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.1.3...v0.2.0
