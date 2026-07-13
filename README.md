@@ -127,6 +127,8 @@ uninstall.cmd -KeepSettings
 
 または、Visual Studioから `F5` でデバッグ実行できます。
 
+> **既知の制約:** 開発ビルド（unpackaged、`dotnet build` / `dotnet run` / `F5` デバッグ実行）では `AppNotificationManager.Register()` が `Microsoft.WindowsAppRuntime.Insights.Resource.dll` の読み込み失敗（8007007E）で失敗し、Windows のトースト通知が一切表示されません（#169）。アプリ内のイベント行 UI とトレイバルーン通知がフォールバックとして機能しますが、トースト起点の導線（「PRを開く」「レビューする」ボタン付き通知）を確認する場合は、MSI インストーラーまたはセットアップ Zip から配布物としてインストールしたビルドを使用してください。
+
 ### 設定
 
 アプリケーションを起動後、「Settings」セクションから以下の設定が可能です:

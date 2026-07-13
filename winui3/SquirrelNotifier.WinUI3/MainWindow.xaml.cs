@@ -98,9 +98,15 @@ internal sealed partial class MainWindow : Window
         EnqueueReviewService enqueueReviewService,
         IRateLimitReminderService rateLimitReminderService,
         RateLimitFileService rateLimitFileService,
-        bool showWindow = true)
+        bool showWindow = true,
+        bool notificationRegistrationFailed = false)
     {
         InitializeComponent();
+
+        if (notificationRegistrationFailed)
+        {
+            NotificationDisabledInfoBar.IsOpen = true;
+        }
 
         // Auto-Pause（#147）の状態はセッション終了時（ライブログウィンドウ側の評価）にも
         // 変わるため、イベント経由でメイン UI の表示へ反映する
@@ -183,6 +189,11 @@ internal sealed partial class MainWindow : Window
         _trayIconService.LeftClick += OnTrayIconLeftClick;
         _trayIconService.RightClick += OnTrayIconRightClick;
         _trayIconService.AddIcon("Squirrel Notifier");
+
+        if (notificationRegistrationFailed)
+        {
+            _trayIconService.ShowBalloonTip("Squirrel Notifier", "開発ビルドではトースト通知が無効です。イベントはアプリ内のイベント行でご確認ください。");
+        }
 
         // Hook window messages to process tray icon messages
         _newWndProcDelegate = new WndProcDelegate(NewWndProc);
