@@ -121,6 +121,36 @@ public class RateLimitStatusParserTests
         RateLimitStatusParser.ParseSnapshot(json).Should().BeNull();
     }
 
+    [Theory]
+    [InlineData("{\"limits\":[{\"id\":\"5h\",\"label\":\"5時間制限\",\"resetAt\":\"2026-07-05T20:00:00Z\"}]}")]
+    [InlineData("{\"schemaVersion\":1,\"limits\":[{\"id\":\"5h\",\"label\":\"5時間制限\",\"resetAt\":\"2026-07-05T20:00:00Z\"}]}")]
+    [InlineData("{\"agentId\":\"claude-code\",\"limits\":[{\"id\":\"5h\",\"label\":\"5時間制限\",\"resetAt\":\"2026-07-05T20:00:00Z\"}]}")]
+    public void IsLegacySchema_ResetAtOnlyPayloadWithLimits_ShouldReturnTrue(string json)
+    {
+        RateLimitStatusParser.IsLegacySchema(json).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("not a json")]
+    [InlineData("{\"limits\":[]}")]
+    [InlineData("{\"other\":\"field\"}")]
+    public void IsLegacySchema_EmptyOrMalformedPayload_ShouldReturnFalse(string? json)
+    {
+        // limits が空/欠落・malformed JSON は「旧形式の実データがある」とは言えないため false
+        RateLimitStatusParser.IsLegacySchema(json).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsLegacySchema_NewSchemaPayload_ShouldReturnFalse()
+    {
+        string json = "{\"schemaVersion\":1,\"agentId\":\"claude-code\",\"observedAt\":\"2026-07-11T10:00:00Z\"," +
+            "\"limits\":[{\"id\":\"5h\",\"label\":\"5時間制限\",\"resetAt\":\"2026-07-05T20:00:00Z\",\"usedPercentage\":73}]}";
+
+        RateLimitStatusParser.IsLegacySchema(json).Should().BeFalse();
+    }
+
     [Fact]
     public void ParseSnapshot_EntryFailingValidation_ShouldSkipThatEntryOnly()
     {

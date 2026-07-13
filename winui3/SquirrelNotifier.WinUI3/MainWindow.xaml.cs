@@ -722,6 +722,10 @@ internal sealed partial class MainWindow : Window
         // 取得したものを再利用し、gate 用に同じ agent を二重取得しない（#167 レビュー対応）。
         var capturedSnapshots = new Dictionary<string, Models.RateLimitSnapshot>(StringComparer.Ordinal);
 
+        // 旧形式（schemaVersion 等を欠く resetAt-only）の snapshot を書き出しているエージェント（#168）。
+        // 一覧表示はできるため気づかれにくいが、Auto-Pause gate の判定対象からは silent に外れる。
+        var legacySchemaAgentNames = new List<string>();
+
         // 1. ローカルファイル経由（statusline フック連携、#139）または App Server 経由（codex、#163）
         // IsAvailable=false は settings.json の手動編集等で IsMonitored=true に
         // なっていても読み取りの対象にしない。
@@ -767,6 +771,10 @@ internal sealed partial class MainWindow : Window
                 if (parsedSnapshot is not null)
                 {
                     capturedSnapshots[agent.Id] = parsedSnapshot;
+                }
+                else if (Services.RateLimitStatusParser.IsLegacySchema(json))
+                {
+                    legacySchemaAgentNames.Add(agent.DisplayName);
                 }
 
                 fetchedLimits.AddRange(Services.RateLimitStatusParser.Parse(json, Services.RateLimitFileService.BuildSourceIdentifier(agent.Id)));
@@ -827,7 +835,25 @@ internal sealed partial class MainWindow : Window
             _rateLimits.Add(info);
         }
 
+        UpdateLegacySchemaInfoBar(legacySchemaAgentNames);
         await RefreshAutoPauseGateAsync(capturedSnapshots).ConfigureAwait(true);
+    }
+
+    // 旧形式 snapshot は一覧表示できてしまうため気づかれにくく、Auto-Pause gate（#147）が
+    // silent に無効化される（#168）。「更新」の都度、旧形式を書き出しているエージェントの
+    // 有無を再評価する.
+    private void UpdateLegacySchemaInfoBar(List<string> legacySchemaAgentNames)
+    {
+        if (legacySchemaAgentNames.Count == 0)
+        {
+            LegacySchemaInfoBar.IsOpen = false;
+            return;
+        }
+
+        LegacySchemaInfoBar.Message =
+            $"{string.Join("、", legacySchemaAgentNames)} の statusline snapshot が旧形式（schemaVersion なし）のため、"
+            + "Auto-Pause は機能しません。statusline フックを更新してください（docs/statusline-integration.md 参照）。";
+        LegacySchemaInfoBar.IsOpen = true;
     }
 
     // Auto-Pause gate（#147）は起動試行時にしか再評価されず、「更新」で fresh な

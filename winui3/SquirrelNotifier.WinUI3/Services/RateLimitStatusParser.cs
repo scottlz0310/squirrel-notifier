@@ -78,6 +78,20 @@ internal static class RateLimitStatusParser
         return new RateLimitSnapshot(payload.AgentId!, payload.ObservedAt!.Value, limits);
     }
 
+    /// <summary>
+    /// json が旧形式（<c>schemaVersion</c> / <c>agentId</c> / <c>observedAt</c> のいずれかを欠く
+    /// resetAt-only）の payload かどうかを判定する（#168）。旧形式は <see cref="Parse"/> で一覧表示は
+    /// できるが <see cref="ParseSnapshot"/> は常に <see langword="null"/> を返すため、Auto-Pause
+    /// gate（#147）の判定対象から silent に外れる。UI 側の警告表示に使う.
+    /// </summary>
+    /// <param name="json">statusline / hook スクリプトが書き出した JSON.</param>
+    /// <returns>limits を含む有効な JSON だが新スキーマの必須フィールドを欠く場合は <see langword="true"/>.</returns>
+    public static bool IsLegacySchema(string? json)
+    {
+        RateLimitStatusPayload? payload = TryDeserialize(json);
+        return payload != null && payload.Limits is { Count: > 0 } && !payload.IsUsageCapable;
+    }
+
     private static RateLimitStatusPayload? TryDeserialize(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))

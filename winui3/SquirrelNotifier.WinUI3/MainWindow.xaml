@@ -153,6 +153,11 @@
                          IsClosable="False"
                          Severity="Warning"
                          Title="Auto-Pause 中（新規エージェント起動を停止）"/>
+                <InfoBar x:Name="LegacySchemaInfoBar"
+                         IsOpen="False"
+                         IsClosable="False"
+                         Severity="Warning"
+                         Title="statusline snapshot が旧形式です"/>
                 <TextBlock Text="監視対象:" FontSize="11" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
                 <ItemsControl x:Name="RateLimitAgentList">
                     <ItemsControl.ItemsPanel>
