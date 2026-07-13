@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- statusline snapshot が旧形式（`schemaVersion` 等を欠く resetAt-only）のままの場合に警告する InfoBar を追加した（#168）。旧形式はレートリミット一覧には引き続き表示されるため気づきにくいが、`RateLimitSnapshotService` は常に `null` を返すため Auto-Pause（#147）が silent に無効化されていた。`RateLimitStatusParser.IsLegacySchema` で検出し、「レートリミット状態」セクションの「更新」実行時に対象エージェント名を明示する。`docs/statusline-integration.md` に旧形式 → 新スキーマの移行手順を追記した
+
 ### Fixed
 - レートリミット一覧の「更新」ボタンで Auto-Pause gate が再評価されず、fresh な使用率 95% 未満への回復が反映されない不具合を修正した（#167）。`OnRefreshRateLimitClick` に reviewer / reviewed 両スロットの `rateLimitAgentId` を対象とした `AutoPauseGate.Evaluate` 呼び出しを追加し、「更新」実行時点で Paused の解除（および開始）を InfoBar に即時反映する。実行中プロセス・MCP subscription・thread-owl queue には作用しない
 
