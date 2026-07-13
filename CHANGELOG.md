@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - レートリミット一覧の「更新」ボタンで Auto-Pause gate が再評価されず、fresh な使用率 95% 未満への回復が反映されない不具合を修正した（#167）。`OnRefreshRateLimitClick` に reviewer / reviewed 両スロットの `rateLimitAgentId` を対象とした `AutoPauseGate.Evaluate` 呼び出しを追加し、「更新」実行時点で Paused の解除（および開始）を InfoBar に即時反映する。実行中プロセス・MCP subscription・thread-owl queue には作用しない
+- `ReviewLauncherServiceTests.StartSession_ShouldNotStartProcess_WhenCancelledImmediatelyAfterStartSession` が稀に失敗する不安定性を修正した。`RunSessionAsync` の先頭で `LogAsync`（`File.AppendAllTextAsync`）が OS キャッシュヒット等で同期的に完了すると、コンパイラの完了済みタスク最適化により `StartSession` の呼び出しスレッド上でプロセス起動直前まで同期的に進んでしまい、直後の `Cancel()` が開始前レースに間に合わないことがあった。`RunSessionAsync` の先頭に `Task.Yield()` を追加し、`StartSession` が確実に呼び出し元へ制御を返してから本体処理を継続するようにした
 
 ## [0.4.0] - 2026-07-11
 

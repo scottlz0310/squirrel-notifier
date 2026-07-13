@@ -123,6 +123,14 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
     private async Task RunSessionAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, CancellationTokenSource cts, CancellationToken cancellationToken)
     {
+        // StartSession の fire-and-forget 呼び出し元へ確実に制御を返すため、最初に一度
+        // スケジューラを経由する。LogAsync が書き込む File.AppendAllTextAsync は OS
+        // キャッシュにヒットすると同期的に完了することがあり、その場合コンパイラの
+        // 完了済みタスク最適化により、これ以降の同期区間が StartSession の呼び出しスレッド上で
+        // プロセス起動直前まで進んでしまう。これにより「StartSession 直後の Cancel()」（開始前
+        // レース、#143）がプロセス起動チェックに間に合わないことがあった.
+        await Task.Yield();
+
         Task<string>? stdoutTask = null;
         Task<string>? stderrTask = null;
 
