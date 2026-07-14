@@ -127,7 +127,7 @@ public class RateLimitSnapshotServiceTests : IDisposable
     {
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
-            .Throws(new System.ComponentModel.Win32Exception("codex not found"));
+            .Throws(new System.ComponentModel.Win32Exception(2, "codex not found")); // ERROR_FILE_NOT_FOUND
         var service = new RateLimitSnapshotService(
             new RateLimitFileService(_settingsDirectory),
             new CodexAppServerRateLimitClient(runner.Object));

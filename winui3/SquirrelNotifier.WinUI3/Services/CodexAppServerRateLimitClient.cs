@@ -41,6 +41,11 @@ internal sealed class CodexAppServerRateLimitClient
     private const string _commandArguments = "app-server";
     private const int _initializeRequestId = 1;
     private const int _readRequestId = 2;
+
+    // Win32Exception.NativeErrorCode（CommandNotFound と確実に判別できる範囲のみ。
+    // ERROR_ACCESS_DENIED 等はコマンド自体は存在するため Unknown 扱いにする）
+    private const int _errorFileNotFound = 2;
+    private const int _errorPathNotFound = 3;
     private static readonly TimeSpan _defaultRoundTripTimeout = TimeSpan.FromSeconds(15);
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -99,15 +104,16 @@ internal sealed class CodexAppServerRateLimitClient
             // round-trip タイムアウト（外部キャンセルではない、_roundTripTimeout 到達）
             return (null, CodexRateLimitFailureReason.Timeout);
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode is _errorFileNotFound or _errorPathNotFound)
         {
-            // codex CLI が見つからない・実行できない
+            // codex CLI が見つからない（ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND）
             return (null, CodexRateLimitFailureReason.CommandNotFound);
         }
         catch (Exception)
         {
-            // 未ログイン・プロトコル不整合等、それ以外は「取得不可」の正常系として扱う
-            // （#163。#146/#147 のパターンに準拠）
+            // 未ログイン・プロトコル不整合・Win32Exception のその他のエラー（アクセス拒否・
+            // 実行形式不正等、コマンド自体は存在する）は原因を確実に判別できないため
+            // 「取得不可」の正常系として扱う（#163。#146/#147 のパターンに準拠）
             return (null, CodexRateLimitFailureReason.Unknown);
         }
     }

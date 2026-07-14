@@ -240,12 +240,14 @@ public class CodexAppServerRateLimitClientTests
         failureReason.Should().BeNull();
     }
 
-    [Fact]
-    public async Task CaptureWithFailureReasonAsync_ShouldReturnCommandNotFound_WhenProcessStartFails()
+    [Theory]
+    [InlineData(2)] // ERROR_FILE_NOT_FOUND
+    [InlineData(3)] // ERROR_PATH_NOT_FOUND
+    public async Task CaptureWithFailureReasonAsync_ShouldReturnCommandNotFound_WhenProcessStartFailsWithFileOrPathNotFound(int nativeErrorCode)
     {
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
-            .Throws(new System.ComponentModel.Win32Exception("codex not found"));
+            .Throws(new System.ComponentModel.Win32Exception(nativeErrorCode, "codex not found"));
         CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
 
         (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
@@ -253,6 +255,22 @@ public class CodexAppServerRateLimitClientTests
 
         snapshot.Should().BeNull();
         failureReason.Should().Be(CodexRateLimitFailureReason.CommandNotFound);
+    }
+
+    [Fact]
+    public async Task CaptureWithFailureReasonAsync_ShouldReturnUnknown_WhenProcessStartFailsWithAccessDenied()
+    {
+        // ERROR_ACCESS_DENIED (5): コマンド自体は存在するため CommandNotFound と誤誘導しない
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Throws(new System.ComponentModel.Win32Exception(5, "access denied"));
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
+
+        (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
+            await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
+
+        snapshot.Should().BeNull();
+        failureReason.Should().Be(CodexRateLimitFailureReason.Unknown);
     }
 
     [Fact]
