@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-14
+
 ### Added
 - UIスレッド・AppDomain・未observeなTaskの未処理例外をグローバルに捕捉し、`winui3.log` へ記録するようにした（#174）。従来はグローバル例外ハンドラが存在せず、真に未捕捉の例外が発生した場合はログに一切証跡が残らずアプリが終了していた。原因不明の「予期しないエラー」報告の切り分けに必要な最低限の証跡を残す
 - 旧形式ステータスライン警告とトースト通知無効警告の InfoBar に `ActionButton` を追加し、それぞれ `docs/statusline-integration.md` と README の既知の制約セクションを外部ブラウザで開けるようにした（#174）。従来は参照先をドキュメント名で案内するのみでクリック導線がなかった
@@ -189,7 +191,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.2.0...v0.3.0
