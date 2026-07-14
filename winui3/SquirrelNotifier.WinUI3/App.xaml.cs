@@ -31,6 +31,8 @@ public partial class App : Application
     {
         InitializeComponent();
 
+        UnhandledException += OnApplicationUnhandledException;
+
         try
         {
             _cacheService = new CacheService();
@@ -138,5 +140,11 @@ public partial class App : Application
         {
             _window.DispatcherQueue.TryEnqueue(() => _window.ShowWindowFromTray());
         }
+    }
+
+    private void OnApplicationUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        // クラッシュ直前のため、原因特定用の証跡を確実に残すべく同期的にログ書き込みを待つ（#174）
+        _loggingService.WriteAsync($"[FATAL] UIスレッドで未処理例外が発生しました: {e.Exception.GetType().FullName}: {e.Message}{Environment.NewLine}{e.Exception.StackTrace}").GetAwaiter().GetResult();
     }
 }

@@ -10,6 +10,23 @@ using SquirrelNotifier.WinUI3.Models;
 namespace SquirrelNotifier.WinUI3.Services;
 
 /// <summary>
+/// <see cref="CodexAppServerRateLimitClient.CaptureWithFailureReasonAsync"/> が返す、取得不可の推定理由（#174）.
+/// JSON-RPC error の code/message は codex CLI バージョンにより変わりうるため確実に判別できない。
+/// そのため「未ログイン」を断定する種別は設けず、確実に判別できるものだけを区別する.
+/// </summary>
+internal enum CodexRateLimitFailureReason
+{
+    /// <summary>未ログイン・JSON-RPC error・プロトコル不整合等、原因を確実に判別できない場合.</summary>
+    Unknown,
+
+    /// <summary><c>codex</c> コマンドが見つからない、または実行できない（プロセス起動失敗）.</summary>
+    CommandNotFound,
+
+    /// <summary>round-trip タイムアウトに到達した.</summary>
+    Timeout,
+}
+
+/// <summary>
 /// Codex App Server（<c>codex app-server</c>、stdio JSON-RPC）からレートリミット snapshot を
 /// 取得する（#163）。statusline フックと異なり任意タイミングで呼べるため、observedAt は常に
 /// 取得時刻（= fresh）になる。呼び出しごとにプロセスを起動し、initialize →
@@ -24,6 +41,11 @@ internal sealed class CodexAppServerRateLimitClient
     private const string _commandArguments = "app-server";
     private const int _initializeRequestId = 1;
     private const int _readRequestId = 2;
+
+    // Win32Exception.NativeErrorCode（CommandNotFound と確実に判別できる範囲のみ。
+    // ERROR_ACCESS_DENIED 等はコマンド自体は存在するため Unknown 扱いにする）
+    private const int _errorFileNotFound = 2;
+    private const int _errorPathNotFound = 3;
     private static readonly TimeSpan _defaultRoundTripTimeout = TimeSpan.FromSeconds(15);
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -49,21 +71,50 @@ internal sealed class CodexAppServerRateLimitClient
 
     public async Task<RateLimitSnapshot?> CaptureAsync(string agentId, CancellationToken cancellationToken)
     {
+        (RateLimitSnapshot? snapshot, _) = await CaptureWithFailureReasonAsync(agentId, cancellationToken).ConfigureAwait(false);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// <see cref="CaptureAsync"/> と同じ取得処理を行うが、取得不可時の理由（推定）も返す（#174）。
+    /// 「未ログイン」「App Server 起動失敗」「タイムアウト」「プロトコル不整合」を一括りに
+    /// 「取得不可」としていたため、ユーザー向けメッセージが原因に関わらず「ログインを確認してください」
+    /// になっていた点を改善する目的。JSON-RPC error の code/message は codex CLI バージョンにより
+    /// 変わりうるため、確実に判別できる「CLI 未検出」「タイムアウト」以外は <see cref="CodexRateLimitFailureReason.Unknown"/>
+    /// として扱い、誤って断定的な理由を示さない.
+    /// </summary>
+    /// <param name="agentId">snapshot に記録する agentId.</param>
+    /// <param name="cancellationToken">キャンセル用トークン.</param>
+    /// <returns>取得できた場合は snapshot と <see langword="null"/> の理由。取得不可の場合は <see langword="null"/> snapshot と推定理由.</returns>
+    public async Task<(RateLimitSnapshot? Snapshot, CodexRateLimitFailureReason? FailureReason)> CaptureWithFailureReasonAsync(string agentId, CancellationToken cancellationToken)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
 
         try
         {
-            return await CaptureCoreAsync(agentId, cancellationToken).ConfigureAwait(false);
+            RateLimitSnapshot? snapshot = await CaptureCoreAsync(agentId, cancellationToken).ConfigureAwait(false);
+            return (snapshot, snapshot is null ? CodexRateLimitFailureReason.Unknown : null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            // round-trip タイムアウト（外部キャンセルではない、_roundTripTimeout 到達）
+            return (null, CodexRateLimitFailureReason.Timeout);
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode is _errorFileNotFound or _errorPathNotFound)
+        {
+            // codex CLI が見つからない（ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND）
+            return (null, CodexRateLimitFailureReason.CommandNotFound);
+        }
         catch (Exception)
         {
-            // 未ログイン・App Server 起動失敗・round-trip タイムアウト・プロトコル不整合は
-            // すべて「取得不可」の正常系として扱う（#163。#146/#147 のパターンに準拠）
-            return null;
+            // 未ログイン・プロトコル不整合・Win32Exception のその他のエラー（アクセス拒否・
+            // 実行形式不正等、コマンド自体は存在する）は原因を確実に判別できないため
+            // 「取得不可」の正常系として扱う（#163。#146/#147 のパターンに準拠）
+            return (null, CodexRateLimitFailureReason.Unknown);
         }
     }
 

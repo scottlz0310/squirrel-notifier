@@ -54,6 +54,9 @@ internal static class Program
     {
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
+        AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
         if (DecideRedirection())
         {
             return;
@@ -124,5 +127,21 @@ internal static class Program
         });
 
         redirectCompleted.WaitOne();
+    }
+
+    private static void OnAppDomainUnhandledException(object sender, System.UnhandledExceptionEventArgs e)
+    {
+        // IsTerminating の場合プロセスは直後に終了するため、原因特定用の証跡を確実に残すべく同期的に待つ（#174）
+        var ex = e.ExceptionObject as Exception;
+        string detail = ex != null
+            ? $"{ex.GetType().FullName}: {ex.Message}{Environment.NewLine}{ex.StackTrace}"
+            : e.ExceptionObject?.ToString() ?? "unknown";
+        new LoggingService().WriteAsync($"[FATAL] AppDomain で未処理例外が発生しました（IsTerminating={e.IsTerminating}）: {detail}").GetAwaiter().GetResult();
+    }
+
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        _ = new LoggingService().WriteAsync($"[ERROR] 未observeなTask例外が発生しました: {e.Exception.GetType().FullName}: {e.Exception.Message}{Environment.NewLine}{e.Exception.StackTrace}");
+        e.SetObserved();
     }
 }

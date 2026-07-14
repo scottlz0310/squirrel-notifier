@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- UIスレッド・AppDomain・未observeなTaskの未処理例外をグローバルに捕捉し、`winui3.log` へ記録するようにした（#174）。従来はグローバル例外ハンドラが存在せず、真に未捕捉の例外が発生した場合はログに一切証跡が残らずアプリが終了していた。原因不明の「予期しないエラー」報告の切り分けに必要な最低限の証跡を残す
+- 旧形式ステータスライン警告とトースト通知無効警告の InfoBar に `ActionButton` を追加し、それぞれ `docs/statusline-integration.md` と README の既知の制約セクションを外部ブラウザで開けるようにした（#174）。従来は参照先をドキュメント名で案内するのみでクリック導線がなかった
+- codex レートリミット取得不可時のエラーメッセージを原因ごとに分離した（#174）。`CodexAppServerRateLimitClient.CaptureWithFailureReasonAsync` が「CLI 未検出」「タイムアウト」「その他（未ログインの可能性を含む）」を区別して返すようにし、`codex` コマンド未インストールやタイムアウトの場合まで一律「ログイン済みか確認してください」と表示していた問題を解消した。JSON-RPC error の code/message は codex CLI バージョンにより変わりうるため、確実に判別できないケースは断定的な理由を出さない。「CLI 未検出」は `Win32Exception.NativeErrorCode` が `ERROR_FILE_NOT_FOUND` / `ERROR_PATH_NOT_FOUND` の場合のみとし、アクセス拒否等コマンド自体は存在するケースを誤って「未インストール」と案内しないようにした
+
+### Fixed
+- MSI インストーラー / セットアップ Zip による正規インストールでも「トースト通知が無効です」警告が発生しうることを README と InfoBar の文言に反映した（#174）。本アプリは `WindowsPackageType=None` かつ self-contained でビルドされており、正規インストールも実行形態としては unpackaged であるため、`AppNotificationManager.Register()` の `Insights.Resource.dll` 読み込み失敗（#169）は配布形態に関わらず発生しうる。#169 時点の「正規配布物では発生しない想定」という記述は誤りだった
+
 ## [0.5.0] - 2026-07-14
 
 ### Added

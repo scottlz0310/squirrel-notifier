@@ -46,4 +46,21 @@ internal sealed class RateLimitSnapshotService
         string? json = await _fileService.ReadAgentStatusAsync(agentId, cancellationToken).ConfigureAwait(false);
         return RateLimitStatusParser.ParseSnapshot(json);
     }
+
+    /// <summary>
+    /// codex エージェント向け。<see cref="CaptureAsync"/> と同じ取得処理を行うが、取得不可時の
+    /// 理由（推定）も返す（#174）。UI 側でエラーメッセージを原因ごとに出し分けるために使う.
+    /// </summary>
+    /// <param name="agentId"><see cref="CodexAgentId"/> であること.</param>
+    /// <param name="cancellationToken">キャンセル用トークン.</param>
+    /// <returns>取得できた場合は snapshot と <see langword="null"/> の理由。取得不可の場合は <see langword="null"/> snapshot と推定理由.</returns>
+    public Task<(RateLimitSnapshot? Snapshot, CodexRateLimitFailureReason? FailureReason)> CaptureCodexWithFailureReasonAsync(string agentId, CancellationToken cancellationToken)
+    {
+        if (agentId != CodexAgentId)
+        {
+            throw new ArgumentException($"'{agentId}' は codex エージェントではありません。", nameof(agentId));
+        }
+
+        return _codexClient.CaptureWithFailureReasonAsync(agentId, cancellationToken);
+    }
 }
