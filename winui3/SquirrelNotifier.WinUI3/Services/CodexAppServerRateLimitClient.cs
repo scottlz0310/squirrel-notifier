@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SquirrelNotifier.WinUI3.Models;
@@ -46,7 +47,10 @@ internal sealed class CodexAppServerRateLimitClient
     // ERROR_ACCESS_DENIED 等はコマンド自体は存在するため Unknown 扱いにする）
     private const int _errorFileNotFound = 2;
     private const int _errorPathNotFound = 3;
+    private const string _resolvedCommandEnvironmentVariable = "SQUIRREL_NOTIFIER_CODEX_COMMAND";
     private static readonly TimeSpan _defaultRoundTripTimeout = TimeSpan.FromSeconds(15);
+
+    private static readonly string[] _shellScriptExtensions = [".cmd", ".bat"];
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -56,17 +60,53 @@ internal sealed class CodexAppServerRateLimitClient
     private readonly IProcessRunner _processRunner;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _roundTripTimeout;
+    private readonly Func<string, string?> _commandResolver;
 
     public CodexAppServerRateLimitClient(
         IProcessRunner processRunner,
         TimeProvider? timeProvider = null,
-        TimeSpan? roundTripTimeout = null)
+        TimeSpan? roundTripTimeout = null,
+        Func<string, string?>? commandResolver = null)
     {
         ArgumentNullException.ThrowIfNull(processRunner);
 
         _processRunner = processRunner;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _roundTripTimeout = roundTripTimeout ?? _defaultRoundTripTimeout;
+        _commandResolver = commandResolver ?? ResolveCommandFromEnvironment;
+    }
+
+    /// <summary>
+    /// PATH / PATHEXT を自前で解決し、コマンドの実体（フルパス）を探す。<see cref="Process.Start(ProcessStartInfo)"/>
+    /// が使う Win32 <c>CreateProcessW</c> は拡張子省略時に <c>.exe</c> のみを暗黙補完し、シェル側の機能である
+    /// PATHEXT 解決（<c>.cmd</c> / <c>.bat</c> 等）は行わない。npm 経由でインストールされた <c>codex</c> は
+    /// Windows 上では <c>codex.cmd</c> シムであることが多く、ターミナルでは実行できるのに本クライアントだけ
+    /// <c>ERROR_FILE_NOT_FOUND</c> になる問題（#177）を避けるため、シェルに頼らず明示的に解決する.
+    /// </summary>
+    private static string? ResolveCommandFromEnvironment(string command)
+    {
+        string? pathVariable = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(pathVariable))
+        {
+            return null;
+        }
+
+        string pathExtVariable = Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD";
+        string[] extensions = pathExtVariable.Split(';', StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (string directory in pathVariable.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (string extension in extensions)
+            {
+                string candidate = Path.Combine(directory.Trim(), command + extension);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
     }
 
     public async Task<RateLimitSnapshot?> CaptureAsync(string agentId, CancellationToken cancellationToken)
@@ -193,16 +233,37 @@ internal sealed class CodexAppServerRateLimitClient
         timeoutCts.CancelAfter(_roundTripTimeout);
         CancellationToken token = timeoutCts.Token;
 
+        string? resolvedPath = _commandResolver(_commandFileName);
+        if (resolvedPath is null)
+        {
+            throw new System.ComponentModel.Win32Exception(_errorFileNotFound, $"'{_commandFileName}' is not found in PATH");
+        }
+
         ProcessStartInfo startInfo = new()
         {
-            FileName = _commandFileName,
-            Arguments = _commandArguments,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+
+        // .cmd / .bat はネイティブ実行形式ではないため、CreateProcessW に直接渡すと
+        // ERROR_BAD_EXE_FORMAT 等で失敗する。cmd.exe にシェルスクリプトとしての実行を委ねる
+        if (_shellScriptExtensions.Contains(Path.GetExtension(resolvedPath), StringComparer.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+
+            // 値をコマンド文字列へ直接埋め込まず、環境変数を引用符内で一度だけ展開することで、
+            // パス内の cmd.exe メタ文字や環境変数形式の文字列が再解釈されるのを防ぐ
+            startInfo.Environment[_resolvedCommandEnvironmentVariable] = resolvedPath;
+            startInfo.Arguments = $"/d /s /c \"\"%{_resolvedCommandEnvironmentVariable}%\" {_commandArguments}\"";
+        }
+        else
+        {
+            startInfo.FileName = resolvedPath;
+            startInfo.Arguments = _commandArguments;
+        }
 
         using IProcessInstance process = _processRunner.Start(startInfo);
         try

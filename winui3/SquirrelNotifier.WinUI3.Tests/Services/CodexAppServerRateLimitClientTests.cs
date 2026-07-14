@@ -16,6 +16,7 @@ public class CodexAppServerRateLimitClientTests
     private static readonly DateTimeOffset _now = new(2026, 7, 11, 12, 0, 0, TimeSpan.Zero);
     private const long _resetsAtPrimary = 1783768226;
     private const long _resetsAtSecondary = 1784355026;
+    private const string _fakeExePath = @"C:\fake\codex.exe";
 
     private const string _initializeResponseLine = """{"id":1,"result":{"userAgent":"test"}}""";
 
@@ -137,7 +138,7 @@ public class CodexAppServerRateLimitClientTests
         string sentPayload = Encoding.UTF8.GetString(stdin.ToArray());
         sentPayload.Should().Contain("\"method\":\"initialize\"").And.Contain("squirrel-notifier");
         sentPayload.Should().Contain("\"method\":\"account/rateLimits/read\"");
-        runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.FileName == "codex" && p.Arguments == "app-server")), Times.Once);
+        runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.FileName == _fakeExePath && p.Arguments == "app-server")), Times.Once);
         process.Verify(p => p.Kill(true), Times.Once);
     }
 
@@ -187,7 +188,7 @@ public class CodexAppServerRateLimitClientTests
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Throws(new System.ComponentModel.Win32Exception("codex not found"));
-        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => _fakeExePath);
 
         RateLimitSnapshot? snapshot = await client.CaptureAsync("codex", CancellationToken.None);
 
@@ -201,7 +202,7 @@ public class CodexAppServerRateLimitClientTests
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
         CodexAppServerRateLimitClient client = new(
-            runner.Object, new FixedTimeProvider(_now), roundTripTimeout: TimeSpan.FromMilliseconds(200));
+            runner.Object, new FixedTimeProvider(_now), roundTripTimeout: TimeSpan.FromMilliseconds(200), commandResolver: _ => _fakeExePath);
 
         RateLimitSnapshot? snapshot = await client.CaptureAsync("codex", CancellationToken.None);
 
@@ -215,7 +216,7 @@ public class CodexAppServerRateLimitClientTests
         (Mock<IProcessInstance> process, _) = CreateMockProcess(stdoutStream: new BlockingStream());
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => _fakeExePath);
         using CancellationTokenSource cts = new();
         cts.CancelAfter(TimeSpan.FromMilliseconds(100));
 
@@ -248,7 +249,7 @@ public class CodexAppServerRateLimitClientTests
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Throws(new System.ComponentModel.Win32Exception(nativeErrorCode, "codex not found"));
-        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => _fakeExePath);
 
         (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
             await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
@@ -258,13 +259,52 @@ public class CodexAppServerRateLimitClientTests
     }
 
     [Fact]
+    public async Task CaptureWithFailureReasonAsync_ShouldReturnCommandNotFound_WhenCommandResolverCannotFindCommand()
+    {
+        // PATH / PATHEXT を解決しても実体が見つからない場合（#177）。
+        // Process.Start は一切呼ばれず、resolver の時点で CommandNotFound と確定する
+        var runner = new Mock<IProcessRunner>();
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => null);
+
+        (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
+            await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
+
+        snapshot.Should().BeNull();
+        failureReason.Should().Be(CodexRateLimitFailureReason.CommandNotFound);
+        runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(@"C:\fake & tools\codex.cmd")]
+    [InlineData(@"C:\fake %TEMP% tools\codex.bat")]
+    public async Task CaptureAsync_ShouldStartViaCmdExeWithoutReinterpretingResolvedPath_WhenCommandResolverReturnsShellScript(
+        string fakeScriptPath)
+    {
+        // npm 経由でインストールされた codex は Windows 上では codex.cmd シムであることが多い（#177）。
+        // 実体パスは環境変数経由で展開し、パスに含まれる cmd.exe メタ文字の再解釈を防ぐ
+        (Mock<IProcessInstance> process, _) = CreateMockProcess(
+            BuildStdout(_initializeResponseLine, $$"""{"id":2,"result":{{_sampleReadResultJson.Trim()}}}"""));
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => fakeScriptPath);
+
+        RateLimitSnapshot? snapshot = await client.CaptureAsync("codex", CancellationToken.None);
+
+        snapshot.Should().NotBeNull();
+        runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p =>
+            p.FileName.EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
+            && p.Arguments == "/d /s /c \"\"%SQUIRREL_NOTIFIER_CODEX_COMMAND%\" app-server\""
+            && p.Environment["SQUIRREL_NOTIFIER_CODEX_COMMAND"] == fakeScriptPath)), Times.Once);
+    }
+
+    [Fact]
     public async Task CaptureWithFailureReasonAsync_ShouldReturnUnknown_WhenProcessStartFailsWithAccessDenied()
     {
         // ERROR_ACCESS_DENIED (5): コマンド自体は存在するため CommandNotFound と誤誘導しない
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Throws(new System.ComponentModel.Win32Exception(5, "access denied"));
-        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => _fakeExePath);
 
         (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
             await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
@@ -280,7 +320,7 @@ public class CodexAppServerRateLimitClientTests
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
         CodexAppServerRateLimitClient client = new(
-            runner.Object, new FixedTimeProvider(_now), roundTripTimeout: TimeSpan.FromMilliseconds(200));
+            runner.Object, new FixedTimeProvider(_now), roundTripTimeout: TimeSpan.FromMilliseconds(200), commandResolver: _ => _fakeExePath);
 
         (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
             await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
@@ -310,7 +350,7 @@ public class CodexAppServerRateLimitClientTests
         (Mock<IProcessInstance> process, _) = CreateMockProcess(stdoutStream: new BlockingStream());
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => _fakeExePath);
         using CancellationTokenSource cts = new();
         cts.CancelAfter(TimeSpan.FromMilliseconds(100));
 
@@ -328,7 +368,7 @@ public class CodexAppServerRateLimitClientTests
     {
         runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        return new CodexAppServerRateLimitClient(runner.Object, new FixedTimeProvider(_now));
+        return new CodexAppServerRateLimitClient(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => _fakeExePath);
     }
 
     private static (Mock<IProcessInstance> Process, MemoryStream StdinStream) CreateMockProcess(

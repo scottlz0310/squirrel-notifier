@@ -192,7 +192,9 @@ internal sealed partial class MainWindow : Window
 
         if (notificationRegistrationFailed)
         {
-            _trayIconService.ShowBalloonTip("Squirrel Notifier", "開発ビルドではトースト通知が無効です。イベントはアプリ内のイベント行でご確認ください。");
+            // Register() 失敗はボタン操作（NotificationInvoked）の受信にのみ影響し、
+            // トースト自体の表示（Show()）は妨げない（README「手動起動」節参照）
+            _trayIconService.ShowBalloonTip("Squirrel Notifier", "通知のボタン操作に反応しない場合があります。イベントはアプリ内のイベント行でご確認ください。");
         }
 
         // Hook window messages to process tray icon messages

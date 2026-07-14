@@ -98,7 +98,7 @@ public class RateLimitSnapshotServiceTests : IDisposable
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
         var service = new RateLimitSnapshotService(
             new RateLimitFileService(_settingsDirectory),
-            new CodexAppServerRateLimitClient(runner.Object));
+            new CodexAppServerRateLimitClient(runner.Object, commandResolver: _ => @"C:\fake\codex.exe"));
 
         RateLimitSnapshot? result = await service.CaptureAsync(RateLimitSnapshotService.CodexAgentId, CancellationToken.None);
 

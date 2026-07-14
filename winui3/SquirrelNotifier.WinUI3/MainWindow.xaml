@@ -28,8 +28,8 @@
                 </InfoBar.ActionButton>
             </InfoBar>
             <InfoBar x:Name="NotificationDisabledInfoBar"
-                     Title="トースト通知が無効です"
-                     Message="Windows のトースト通知を利用できません（MSI / セットアップ Zip の正規インストールでも発生することがあります）。イベントはアプリ内のイベント行でご確認ください。"
+                     Title="通知のボタン操作に反応しない場合があります"
+                     Message="Windows App SDK の既知の制約（MSI / セットアップ Zip の正規インストールでも発生することがあります）により、トースト通知は表示されても、ボタン操作（PRを開く・レビューする等）に反応しない場合があります。反応しない場合はアプリ内のイベント行またはトレイバルーン通知をご確認ください。"
                      Severity="Warning"
                      IsOpen="False"
                      IsClosable="True"
