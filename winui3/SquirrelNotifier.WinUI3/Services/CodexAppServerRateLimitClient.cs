@@ -47,6 +47,7 @@ internal sealed class CodexAppServerRateLimitClient
     // ERROR_ACCESS_DENIED 等はコマンド自体は存在するため Unknown 扱いにする）
     private const int _errorFileNotFound = 2;
     private const int _errorPathNotFound = 3;
+    private const string _resolvedCommandEnvironmentVariable = "SQUIRREL_NOTIFIER_CODEX_COMMAND";
     private static readonly TimeSpan _defaultRoundTripTimeout = TimeSpan.FromSeconds(15);
 
     private static readonly string[] _shellScriptExtensions = [".cmd", ".bat"];
@@ -252,9 +253,11 @@ internal sealed class CodexAppServerRateLimitClient
         if (_shellScriptExtensions.Contains(Path.GetExtension(resolvedPath), StringComparer.OrdinalIgnoreCase))
         {
             startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(resolvedPath);
-            startInfo.ArgumentList.Add(_commandArguments);
+
+            // 値をコマンド文字列へ直接埋め込まず、環境変数を引用符内で一度だけ展開することで、
+            // パス内の cmd.exe メタ文字や環境変数形式の文字列が再解釈されるのを防ぐ
+            startInfo.Environment[_resolvedCommandEnvironmentVariable] = resolvedPath;
+            startInfo.Arguments = $"/d /s /c \"\"%{_resolvedCommandEnvironmentVariable}%\" {_commandArguments}\"";
         }
         else
         {

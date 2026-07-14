@@ -274,24 +274,27 @@ public class CodexAppServerRateLimitClientTests
         runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Never);
     }
 
-    [Fact]
-    public async Task CaptureAsync_ShouldStartViaCmdExe_WhenCommandResolverReturnsShellScript()
+    [Theory]
+    [InlineData(@"C:\fake & tools\codex.cmd")]
+    [InlineData(@"C:\fake %TEMP% tools\codex.bat")]
+    public async Task CaptureAsync_ShouldStartViaCmdExeWithoutReinterpretingResolvedPath_WhenCommandResolverReturnsShellScript(
+        string fakeScriptPath)
     {
         // npm 経由でインストールされた codex は Windows 上では codex.cmd シムであることが多い（#177）。
-        // .cmd / .bat はネイティブ実行形式ではないため cmd.exe /c 経由で起動する
-        const string fakeCmdPath = @"C:\fake\codex.cmd";
+        // 実体パスは環境変数経由で展開し、パスに含まれる cmd.exe メタ文字の再解釈を防ぐ
         (Mock<IProcessInstance> process, _) = CreateMockProcess(
             BuildStdout(_initializeResponseLine, $$"""{"id":2,"result":{{_sampleReadResultJson.Trim()}}}"""));
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => fakeCmdPath);
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now), commandResolver: _ => fakeScriptPath);
 
         RateLimitSnapshot? snapshot = await client.CaptureAsync("codex", CancellationToken.None);
 
         snapshot.Should().NotBeNull();
         runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p =>
             p.FileName.EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
-            && p.ArgumentList.SequenceEqual(new[] { "/c", fakeCmdPath, "app-server" }))), Times.Once);
+            && p.Arguments == "/d /s /c \"\"%SQUIRREL_NOTIFIER_CODEX_COMMAND%\" app-server\""
+            && p.Environment["SQUIRREL_NOTIFIER_CODEX_COMMAND"] == fakeScriptPath)), Times.Once);
     }
 
     [Fact]
