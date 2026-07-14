@@ -121,4 +121,31 @@ public class RateLimitSnapshotServiceTests : IDisposable
 
         result.Should().BeNull();
     }
+
+    [Fact]
+    public async Task CaptureCodexWithFailureReasonAsync_ShouldReturnCommandNotFound_WhenAppServerIsUnavailable()
+    {
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Throws(new System.ComponentModel.Win32Exception("codex not found"));
+        var service = new RateLimitSnapshotService(
+            new RateLimitFileService(_settingsDirectory),
+            new CodexAppServerRateLimitClient(runner.Object));
+
+        (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
+            await service.CaptureCodexWithFailureReasonAsync(RateLimitSnapshotService.CodexAgentId, CancellationToken.None);
+
+        snapshot.Should().BeNull();
+        failureReason.Should().Be(CodexRateLimitFailureReason.CommandNotFound);
+    }
+
+    [Fact]
+    public async Task CaptureCodexWithFailureReasonAsync_ShouldThrow_WhenAgentIdIsNotCodex()
+    {
+        var service = new RateLimitSnapshotService(new RateLimitFileService(_settingsDirectory));
+
+        Func<Task> act = () => service.CaptureCodexWithFailureReasonAsync("claude-code", CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
 }

@@ -224,6 +224,83 @@ public class CodexAppServerRateLimitClientTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    // ---- CaptureWithFailureReasonAsync（#174: 取得不可理由の区別）----
+
+    [Fact]
+    public async Task CaptureWithFailureReasonAsync_ShouldReturnNullReason_WhenSnapshotSucceeds()
+    {
+        (Mock<IProcessInstance> process, _) = CreateMockProcess(
+            BuildStdout(_initializeResponseLine, $$"""{"id":2,"result":{{_sampleReadResultJson.Trim()}}}"""));
+        CodexAppServerRateLimitClient client = CreateClient(process, out _);
+
+        (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
+            await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
+
+        snapshot.Should().NotBeNull();
+        failureReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CaptureWithFailureReasonAsync_ShouldReturnCommandNotFound_WhenProcessStartFails()
+    {
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Throws(new System.ComponentModel.Win32Exception("codex not found"));
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
+
+        (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
+            await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
+
+        snapshot.Should().BeNull();
+        failureReason.Should().Be(CodexRateLimitFailureReason.CommandNotFound);
+    }
+
+    [Fact]
+    public async Task CaptureWithFailureReasonAsync_ShouldReturnTimeout_WhenRoundTripTimesOut()
+    {
+        (Mock<IProcessInstance> process, _) = CreateMockProcess(stdoutStream: new BlockingStream());
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        CodexAppServerRateLimitClient client = new(
+            runner.Object, new FixedTimeProvider(_now), roundTripTimeout: TimeSpan.FromMilliseconds(200));
+
+        (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
+            await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
+
+        snapshot.Should().BeNull();
+        failureReason.Should().Be(CodexRateLimitFailureReason.Timeout);
+    }
+
+    [Fact]
+    public async Task CaptureWithFailureReasonAsync_ShouldReturnUnknown_WhenReadRespondsWithJsonRpcError()
+    {
+        (Mock<IProcessInstance> process, _) = CreateMockProcess(BuildStdout(
+            _initializeResponseLine,
+            """{"id":2,"error":{"code":-32000,"message":"not logged in"}}"""));
+        CodexAppServerRateLimitClient client = CreateClient(process, out _);
+
+        (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
+            await client.CaptureWithFailureReasonAsync("codex", CancellationToken.None);
+
+        snapshot.Should().BeNull();
+        failureReason.Should().Be(CodexRateLimitFailureReason.Unknown);
+    }
+
+    [Fact]
+    public async Task CaptureWithFailureReasonAsync_ShouldPropagateExternalCancellation()
+    {
+        (Mock<IProcessInstance> process, _) = CreateMockProcess(stdoutStream: new BlockingStream());
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        CodexAppServerRateLimitClient client = new(runner.Object, new FixedTimeProvider(_now));
+        using CancellationTokenSource cts = new();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        Func<Task> act = () => client.CaptureWithFailureReasonAsync("codex", cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     private static CodexRateLimitsReadResult Deserialize(string json)
         => System.Text.Json.JsonSerializer.Deserialize<CodexRateLimitsReadResult>(json)!;
 

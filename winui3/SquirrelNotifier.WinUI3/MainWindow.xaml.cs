@@ -748,12 +748,13 @@ internal sealed partial class MainWindow : Window
                 if (agent.Id == RateLimitSnapshotService.CodexAgentId)
                 {
                     // codex は statusline を持たないため App Server（account/rateLimits/read）から取得する
-                    Models.RateLimitSnapshot? snapshot = await _rateLimitSnapshotService.CaptureAsync(agent.Id, CancellationToken.None).ConfigureAwait(true);
+                    (Models.RateLimitSnapshot? snapshot, Services.CodexRateLimitFailureReason? failureReason) =
+                        await _rateLimitSnapshotService.CaptureCodexWithFailureReasonAsync(agent.Id, CancellationToken.None).ConfigureAwait(true);
                     if (snapshot == null)
                     {
                         await ShowAlertDialogAsync(
                             "レートリミット情報を取得できません",
-                            $"{agent.DisplayName} のレートリミット情報を Codex App Server から取得できませんでした。codex にログイン済みか確認してください。");
+                            BuildCodexFailureMessage(agent.DisplayName, failureReason));
                         continue;
                     }
 
@@ -848,6 +849,22 @@ internal sealed partial class MainWindow : Window
 
         UpdateLegacySchemaInfoBar(legacySchemaAgentNames);
         await RefreshAutoPauseGateAsync(capturedSnapshots).ConfigureAwait(true);
+    }
+
+    // codex の取得不可理由を原因ごとに出し分ける（#174）。JSON-RPC error の code/message は
+    // codex CLI バージョンにより変わりうるため確実に判別できず、Unknown を「未ログインの可能性を
+    // 含む」表現に留め、断定しない。
+    private static string BuildCodexFailureMessage(string agentDisplayName, Services.CodexRateLimitFailureReason? failureReason)
+    {
+        return failureReason switch
+        {
+            Services.CodexRateLimitFailureReason.CommandNotFound =>
+                $"{agentDisplayName} の codex コマンドが見つかりませんでした。codex CLI がインストールされ、PATH が通っているか確認してください。",
+            Services.CodexRateLimitFailureReason.Timeout =>
+                $"{agentDisplayName} の Codex App Server が応答しませんでした（タイムアウト）。しばらく待ってから再試行してください。",
+            _ =>
+                $"{agentDisplayName} のレートリミット情報を Codex App Server から取得できませんでした。codex にログイン済みか確認するか、しばらく待って再試行してください。",
+        };
     }
 
     // 旧形式 snapshot は一覧表示できてしまうため気づかれにくく、Auto-Pause gate（#147）が
@@ -1071,7 +1088,7 @@ internal sealed partial class MainWindow : Window
             ContentDialogResult dialogResult = await updateDialog.ShowAsync(ContentDialogPlacement.Popup);
             if (dialogResult == ContentDialogResult.Primary)
             {
-                TryOpenReleasePage(result.ReleaseUrl);
+                TryOpenUrl(result.ReleaseUrl);
             }
             else if (dialogResult == ContentDialogResult.Secondary)
             {
@@ -1088,9 +1105,9 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private void TryOpenReleasePage(string releaseUrl)
+    private void TryOpenUrl(string url)
     {
-        if (string.IsNullOrWhiteSpace(releaseUrl))
+        if (string.IsNullOrWhiteSpace(url))
         {
             return;
         }
@@ -1099,7 +1116,7 @@ internal sealed partial class MainWindow : Window
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = releaseUrl,
+                FileName = url,
                 UseShellExecute = true,
             });
         }
@@ -1107,6 +1124,16 @@ internal sealed partial class MainWindow : Window
         {
             // ignore
         }
+    }
+
+    private void OnOpenStatuslineDocsClick(object sender, RoutedEventArgs e)
+    {
+        TryOpenUrl("https://github.com/scottlz0310/squirrel-notifier/blob/main/docs/statusline-integration.md");
+    }
+
+    private void OnOpenNotificationDocsClick(object sender, RoutedEventArgs e)
+    {
+        TryOpenUrl("https://github.com/scottlz0310/squirrel-notifier#手動起動");
     }
 
     private void OnReviewEventReceived(object? sender, Models.ReviewEvent e)
