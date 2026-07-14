@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-14
+
 ### Fixed
 - codex レートリミット取得が PATHEXT 非解決で `CommandNotFound` になる問題を修正した（#177）。`CodexAppServerRateLimitClient` は `FileName="codex"` かつ `UseShellExecute=false` で `Process.Start` していたため、npm 経由でインストールされた `codex.cmd` シム環境では Win32 `CreateProcessW` が `.exe` のみを暗黙補完し、ターミナルでは実行できるのに `ERROR_FILE_NOT_FOUND` で失敗していた。PATH / PATHEXT を自前で解決し、`.cmd` / `.bat` が見つかった場合は `cmd.exe /c` 経由で起動するようにした
 - 「トースト通知が無効です」という警告文言が誤りだったため、README と InfoBar・トレイバルーン通知の文言を修正した。`AppNotificationManager.Register()` の `Insights.Resource.dll` 読み込み失敗（#169、[microsoft/WindowsAppSDK#6071](https://github.com/microsoft/WindowsAppSDK/issues/6071) — Microsoft 側の self-contained 配布における既知の未解決バグ）はボタン操作（`NotificationInvoked`）の受信にのみ影響し、`AppNotificationManager.Show()` によるトースト表示自体は妨げない。実機ログ・実機確認でも `Register()` 失敗時にトースト自体は表示されることを確認した
@@ -195,7 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.3.0...v0.4.0
