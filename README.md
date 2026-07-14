@@ -127,7 +127,7 @@ uninstall.cmd -KeepSettings
 
 または、Visual Studioから `F5` でデバッグ実行できます。
 
-> **既知の制約:** 本アプリは `WindowsPackageType=None` かつ self-contained（`WindowsAppSDKSelfContained=true`）でビルドされており、MSI インストーラー / セットアップ Zip による正規インストールも実行形態としては unpackaged です。そのため `AppNotificationManager.Register()` が `Microsoft.WindowsAppRuntime.Insights.Resource.dll` の読み込み失敗（8007007E）で失敗し、Windows のトースト通知が一切表示されない事象は、開発ビルドに限らず MSI / セットアップ Zip からの正規インストールでも発生しえます（#169、#174）。発生した場合はアプリ内のイベント行 UI とトレイバルーン通知がフォールバックとして機能します。
+> **既知の制約:** 本アプリは `WindowsPackageType=None` かつ self-contained（`WindowsAppSDKSelfContained=true`）でビルドされており、MSI インストーラー / セットアップ Zip による正規インストールも実行形態としては unpackaged です。そのため `AppNotificationManager.Register()` が `Microsoft.WindowsAppRuntime.Insights.Resource.dll` の読み込み失敗（8007007E）で失敗する事象は、開発ビルドに限らず MSI / セットアップ Zip からの正規インストールでも発生しえます（#169、#174、[microsoft/WindowsAppSDK#6071](https://github.com/microsoft/WindowsAppSDK/issues/6071) — Microsoft 側の self-contained 配布における既知の未解決バグ）。`Register()` はボタン操作等の通知アクティベーション（`NotificationInvoked`）を受け取るためのものであり、`AppNotificationManager.Show()` によるトースト自体の表示には影響しません。そのため `Register()` 失敗時もトースト通知は表示されますが、通知のボタン操作（「PRを開く」「レビューする」等）に反応しない場合があります。その場合はアプリ内のイベント行 UI とトレイバルーン通知がフォールバックとして機能します。
 
 ### 設定
 

@@ -64,9 +64,12 @@ public partial class App : Application
         }
         catch (System.Runtime.InteropServices.COMException ex) when (ex.Message.Contains("Insights.Resource.dll", StringComparison.Ordinal))
         {
-            // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題（#169）。
-            // トースト通知が一切表示できなくなるため、MainWindow 側でトレイバルーンと
-            // InfoBar によるフォールバック通知を出す
+            // self-contained モードで Insights.Resource.dll が見つからない場合の既知の問題
+            // （#169、microsoft/WindowsAppSDK#6071。Microsoft 側の未解決バグ）。
+            // Register() はボタン操作（NotificationInvoked）の受信にのみ必要であり、
+            // AppNotificationManager.Show() によるトースト表示自体には影響しない。
+            // そのためトースト自体は引き続き表示されるが、ボタン操作に反応しない場合がある旨を
+            // MainWindow 側でトレイバルーンと InfoBar により案内する
             _notificationRegistrationFailed = true;
             _ = _loggingService.WriteAsync($"[WARN] AppNotificationManager.Register() 失敗（{ex.HResult:X8}）: {ex.Message}");
         }
