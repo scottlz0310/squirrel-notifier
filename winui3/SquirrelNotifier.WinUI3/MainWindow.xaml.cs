@@ -158,6 +158,7 @@ internal sealed partial class MainWindow : Window
         ReviewerArgumentsBox.Text = settings.ReviewerLauncherArguments;
         ReviewedPathBox.Text = settings.ReviewedLauncherCommandPath;
         ReviewedArgumentsBox.Text = settings.ReviewedLauncherArguments;
+        RepositoryCheckoutMappingsBox.Text = Helpers.RepositoryCheckoutMappingParser.Format(settings.RepositoryCheckoutMappings);
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
         LiveLogAutoCloseToggle.IsOn = settings.LiveLogAutoCloseEnabled;
 
@@ -1000,6 +1001,8 @@ internal sealed partial class MainWindow : Window
             string reviewerArguments = ReviewerArgumentsBox.Text;
             string reviewedPath = ReviewedPathBox.Text;
             string reviewedArguments = ReviewedArgumentsBox.Text;
+            Dictionary<string, string> repositoryCheckoutMappings =
+                Helpers.RepositoryCheckoutMappingParser.Parse(RepositoryCheckoutMappingsBox.Text);
             int launcherTimeoutMs = double.IsNaN(LauncherTimeoutBox.Value) ? 1800000 : (int)LauncherTimeoutBox.Value;
 
             string reviewerPresetId = Models.LauncherAgentCatalog.ResolvePresetId(reviewerPath, reviewerArguments, Models.LauncherRole.Reviewer);
@@ -1020,6 +1023,7 @@ internal sealed partial class MainWindow : Window
                 launcherTimeoutMs,
                 reviewerPresetId,
                 reviewedPresetId);
+            _settingsService.UpdateRepositoryCheckoutMappings(repositoryCheckoutMappings);
         }
         catch
         {

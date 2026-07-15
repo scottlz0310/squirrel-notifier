@@ -138,6 +138,11 @@ uninstall.cmd -KeepSettings
 - **Gateway URL**: mcp-gateway のエンドポイントURL（例: http://localhost:3000）
 - **Resource URI**: 監視対象の MCP リソース URI（例: queue://review/queue）
 - **Timeout (ms)**: タイムアウトミリ秒（1〜300,000 ms）
+- **Checkout Mappings**: reviewed 側の「レビューに対応」で使う checkout を `owner/repo=C:\src\repo` 形式で1行に1件指定
+
+launcher の作業ディレクトリはロールごとに固定されます。「レビューする」（reviewer）は `%LocalAppData%\SquirrelNotifier\launcher-workspace\reviewer` から起動し、対象 checkout を直接操作しません。「レビューに対応」（reviewed）は Checkout Mappings に登録した Git checkout から起動します。mapping が未設定、存在しない、Git checkout ではない、または Windows／Program Files／アプリのインストール先を指す場合は、プロセスを起動せずエラーにします。タスクスケジューラーやアプリの起動元ディレクトリには依存しません。
+
+起動時の実効作業ディレクトリ、解決済み実行ファイル、実行形式、終了コードは `winui3.log` に記録されます。非ゼロ終了時は stderr の先頭3行（最大500文字）も、ANSI 制御文字の除去と既知の機密値マスキング後に記録されます。
 
 設定は `%LocalAppData%\SquirrelNotifier\settings.json` に保存されます。
 なお、認証トークンなどの機密情報は設定ファイルには保存せず、環境変数 `MCP_PROBE_AUTH_TOKEN` から子プロセスへ渡されます。

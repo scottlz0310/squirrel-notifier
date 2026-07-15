@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Moq;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
@@ -76,6 +77,13 @@ public class ReviewLauncherServiceTests : IDisposable
             reviewedCmd, reviewedArgs,
             timeoutMs,
             "custom", "custom");
+
+        string checkoutPath = Path.Combine(_tempDir, "checkouts", "squirrel-notifier");
+        Directory.CreateDirectory(Path.Combine(checkoutPath, ".git"));
+        _settingsService.UpdateRepositoryCheckoutMappings(new Dictionary<string, string>
+        {
+            ["scottlz0310/squirrel-notifier"] = checkoutPath,
+        });
     }
 
     [Fact]
@@ -115,6 +123,8 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedPsi.Should().NotBeNull();
         capturedPsi!.FileName.Should().Contain("launcher-cmd");
         capturedPsi.ArgumentList.Should().Contain("--launcher-arg");
+        capturedPsi.WorkingDirectory.Should().Be(Path.Combine(_tempDir, "launcher-workspace", "reviewer"));
+        Directory.Exists(capturedPsi.WorkingDirectory).Should().BeTrue();
         mockProcess.Verify(p => p.Dispose(), Times.Once);
     }
 
@@ -172,9 +182,11 @@ public class ReviewLauncherServiceTests : IDisposable
 
         // Delay mock process to simulate execution time
         Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Pending...", "", delayMs: 5000);
+        var processStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback(() => processStarted.SetResult())
             .Returns(mockProcess.Object);
 
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
@@ -183,7 +195,7 @@ public class ReviewLauncherServiceTests : IDisposable
         // Act
         Task<LauncherResult> launchTask = service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, cts.Token);
 
-        await Task.Delay(100);
+        await processStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cts.Cancel();
 
         LauncherResult result = await launchTask;
@@ -264,6 +276,53 @@ public class ReviewLauncherServiceTests : IDisposable
         // Assert
         capturedPsi.Should().NotBeNull();
         capturedPsi!.FileName.Should().Contain(expectedCmd);
+        string expectedWorkingDirectory = role == LauncherRole.Reviewer
+            ? Path.Combine(_tempDir, "launcher-workspace", "reviewer")
+            : Path.Combine(_tempDir, "checkouts", "squirrel-notifier");
+        capturedPsi.WorkingDirectory.Should().Be(expectedWorkingDirectory);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldFailBeforeStartingProcess_WhenReviewedCheckoutMappingIsMissing()
+    {
+        ReviewEvent reviewEvent = CreateReviewEvent("missing-checkout");
+        ConfigureSettings();
+        _settingsService.UpdateRepositoryCheckoutMappings(new Dictionary<string, string>());
+        var mockRunner = new Mock<IProcessRunner>();
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewed, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("checkout mapping");
+        mockRunner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldPersistMaskedFailureDiagnostics()
+    {
+        const string secret = "diagnostic-secret-value";
+        ReviewEvent reviewEvent = CreateReviewEvent("failed-diagnostics");
+        ConfigureSettings();
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(17, string.Empty, $"first failure {secret}\nsecond failure");
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        var service = new ReviewLauncherService(
+            _settingsService,
+            _loggingService,
+            mockRunner.Object,
+            secretMasker: new SecretMasker([secret]));
+
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+        string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+
+        result.Success.Should().BeFalse();
+        log.Should().Contain("ExitCode=17");
+        log.Should().Contain($"WorkingDirectory={Path.Combine(_tempDir, "launcher-workspace", "reviewer")}");
+        log.Should().Contain("ResolvedExecutable=");
+        log.Should().Contain("ExecutableKind=");
+        log.Should().Contain("first failure *** | second failure");
+        log.Should().NotContain(secret);
     }
 
     [Theory]
