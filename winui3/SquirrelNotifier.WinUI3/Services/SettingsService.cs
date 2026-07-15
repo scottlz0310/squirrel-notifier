@@ -82,6 +82,29 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // agy の print mode は launcher 側とは別に既定 5 分で timeout する（#180）。
+        // 旧プリセットと完全一致する未変更の設定だけを 30 分指定へ移行し、自由編集された値は保持する。
+        // 後続の LauncherPresetsMigrated 判定が新しいカタログ値と一致するよう、この migration は先に実行する.
+        if (!_settings.AgyPrintTimeoutMigrated)
+        {
+            const string legacyReviewerArguments = "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+            const string legacyReviewedArguments = "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"";
+            LauncherAgentDefinition agy = LauncherAgentCatalog.Find("agy")!;
+
+            if (_settings.ReviewerLauncherCommandPath == agy.Command && _settings.ReviewerLauncherArguments == legacyReviewerArguments)
+            {
+                _settings.ReviewerLauncherArguments = agy.ReviewerArgumentsTemplate;
+            }
+
+            if (_settings.ReviewedLauncherCommandPath == agy.Command && _settings.ReviewedLauncherArguments == legacyReviewedArguments)
+            {
+                _settings.ReviewedLauncherArguments = agy.ReviewedArgumentsTemplate;
+            }
+
+            _settings.AgyPrintTimeoutMigrated = true;
+            SaveSettings();
+        }
+
         // launcher スロットの command / arguments がどのエージェントプリセットと一致するかを
         // 一回だけ判定して記録する（#149）。一致しない場合は「カスタム」として扱う.
         if (!_settings.LauncherPresetsMigrated)
@@ -419,6 +442,9 @@ internal sealed class AppSettings
 
     // reviewed launcher 既定値のスキル名修正（#150）を既存ユーザーへ適用する一回限り migration のフラグ
     public bool ReviewedLauncherSkillMigrated { get; set; }
+
+    // agy の print timeout 修正（#180）を既存の未変更プリセットへ適用する一回限り migration のフラグ
+    public bool AgyPrintTimeoutMigrated { get; set; }
 
     // launcher スロットに選択されているエージェントプリセット ID（LauncherAgentCatalog 参照）。
     // 自由編集でどのプリセットとも一致しなくなった場合は LauncherAgentCatalog.CustomPresetId になる.
