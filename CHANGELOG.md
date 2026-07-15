@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `agy` launcher プリセットが CLI 内部の既定 `--print-timeout 5m` で終了し、squirrel-notifier の Launcher Timeout（既定30分）より先にレビューが失敗する問題を修正した（#180）。reviewer / reviewed の既定引数へ `--print-timeout 30m` を追加し、既存の未変更プリセットは一回限りの migration で更新する。カスタマイズ済みの command / arguments は変更しない
+
 ## [0.5.2] - 2026-07-14
 
 ### Fixed

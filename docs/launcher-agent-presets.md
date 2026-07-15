@@ -14,7 +14,7 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 |---|---|---|---|
 | `claude` | `claude` | `-p "/thread-owl-pr-reviewer ..."` のようなスキル呼び出し | `claude-code` |
 | `codex` | `codex` | `exec "..."` にプロンプト全文を埋め込み（スキル機構が無いため） | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
-| `agy` | `agy` | `-p "..."` にプロンプト全文を埋め込み | `agy` |
+| `agy` | `agy` | `--print-timeout 30m -p "..."` にプロンプト全文を埋め込み | `agy` |
 | `copilot` | `copilot` | `-p "..."` にプロンプト全文を埋め込み | `null`（レートリミット取得手段が無い） |
 
 codex / agy / copilot はスキル呼び出し機構を持たないため、claude 版スキルが行う指示内容（thread-owl MCP のツールを使ったレビュー・対応フロー）をプロンプト全文としてテンプレートに埋め込んでいる。実際に動作させるには、当該エージェントが thread-owl の MCP ツールを利用できるよう接続設定済みであることが前提（前述の責務境界により、この接続設定自体は squirrel-notifier の対象外）。
@@ -24,6 +24,7 @@ codex / agy / copilot はスキル呼び出し機構を持たないため、clau
 - reviewer / reviewed 各スロットにプリセット選択 ComboBox を用意する。選択すると command / arguments が既定値で上書きされる
 - 選択後も command / arguments は自由編集できる。保存時（`LauncherAgentCatalog.ResolvePresetId`）に現在の command / arguments を各プリセットの既定値と突き合わせ、完全一致しなければ「カスタム」として扱う。プリセット選択 ComboBox はこの判定結果を表示するだけで、選択操作そのものを永続化するわけではない
 - 既存ユーザーの設定は `LauncherPresetsMigrated` フラグで一回だけ移行し、移行時点の command / arguments がどのプリセットと一致するかを判定して `ReviewerLauncherPresetId` / `ReviewedLauncherPresetId` に記録する
+- #180 より前の `agy` 既定引数は CLI 内部の print timeout が 5 分だったため、未変更の既定値だけを `AgyPrintTimeoutMigrated` で `--print-timeout 30m` 付きへ移行する。自由編集された command / arguments は変更しない
 
 ## rateLimitAgentId の解決
 

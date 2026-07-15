@@ -644,6 +644,106 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void AgyPrintTimeoutMigration_ShouldRewriteLegacyDefaultArguments()
+    {
+        const string legacyReviewerArgs = "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        const string legacyReviewedArgs = "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierAgyTimeoutMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "agy",
+            ReviewerLauncherArguments = legacyReviewerArgs,
+            ReviewedLauncherCommandPath = "agy",
+            ReviewedLauncherArguments = legacyReviewedArgs,
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = false,
+            AgyPrintTimeoutMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+            LauncherAgentDefinition agy = LauncherAgentCatalog.Find("agy")!;
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(agy.ReviewerArgumentsTemplate);
+            service.Settings.ReviewedLauncherArguments.Should().Be(agy.ReviewedArgumentsTemplate);
+            service.Settings.ReviewerLauncherPresetId.Should().Be("agy");
+            service.Settings.ReviewedLauncherPresetId.Should().Be("agy");
+            service.Settings.AgyPrintTimeoutMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("reviewer")]
+    [InlineData("reviewed")]
+    public void AgyPrintTimeoutMigration_ShouldNotRewriteCustomizedArguments(string roleName)
+    {
+        const string customArguments = "-p custom-args";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierAgyTimeoutMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "agy",
+            ReviewerLauncherArguments = roleName == "reviewer" ? customArguments : "unused-reviewer-args",
+            ReviewedLauncherCommandPath = "agy",
+            ReviewedLauncherArguments = roleName == "reviewed" ? customArguments : "unused-reviewed-args",
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = true,
+            AgyPrintTimeoutMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            string actualArguments = roleName == "reviewer"
+                ? service.Settings.ReviewerLauncherArguments
+                : service.Settings.ReviewedLauncherArguments;
+            actualArguments.Should().Be(customArguments);
+            service.Settings.AgyPrintTimeoutMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void AgyPrintTimeoutMigration_ShouldSkipWhenAlreadyMigrated()
+    {
+        const string legacyArgs = "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierAgyTimeoutMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "agy",
+            ReviewerLauncherArguments = legacyArgs,
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(legacyArgs);
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
     public void Settings_ShouldDefaultReviewedLauncherArgumentsToExistingSkillName()
     {
         new AppSettings().ReviewedLauncherArguments.Should().Contain("/review-raven-thread-owl-cycle");
