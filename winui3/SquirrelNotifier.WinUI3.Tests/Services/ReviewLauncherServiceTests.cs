@@ -182,9 +182,11 @@ public class ReviewLauncherServiceTests : IDisposable
 
         // Delay mock process to simulate execution time
         Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Pending...", "", delayMs: 5000);
+        var processStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback(() => processStarted.SetResult())
             .Returns(mockProcess.Object);
 
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
@@ -193,7 +195,7 @@ public class ReviewLauncherServiceTests : IDisposable
         // Act
         Task<LauncherResult> launchTask = service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, cts.Token);
 
-        await Task.Delay(100);
+        await processStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cts.Cancel();
 
         LauncherResult result = await launchTask;
