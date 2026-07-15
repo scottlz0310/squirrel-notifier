@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- タスクスケジューラー等から launcher を起動した際に不定な current directory（例: `C:\Windows\System32`）を継承し、Codex の Git repository check や reviewed 側の checkout 操作が失敗する問題を修正した（#186）。reviewer は Settings 配下の専用 workspace、reviewed は Settings の `owner/repo=絶対パス` mapping で解決した Git checkout を明示的な `WorkingDirectory` として起動する。reviewed の mapping 不備・非 Git directory・システム／インストール先 directory はプロセス起動前に拒否する。Codex reviewer 既定引数には `--skip-git-repo-check` を追加し、未変更の旧既定値だけを一回限りで移行する。永続ログには実効 cwd・解決済み executable・実行形式・終了コードと、非ゼロ終了時のマスク済み stderr 要約を残す
 - `agy` launcher プリセットが CLI 内部の既定 `--print-timeout 5m` で終了し、squirrel-notifier の Launcher Timeout（既定30分）より先にレビューが失敗する問題を修正した（#180）。reviewer / reviewed の既定引数へ `--print-timeout 30m` を追加し、既存の未変更プリセットは一回限りの migration で更新する。カスタマイズ済みの command / arguments は変更しない
 
 ## [0.5.2] - 2026-07-14

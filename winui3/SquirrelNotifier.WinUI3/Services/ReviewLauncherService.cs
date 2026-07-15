@@ -19,6 +19,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
     private readonly TimeProvider _timeProvider;
+    private readonly LauncherWorkingDirectoryResolver _workingDirectoryResolver;
+    private readonly SecretMasker _secretMasker;
     private readonly object _lock = new();
 
     private bool _isRunning;
@@ -41,12 +43,16 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         SettingsService settingsService,
         LoggingService loggingService,
         IProcessRunner? processRunner = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        LauncherWorkingDirectoryResolver? workingDirectoryResolver = null,
+        SecretMasker? secretMasker = null)
     {
         _settingsService = settingsService;
         _loggingService = loggingService;
         _processRunner = processRunner ?? new ProcessRunner();
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _workingDirectoryResolver = workingDirectoryResolver ?? new LauncherWorkingDirectoryResolver(settingsService);
+        _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
     }
 
     public async Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken)
@@ -153,9 +159,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 throw new InvalidOperationException("Launcher command path is empty or invalid.");
             }
 
+            string workingDirectory = _workingDirectoryResolver.Resolve(reviewEvent, role);
+
             var psi = new ProcessStartInfo
             {
                 FileName = resolvedPath,
+                WorkingDirectory = workingDirectory,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
@@ -172,7 +181,16 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 psi.ArgumentList.Add(arg);
             }
 
-            await LogAsync($"Launching: {commandPath} with safe arguments").ConfigureAwait(false);
+            string executableKind = Path.GetExtension(resolvedPath).ToUpperInvariant() switch
+            {
+                ".CMD" => "cmd",
+                ".BAT" => "bat",
+                ".PS1" => "powershell-script",
+                _ => "native",
+            };
+            await LogAsync(
+                $"Launching: {commandPath} with safe arguments. WorkingDirectory={workingDirectory}; ResolvedExecutable={resolvedPath}; ExecutableKind={executableKind}")
+                .ConfigureAwait(false);
 
             lock (_lock)
             {
@@ -198,7 +216,11 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
             int exitCode = _activeProcess.ExitCode;
 
-            await LogAsync($"Review process finished. ExitCode={exitCode}").ConfigureAwait(false);
+            await LogAsync($"Review process finished. ExitCode={exitCode}; WorkingDirectory={workingDirectory}").ConfigureAwait(false);
+            if (exitCode != 0 && !string.IsNullOrWhiteSpace(stderr))
+            {
+                await LogAsync($"Review process stderr summary: {BuildStderrSummary(stderr)}").ConfigureAwait(false);
+            }
 
             session.Complete(
                 exitCode == 0 ? AgentExecutionOutcome.Succeeded : AgentExecutionOutcome.Failed,
@@ -318,6 +340,16 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             {
             }
         }
+    }
+
+    private string BuildStderrSummary(string stderr)
+    {
+        const int maxLength = 500;
+        string summary = string.Join(" | ", stderr
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(3)
+            .Select(line => _secretMasker.Mask(AnsiControlSanitizer.Sanitize(line))));
+        return summary.Length <= maxLength ? summary : summary[..maxLength];
     }
 
     // スロットはユーザーが押したアクションのロールだけで決まる（#127）

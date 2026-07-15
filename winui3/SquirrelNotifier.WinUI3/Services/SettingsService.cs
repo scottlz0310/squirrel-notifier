@@ -105,6 +105,21 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // reviewer は対象 checkout を直接操作せず専用ディレクトリから起動するため、Codex の
+        // Git repository check を明示的に無効化する（#186）。旧プリセットと完全一致する設定のみ移行する.
+        if (!_settings.CodexReviewerWorkingDirectoryMigrated)
+        {
+            const string legacyReviewerArguments = "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+            LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
+            if (_settings.ReviewerLauncherCommandPath == codex.Command && _settings.ReviewerLauncherArguments == legacyReviewerArguments)
+            {
+                _settings.ReviewerLauncherArguments = codex.ReviewerArgumentsTemplate;
+            }
+
+            _settings.CodexReviewerWorkingDirectoryMigrated = true;
+            SaveSettings();
+        }
+
         // launcher スロットの command / arguments がどのエージェントプリセットと一致するかを
         // 一回だけ判定して記録する（#149）。一致しない場合は「カスタム」として扱う.
         if (!_settings.LauncherPresetsMigrated)
@@ -329,6 +344,32 @@ internal sealed class SettingsService
         return LauncherAgentCatalog.Find(presetId)?.ProgressEventSupport ?? ProgressEventSupport.None;
     }
 
+    public string? ResolveRepositoryCheckoutPath(string repository)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repository);
+        return _settings.RepositoryCheckoutMappings
+            .FirstOrDefault(pair => string.Equals(pair.Key, repository, StringComparison.OrdinalIgnoreCase))
+            .Value;
+    }
+
+    public void UpdateRepositoryCheckoutMappings(IReadOnlyDictionary<string, string> mappings)
+    {
+        ArgumentNullException.ThrowIfNull(mappings);
+        var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string repository, string path) in mappings)
+        {
+            if (string.IsNullOrWhiteSpace(repository) || string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            {
+                throw new ArgumentException("Repository checkout mapping には owner/repo と絶対パスが必要です。", nameof(mappings));
+            }
+
+            normalized.Add(repository, Path.GetFullPath(path));
+        }
+
+        _settings.RepositoryCheckoutMappings = normalized;
+        SaveSettings();
+    }
+
     public void UpdateSettings(
         string commandPath,
         string arguments,
@@ -446,6 +487,9 @@ internal sealed class AppSettings
     // agy の print timeout 修正（#180）を既存の未変更プリセットへ適用する一回限り migration のフラグ
     public bool AgyPrintTimeoutMigrated { get; set; }
 
+    // Codex reviewer の専用 working directory 対応（#186）を既存の未変更プリセットへ適用する migration
+    public bool CodexReviewerWorkingDirectoryMigrated { get; set; }
+
     // launcher スロットに選択されているエージェントプリセット ID（LauncherAgentCatalog 参照）。
     // 自由編集でどのプリセットとも一致しなくなった場合は LauncherAgentCatalog.CustomPresetId になる.
     public string ReviewerLauncherPresetId { get; set; } = "claude";
@@ -453,6 +497,9 @@ internal sealed class AppSettings
     public string ReviewedLauncherPresetId { get; set; } = "claude";
 
     public bool LauncherPresetsMigrated { get; set; }
+
+    // reviewed-side launcher が対象 repository の checkout を一意に解決するための明示 mapping（#186）
+    public Dictionary<string, string> RepositoryCheckoutMappings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     // 長時間のレビューサイクル（30 分超もありうる）を 5 分で強制終了しないよう既定 30 分（#143）
     public int LauncherTimeoutMs { get; set; } = 1800000;

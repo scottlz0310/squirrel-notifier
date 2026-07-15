@@ -744,6 +744,93 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void CodexReviewerWorkingDirectoryMigration_ShouldRewriteLegacyDefaultArguments()
+    {
+        const string legacyArgs = "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierCodexWorkingDirectoryMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "codex",
+            ReviewerLauncherArguments = legacyArgs,
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = false,
+            CodexReviewerWorkingDirectoryMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(
+                LauncherAgentCatalog.Find("codex")!.ReviewerArgumentsTemplate);
+            service.Settings.ReviewerLauncherPresetId.Should().Be("codex");
+            service.Settings.CodexReviewerWorkingDirectoryMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("custom-command", "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"")]
+    [InlineData("codex", "exec custom-arguments")]
+    public void CodexReviewerWorkingDirectoryMigration_ShouldNotRewriteCustomizedSettings(string command, string arguments)
+    {
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierCodexWorkingDirectoryMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = command,
+            ReviewerLauncherArguments = arguments,
+            LauncherSlotsMigrated = true,
+            LauncherPresetsMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherCommandPath.Should().Be(command);
+            service.Settings.ReviewerLauncherArguments.Should().Be(arguments);
+            service.Settings.CodexReviewerWorkingDirectoryMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void UpdateRepositoryCheckoutMappings_ShouldPersistAndResolveIgnoringRepositoryCase()
+    {
+        string checkout = Path.Combine(_settingsDirectory, "checkout");
+        _settingsService.UpdateRepositoryCheckoutMappings(new Dictionary<string, string>
+        {
+            ["Owner/Repo"] = checkout,
+        });
+
+        var reloaded = new SettingsService(_settingsDirectory, pnpmBinDir: string.Empty);
+
+        reloaded.ResolveRepositoryCheckoutPath("owner/repo").Should().Be(Path.GetFullPath(checkout));
+    }
+
+    [Fact]
+    public void UpdateRepositoryCheckoutMappings_ShouldRejectRelativePath()
+    {
+        Action act = () => _settingsService.UpdateRepositoryCheckoutMappings(new Dictionary<string, string>
+        {
+            ["owner/repo"] = "relative-path",
+        });
+
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
     public void Settings_ShouldDefaultReviewedLauncherArgumentsToExistingSkillName()
     {
         new AppSettings().ReviewedLauncherArguments.Should().Contain("/review-raven-thread-owl-cycle");
