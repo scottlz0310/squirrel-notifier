@@ -12,7 +12,7 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 
 | プリセット ID | コマンド | 引数の方式 | rateLimitAgentId |
 |---|---|---|---|
-| `claude` | `claude` | `-p "/thread-owl-pr-reviewer ..."` のようなスキル呼び出し | `claude-code` |
+| `claude` | `claude` | `-p "/thread-owl-pr-reviewer ..." --verbose --output-format stream-json` のようなスキル呼び出し。stream-json は progress event の逐次取得用で、`-p` との併用時は CLI 仕様で `--verbose` が必須（[docs/progress-event-contract.md](progress-event-contract.md) 参照） | `claude-code` |
 | `codex` | `codex` | reviewer は `exec --skip-git-repo-check "..."`、reviewed は `exec "..."` にプロンプト全文を埋め込み | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
 | `agy` | `agy` | `--print-timeout 30m -p "..."` にプロンプト全文を埋め込み | `agy` |
 | `copilot` | `copilot` | `-p "..."` にプロンプト全文を埋め込み | `null`（レートリミット取得手段が無い） |
@@ -26,6 +26,7 @@ codex / agy / copilot はスキル呼び出し機構を持たないため、clau
 - 既存ユーザーの設定は `LauncherPresetsMigrated` フラグで一回だけ移行し、移行時点の command / arguments がどのプリセットと一致するかを判定して `ReviewerLauncherPresetId` / `ReviewedLauncherPresetId` に記録する
 - #180 より前の `agy` 既定引数は CLI 内部の print timeout が 5 分だったため、未変更の既定値だけを `AgyPrintTimeoutMigrated` で `--print-timeout 30m` 付きへ移行する。自由編集された command / arguments は変更しない
 - reviewer は対象 checkout 外の専用ディレクトリから起動するため、#186 より前の Codex reviewer 既定引数だけを `CodexReviewerWorkingDirectoryMigrated` で `--skip-git-repo-check` 付きへ移行する。自由編集された command / arguments と reviewed 側は変更しない
+- #187 より前の `claude` 既定引数は text 出力のため progress event を実行中に取得できなかった。未変更の既定値だけを `ClaudeStreamJsonMigrated` で `--verbose --output-format stream-json` 付きへ移行する。自由編集された command / arguments は変更しない
 
 ## 作業ディレクトリ契約
 

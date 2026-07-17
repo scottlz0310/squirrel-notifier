@@ -121,6 +121,30 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // claude の print mode 既定（text）では progress marker を実行中に取得できないため、
+        // stream-json 出力へ移行する（#187）。旧プリセットと完全一致する未変更の設定だけを移行し、
+        // 自由編集された値は保持する。後続の LauncherPresetsMigrated 判定が新しいカタログ値と
+        // 一致するよう、この migration は先に実行する.
+        if (!_settings.ClaudeStreamJsonMigrated)
+        {
+            const string legacyReviewerArguments = "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+            const string legacyReviewedArguments = "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+            LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
+
+            if (_settings.ReviewerLauncherCommandPath == claude.Command && _settings.ReviewerLauncherArguments == legacyReviewerArguments)
+            {
+                _settings.ReviewerLauncherArguments = claude.ReviewerArgumentsTemplate;
+            }
+
+            if (_settings.ReviewedLauncherCommandPath == claude.Command && _settings.ReviewedLauncherArguments == legacyReviewedArguments)
+            {
+                _settings.ReviewedLauncherArguments = claude.ReviewedArgumentsTemplate;
+            }
+
+            _settings.ClaudeStreamJsonMigrated = true;
+            SaveSettings();
+        }
+
         // launcher スロットの command / arguments がどのエージェントプリセットと一致するかを
         // 一回だけ判定して記録する（#149）。一致しない場合は「カスタム」として扱う.
         if (!_settings.LauncherPresetsMigrated)
@@ -423,12 +447,12 @@ internal sealed class AppSettings
     // reviewer-side スロット
     public string ReviewerLauncherCommandPath { get; set; } = "claude";
 
-    public string ReviewerLauncherArguments { get; set; } = "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+    public string ReviewerLauncherArguments { get; set; } = "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --verbose --output-format stream-json";
 
     // reviewed-side スロット
     public string ReviewedLauncherCommandPath { get; set; } = "claude";
 
-    public string ReviewedLauncherArguments { get; set; } = "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+    public string ReviewedLauncherArguments { get; set; } = "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --verbose --output-format stream-json";
 
     public bool LauncherSlotsMigrated { get; set; }
 
@@ -440,6 +464,9 @@ internal sealed class AppSettings
 
     // Codex reviewer の専用 working directory 対応（#186）を既存の未変更プリセットへ適用する migration
     public bool CodexReviewerWorkingDirectoryMigrated { get; set; }
+
+    // claude の progress event 逐次取得対応（#187、stream-json 化）を既存の未変更プリセットへ適用する migration
+    public bool ClaudeStreamJsonMigrated { get; set; }
 
     // launcher スロットに選択されているエージェントプリセット ID（LauncherAgentCatalog 参照）。
     // 自由編集でどのプリセットとも一致しなくなった場合は LauncherAgentCatalog.CustomPresetId になる.

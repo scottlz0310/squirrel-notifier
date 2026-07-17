@@ -65,14 +65,19 @@ internal static class LauncherAgentCatalog
     // claude はスキル定義への progress スニペット組み込み（docs/samples/skill-progress-snippet.md）
     // により @squirrel-progress を出力できる。codex / agy / copilot はスキル機構が無く
     // 構造化イベントの producer 統合が未整備のため None（indeterminate 表示）とする.
+    //
+    // claude の print mode は既定（text）だと最終応答しか stdout へ出力せず、スキルが echo する
+    // マーカーを実行中に取得できない（#187）。stream-json でリアルタイムイベントを受け取り、
+    // ClaudeStreamJsonEventExtractor がマーカーを抽出する。-p + stream-json は CLI 仕様で
+    // --verbose が必須（無いと即時エラー終了する）.
     public static readonly IReadOnlyList<LauncherAgentDefinition> All =
     [
         new LauncherAgentDefinition(
             "claude",
             "claude",
             "claude",
-            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
+            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --verbose --output-format stream-json",
+            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --verbose --output-format stream-json",
             "claude-code",
             ProgressEventSupport.Structured),
 

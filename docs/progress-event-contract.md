@@ -41,6 +41,19 @@ progress event は **stdout に混在する、行頭マーカー付きの 1 行 
 
 phase 構成はエージェント非依存であり、phase 数を固定しない。「Phase 0〜8」は claude のレビューワークフロー（thread-owl スキル）における一例であり、他のエージェント・ワークフローは独自の phase 構成で出力してよい（#149 のエージェント差し替えを許容するため）。
 
+### Claude stream-json 経由の輸送（#187）
+
+Claude Code CLI の print mode 既定（`--output-format text`）は最終応答しか stdout へ出力しないため、スキルが echo するマーカー行を実行中に取得できない。`claude` プリセットの既定引数は `--verbose --output-format stream-json` を含み（`-p` + stream-json は CLI 仕様で `--verbose` が必須）、stdout には stream-json の JSONL イベントが流れる。
+
+この場合、マーカー行は `user` イベント内の `tool_result` テキストに埋め込まれて届く。`ClaudeStreamJsonEventExtractor` が既知イベント（`system` / `assistant` / `user` / `result` / `stream_event`）を解釈し、以下のように既存 contract へ接続する。
+
+- `tool_result` テキスト内のマーカー行 → `ProgressEventParser` で検証のうえ `Progress` イベントへ。マーカー以外のツール出力（ファイル全文等）はライブログへ流さない
+- `assistant` の text ブロック（実行中のナレーション・最終応答）→ 通常の `Stdout` イベントへ
+- `system` / `stream_event`、および成功時の `result`（最終応答は assistant で配信済み）→ 抑制。エラー終了の `result` はログへ表示
+- 未知 type・malformed JSON・非 JSON 行 → 生の行のまま通常ログ（launcher の実行自体は失敗しない）
+
+判別は行の形（既知イベントとして解釈できるか）のみで行い、プリセット設定には依存しない。行頭マーカー方式（上記）はそのまま併用できるため、text 出力のエージェント・カスタム構成の producer は従来どおり動作する。
+
 ## producer 統合（スキルへの組み込み）
 
 スキル定義に組み込むスニペットは [`samples/skill-progress-snippet.md`](samples/skill-progress-snippet.md) を参照。スキルの各 Phase 開始時にマーカー行を echo させることで、squirrel-notifier 側の phase 表示が動作する。
