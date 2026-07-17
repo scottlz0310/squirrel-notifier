@@ -161,25 +161,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
             string workingDirectory = _workingDirectoryResolver.Resolve(reviewEvent, role);
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = resolvedPath,
-                WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = true,
-                StandardOutputEncoding = System.Text.Encoding.UTF8,
-                StandardErrorEncoding = System.Text.Encoding.UTF8,
-            };
-
-            // Build and add safe arguments
+            // .cmd / .bat シムの cmd.exe ラップと引数の安全な受け渡しは共通 factory に委ねる（#186）
             List<string> args = LauncherArgumentBuilder.BuildArguments(argumentsTemplate, reviewEvent);
-            foreach (string arg in args)
-            {
-                psi.ArgumentList.Add(arg);
-            }
+            ProcessStartInfo psi = AgentProcessStartInfoFactory.Create(resolvedPath, args);
+            psi.WorkingDirectory = workingDirectory;
+            psi.StandardOutputEncoding = System.Text.Encoding.UTF8;
+            psi.StandardErrorEncoding = System.Text.Encoding.UTF8;
 
             string executableKind = Path.GetExtension(resolvedPath).ToUpperInvariant() switch
             {
