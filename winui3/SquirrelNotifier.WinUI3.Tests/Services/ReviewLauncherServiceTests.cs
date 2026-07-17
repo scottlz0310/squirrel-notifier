@@ -499,7 +499,8 @@ public class ReviewLauncherServiceTests : IDisposable
     {
         // Arrange: Kill のコールバックがパイプを閉じるため、writer 側の後始末は不要
         ConfigureSettings();
-        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out _, out _);
+        var processStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out _, out _, processStarted);
 
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
@@ -509,7 +510,7 @@ public class ReviewLauncherServiceTests : IDisposable
 
         // Act
         AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-cancel"), LauncherRole.Reviewer, cts.Token);
-        await Task.Delay(100);
+        await processStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
         cts.Cancel();
 
         LauncherResult result = await session.Completion;
