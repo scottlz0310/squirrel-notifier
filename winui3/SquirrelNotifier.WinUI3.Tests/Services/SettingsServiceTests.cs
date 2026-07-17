@@ -806,6 +806,106 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void ClaudeStreamJsonMigration_ShouldRewriteLegacyDefaultArguments()
+    {
+        const string legacyReviewerArgs = "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        const string legacyReviewedArgs = "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierClaudeStreamJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "claude",
+            ReviewerLauncherArguments = legacyReviewerArgs,
+            ReviewedLauncherCommandPath = "claude",
+            ReviewedLauncherArguments = legacyReviewedArgs,
+            LauncherSlotsMigrated = true,
+            ReviewedLauncherSkillMigrated = true,
+            LauncherPresetsMigrated = false,
+            ClaudeStreamJsonMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+            LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(claude.ReviewerArgumentsTemplate);
+            service.Settings.ReviewedLauncherArguments.Should().Be(claude.ReviewedArgumentsTemplate);
+            service.Settings.ReviewerLauncherPresetId.Should().Be("claude");
+            service.Settings.ReviewedLauncherPresetId.Should().Be("claude");
+            service.Settings.ClaudeStreamJsonMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("custom-command", "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"")]
+    [InlineData("claude", "-p custom-arguments")]
+    public void ClaudeStreamJsonMigration_ShouldNotRewriteCustomizedSettings(string command, string arguments)
+    {
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierClaudeStreamJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = command,
+            ReviewerLauncherArguments = arguments,
+            ReviewedLauncherCommandPath = command,
+            ReviewedLauncherArguments = arguments,
+            LauncherSlotsMigrated = true,
+            ReviewedLauncherSkillMigrated = true,
+            LauncherPresetsMigrated = true,
+            ClaudeStreamJsonMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(arguments);
+            service.Settings.ReviewedLauncherArguments.Should().Be(arguments);
+            service.Settings.ClaudeStreamJsonMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void ClaudeStreamJsonMigration_ShouldSkipWhenAlreadyMigrated()
+    {
+        const string legacyReviewerArgs = "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierClaudeStreamJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "claude",
+            ReviewerLauncherArguments = legacyReviewerArgs,
+            LauncherSlotsMigrated = true,
+            ReviewedLauncherSkillMigrated = true,
+            LauncherPresetsMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(legacyReviewerArgs);
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
     public void UpdateRepositoryCheckoutMappings_ShouldPersistAndResolveIgnoringRepositoryCase()
     {
         string checkout = Path.Combine(_settingsDirectory, "checkout");

@@ -280,6 +280,20 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             {
                 session.PublishProgress(progress!);
             }
+            else if (ClaudeStreamJsonEventExtractor.TryExtract(line, out ClaudeStreamJsonExtraction? extraction))
+            {
+                // Claude の stream-json イベント（#187）。tool_result 内のマーカーを progress へ、
+                // assistant テキストを通常ログへ展開する。プリセット設定には依存せず行の形で判別する.
+                foreach (AgentProgressEvent extractedProgress in extraction!.ProgressEvents)
+                {
+                    session.PublishProgress(extractedProgress);
+                }
+
+                foreach (string logLine in extraction.LogLines)
+                {
+                    session.PublishStdout(logLine);
+                }
+            }
             else
             {
                 // マーカー不一致・malformed JSON・未知 schemaVersion は通常ログとして流す（#143 AC）

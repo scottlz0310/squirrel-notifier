@@ -373,7 +373,7 @@ public class ReviewLauncherServiceTests : IDisposable
 
         ConfigureSettings(
             reviewerCmd: "claude",
-            reviewerArgs: "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"");
+            reviewerArgs: "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --verbose --output-format stream-json");
 
         var mockRunner = new Mock<IProcessRunner>();
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
@@ -382,7 +382,7 @@ public class ReviewLauncherServiceTests : IDisposable
         string commandLine = service.BuildCommandLine(reviewEvent, LauncherRole.Reviewer);
 
         // Assert
-        commandLine.Should().Be("claude -p \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\"");
+        commandLine.Should().Be("claude -p \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\" --verbose --output-format stream-json");
     }
 
     // ---- #143: 実行イベントのストリーミング ----
@@ -492,6 +492,58 @@ public class ReviewLauncherServiceTests : IDisposable
         LauncherResult result = await session.Completion;
         result.Success.Should().BeTrue();
         result.Stdout.Should().Be($"plain log line\n{progressLine}\n{malformedLine}");
+    }
+
+    [Fact]
+    public async Task StartSession_ShouldExtractProgressFromClaudeStreamJsonEvents()
+    {
+        // Arrange: claude -p --verbose --output-format stream-json の stdout を模す（#187）
+        const string initEvent = """{"type":"system","subtype":"init","session_id":"s1","tools":["Bash"]}""";
+        const string assistantTextEvent = """{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"レビューを開始します。"}]},"session_id":"s1"}""";
+        const string toolResultEvent = """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":[{"type":"text","text":"@squirrel-progress {\"schemaVersion\":1,\"phaseIndex\":2,\"totalPhases\":8,\"phaseLabel\":\"分類\"}"}]}]},"session_id":"s1"}""";
+        const string unknownEvent = """{"type":"unknown_future_event","data":"x"}""";
+
+        ConfigureSettings();
+        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out StreamWriter stdout, out TaskCompletionSource exitTcs);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object, new FixedTimeProvider());
+
+        // Act
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent(), LauncherRole.Reviewer, CancellationToken.None);
+
+        using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<AgentExecutionEvent> events = session.ReadEventsAsync(readTimeout.Token).GetAsyncEnumerator();
+
+        // Assert: init イベントは抑制され、assistant テキストが通常ログとして届く
+        await stdout.WriteLineAsync(initEvent);
+        await stdout.WriteLineAsync(assistantTextEvent);
+        (await events.MoveNextAsync()).Should().BeTrue();
+        events.Current.Kind.Should().Be(AgentExecutionEventKind.Stdout);
+        events.Current.Text.Should().Be("レビューを開始します。");
+        session.Completion.IsCompleted.Should().BeFalse("プロセス終了前にログが購読側へ届くこと");
+
+        // tool_result 内のマーカーはプロセス終了前に progress event として届く（#187 AC）
+        await stdout.WriteLineAsync(toolResultEvent);
+        (await events.MoveNextAsync()).Should().BeTrue();
+        events.Current.Kind.Should().Be(AgentExecutionEventKind.Progress);
+        events.Current.Progress!.PhaseIndex.Should().Be(2);
+        events.Current.Progress.PhaseLabel.Should().Be("分類");
+
+        // 未知 type の JSON 行は生の行のまま通常ログとして流れ、実行は失敗しない
+        await stdout.WriteLineAsync(unknownEvent);
+        (await events.MoveNextAsync()).Should().BeTrue();
+        events.Current.Kind.Should().Be(AgentExecutionEventKind.Stdout);
+        events.Current.Text.Should().Be(unknownEvent);
+
+        stdout.Dispose();
+        exitTcs.SetResult();
+
+        (await events.MoveNextAsync()).Should().BeTrue();
+        events.Current.Kind.Should().Be(AgentExecutionEventKind.Completed);
+        events.Current.Outcome.Should().Be(AgentExecutionOutcome.Succeeded);
     }
 
     [Fact]
