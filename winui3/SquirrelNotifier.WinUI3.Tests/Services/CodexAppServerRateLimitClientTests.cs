@@ -138,7 +138,7 @@ public class CodexAppServerRateLimitClientTests
         string sentPayload = Encoding.UTF8.GetString(stdin.ToArray());
         sentPayload.Should().Contain("\"method\":\"initialize\"").And.Contain("squirrel-notifier");
         sentPayload.Should().Contain("\"method\":\"account/rateLimits/read\"");
-        runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.FileName == _fakeExePath && p.Arguments == "app-server")), Times.Once);
+        runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.FileName == _fakeExePath && p.ArgumentList.Count == 1 && p.ArgumentList[0] == "app-server")), Times.Once);
         process.Verify(p => p.Kill(true), Times.Once);
     }
 
@@ -281,7 +281,7 @@ public class CodexAppServerRateLimitClientTests
         string fakeScriptPath)
     {
         // npm 経由でインストールされた codex は Windows 上では codex.cmd シムであることが多い（#177）。
-        // 実体パスは環境変数経由で展開し、パスに含まれる cmd.exe メタ文字の再解釈を防ぐ
+        // 実体パス・引数は共通 factory（#186）が環境変数経由で展開し、cmd.exe メタ文字の再解釈を防ぐ
         (Mock<IProcessInstance> process, _) = CreateMockProcess(
             BuildStdout(_initializeResponseLine, $$"""{"id":2,"result":{{_sampleReadResultJson.Trim()}}}"""));
         var runner = new Mock<IProcessRunner>();
@@ -293,8 +293,9 @@ public class CodexAppServerRateLimitClientTests
         snapshot.Should().NotBeNull();
         runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p =>
             p.FileName.EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
-            && p.Arguments == "/d /s /c \"\"%SQUIRREL_NOTIFIER_CODEX_COMMAND%\" app-server\""
-            && p.Environment["SQUIRREL_NOTIFIER_CODEX_COMMAND"] == fakeScriptPath)), Times.Once);
+            && p.Arguments == "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\"\""
+            && p.Environment["SQUIRREL_NOTIFIER_LAUNCHER_COMMAND"] == fakeScriptPath
+            && p.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_0"] == "app-server")), Times.Once);
     }
 
     [Fact]

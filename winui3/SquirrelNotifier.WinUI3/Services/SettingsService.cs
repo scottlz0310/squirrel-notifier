@@ -4,6 +4,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -147,41 +148,11 @@ internal sealed class SettingsService
         }
     }
 
+    // PATH / PATHEXT の探索は共通 resolver（#186）へ委譲する。解決できない場合は
+    // 設定値をそのまま返し、起動時の Win32 エラー（ファイル未検出）として表面化させる
     internal static string ResolveCommandPath(string command, string? pnpmBinDir = null, string? pathEnv = null)
     {
-        if (File.Exists(command))
-        {
-            return Path.GetFullPath(command);
-        }
-
-        string[] extensions = OperatingSystem.IsWindows()
-            ? [".exe", ".cmd", ".bat", ".ps1"]
-            : [];
-
-        pathEnv ??= Environment.GetEnvironmentVariable("PATH");
-        if (!string.IsNullOrEmpty(pathEnv))
-        {
-            char separator = OperatingSystem.IsWindows() ? ';' : ':';
-            foreach (string dir in pathEnv.Split(separator, StringSplitOptions.RemoveEmptyEntries))
-            {
-                string? found = FindInDirectory(dir, command, extensions);
-                if (found is not null)
-                {
-                    return found;
-                }
-            }
-        }
-
-        if (!string.IsNullOrEmpty(pnpmBinDir))
-        {
-            string? found = FindInDirectory(pnpmBinDir, command, extensions);
-            if (found is not null)
-            {
-                return found;
-            }
-        }
-
-        return command;
+        return CommandPathResolver.Resolve(command, pnpmBinDir, pathEnv) ?? command;
     }
 
     // Runs `pnpm bin -g` to locate the global bin directory; returns null on any failure or timeout.
@@ -218,26 +189,6 @@ internal sealed class SettingsService
         {
             return null;
         }
-    }
-
-    private static string? FindInDirectory(string dir, string command, string[] extensions)
-    {
-        string fullPath = Path.Combine(dir, command);
-        foreach (string ext in extensions)
-        {
-            string extPath = fullPath + ext;
-            if (File.Exists(extPath))
-            {
-                return Path.GetFullPath(extPath);
-            }
-        }
-
-        if (File.Exists(fullPath))
-        {
-            return Path.GetFullPath(fullPath);
-        }
-
-        return null;
     }
 
     private AppSettings LoadSettings()

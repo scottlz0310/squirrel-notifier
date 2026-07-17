@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- AI エージェント起動のコマンド解決と Windows shim の起動規約を、レビュー起動とレートリミット取得で共通化した（#186 の残タスク）。PATH / PATHEXT 解決を共通の `CommandPathResolver` に集約し、launcher 側も PATHEXT に従ってコマンドを解決するようにした。`.cmd` / `.bat` シムは `CreateProcessW` の暗黙の cmd.exe 起動（`ArgumentList` の引用規約と cmd.exe のパース規則が一致せず、引数内のメタ文字が再解釈されうる経路）に頼らず、共通の `AgentProcessStartInfoFactory` が `cmd.exe /d /s /v:off /c` で明示的にラップし、実行パスと各引数を環境変数の引用符内展開で安全に受け渡す。引用符・改行を含み安全に渡せない引数は起動前に明示エラーで拒否する。`.exe` / `.cmd` / `.bat` の実プロセス起動テストと、タスクスケジューラ起動相当の初期 cwd（System32）から dummy agent を起動する回帰テストを追加した
 - タスクスケジューラー等から launcher を起動した際に不定な current directory（例: `C:\Windows\System32`）を継承し、Codex の Git repository check や reviewed 側の checkout 操作が失敗する問題を修正した（#186）。reviewer は Settings 配下の専用 workspace、reviewed は Settings の `owner/repo=絶対パス` mapping で解決した Git checkout を明示的な `WorkingDirectory` として起動する。reviewed の mapping 不備・非 Git directory・システム／インストール先 directory はプロセス起動前に拒否する。Codex reviewer 既定引数には `--skip-git-repo-check` を追加し、未変更の旧既定値だけを一回限りで移行する。永続ログには実効 cwd・解決済み executable・実行形式・終了コードと、非ゼロ終了時のマスク済み stderr 要約を残す
 - `agy` launcher プリセットが CLI 内部の既定 `--print-timeout 5m` で終了し、squirrel-notifier の Launcher Timeout（既定30分）より先にレビューが失敗する問題を修正した（#180）。reviewer / reviewed の既定引数へ `--print-timeout 30m` を追加し、既存の未変更プリセットは一回限りの migration で更新する。カスタマイズ済みの command / arguments は変更しない
 
