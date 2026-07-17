@@ -406,7 +406,10 @@ public class ReviewLauncherServiceTests : IDisposable
 
     // stdout を実行中に逐次供給できる mock process。実プロセス同様、Kill でパイプが閉じて
     // 読み取り側が EOF / IOException で終了する挙動を再現する.
-    private Mock<IProcessInstance> CreatePipeMockProcess(out StreamWriter stdoutWriter, out TaskCompletionSource exitTcs)
+    private Mock<IProcessInstance> CreatePipeMockProcess(
+        out StreamWriter stdoutWriter,
+        out TaskCompletionSource exitTcs,
+        TaskCompletionSource? processStarted = null)
     {
         var server = new AnonymousPipeServerStream(PipeDirection.Out);
         var client = new AnonymousPipeClientStream(PipeDirection.In, server.ClientSafePipeHandle);
@@ -421,7 +424,11 @@ public class ReviewLauncherServiceTests : IDisposable
         mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
         mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
         mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
-            .Returns((CancellationToken t) => tcs.Task.WaitAsync(t));
+            .Returns((CancellationToken t) =>
+            {
+                processStarted?.TrySetResult();
+                return tcs.Task.WaitAsync(t);
+            });
         mockProcess.Setup(p => p.Kill(It.IsAny<bool>())).Callback(server.Dispose);
         return mockProcess;
     }
@@ -492,7 +499,8 @@ public class ReviewLauncherServiceTests : IDisposable
     {
         // Arrange: Kill のコールバックがパイプを閉じるため、writer 側の後始末は不要
         ConfigureSettings();
-        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out _, out _);
+        var processStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out _, out _, processStarted);
 
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
@@ -502,7 +510,7 @@ public class ReviewLauncherServiceTests : IDisposable
 
         // Act
         AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-cancel"), LauncherRole.Reviewer, cts.Token);
-        await Task.Delay(100);
+        await processStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
         cts.Cancel();
 
         LauncherResult result = await session.Completion;
@@ -528,7 +536,8 @@ public class ReviewLauncherServiceTests : IDisposable
         // Arrange: Cancel() は内部 CTS のみを cancel し、呼び出し元トークンは cancel されない経路。
         // timeout（TimedOut）に誤分類されないことを固定する（#143 レビュー対応）
         ConfigureSettings();
-        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out _, out _);
+        var processStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<IProcessInstance> mockProcess = CreatePipeMockProcess(out _, out _, processStarted);
 
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
@@ -537,7 +546,7 @@ public class ReviewLauncherServiceTests : IDisposable
 
         // Act
         AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-cancel-method"), LauncherRole.Reviewer, CancellationToken.None);
-        await Task.Delay(100);
+        await processStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
         service.Cancel();
 
         LauncherResult result = await session.Completion;
