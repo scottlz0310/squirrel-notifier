@@ -74,8 +74,10 @@ internal static class AgentProcessStartInfoFactory
             string argument = arguments[i];
             if (argument.AsSpan().ContainsAny('"', '\r', '\n'))
             {
+                // 例外メッセージは呼び出し元で永続ログへ記録されるため、機密を含み得る
+                // 実引数の内容は出力せず、位置と拒否理由のみを示す（改行によるログ行偽装も防ぐ）
                 throw new ArgumentException(
-                    $"Argument #{i} cannot be passed safely to a .cmd/.bat shim because it contains a double quote or a line break: {argument}",
+                    $"Argument #{i} cannot be passed safely to a .cmd/.bat shim because it contains a double quote or a line break.",
                     nameof(arguments));
             }
 

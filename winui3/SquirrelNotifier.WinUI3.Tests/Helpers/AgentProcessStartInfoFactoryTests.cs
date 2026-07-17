@@ -86,15 +86,18 @@ public class AgentProcessStartInfoFactoryTests
     }
 
     [Theory]
-    [InlineData("contains \" quote")]
-    [InlineData("contains \r carriage-return")]
-    [InlineData("contains \n line-feed")]
+    [InlineData("SENSITIVE-VALUE \" quote")]
+    [InlineData("SENSITIVE-VALUE \r carriage-return")]
+    [InlineData("SENSITIVE-VALUE \n line-feed")]
     public void Create_ShouldRejectUnsafeArguments_ForShellScriptShim(string argument)
     {
-        // 引用符・改行は環境変数展開方式でも cmd.exe の引用状態を破壊しうるため明示エラー
+        // 引用符・改行は環境変数展開方式でも cmd.exe の引用状態を破壊しうるため明示エラー。
+        // 例外メッセージは永続ログへ記録されるため、機密を含み得る実引数の内容を含めない
         Action act = () => AgentProcessStartInfoFactory.Create(@"C:\tools\tool.cmd", ["safe", argument]);
 
-        act.Should().Throw<ArgumentException>().WithMessage("*#1*cannot be passed safely*");
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*#1*cannot be passed safely*")
+            .Which.Message.Should().NotContain("SENSITIVE-VALUE", "実引数の内容をメッセージへ埋め込まないこと");
     }
 
     [Fact]
