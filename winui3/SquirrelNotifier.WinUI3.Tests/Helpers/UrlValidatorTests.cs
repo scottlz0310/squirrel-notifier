@@ -43,4 +43,25 @@ public class UrlValidatorTests
         // Assert
         result.Should().Be(expected);
     }
+
+    [Theory]
+    [InlineData("https://gateway.example/device", true)]
+    [InlineData("http://127.0.0.1:8080/device?user_code=WDJB-MJHT", true)]
+    [InlineData("HTTPS://gateway.example/device", true)] // scheme is case-insensitive
+    [InlineData("ms-settings:privacy", false)] // OS protocol handler
+    [InlineData("file:///C:/Windows/System32/calc.exe", false)]
+    [InlineData("ftp://gateway.example/device", false)]
+    [InlineData("javascript:alert(1)", false)]
+    [InlineData("/relative/path", false)] // not absolute
+    [InlineData("gateway.example/device", false)] // missing scheme
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsHttpOrHttpsAbsoluteUrl_ShouldAllowOnlyHttpAndHttps(string? url, bool expected)
+    {
+        // Act
+        bool result = UrlValidator.IsHttpOrHttpsAbsoluteUrl(url);
+
+        // Assert
+        result.Should().Be(expected);
+    }
 }

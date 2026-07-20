@@ -167,15 +167,30 @@ internal sealed class McpLoginService
                 case DeviceLoginSignalKind.VerificationUri:
                     verificationUri = signal.Value;
 
+                    // 悪意ある／侵害された gateway は verification_uri に ms-settings: 等の任意 scheme を
+                    // 返しうる。UseShellExecute=true の自動起動で OS protocol handler を誤起動しないよう、
+                    // http / https の absolute URI に限って自動でブラウザを開く（#183 セキュリティレビュー）。
+                    bool schemeAllowed = UrlValidator.IsHttpOrHttpsAbsoluteUrl(verificationUri);
+
                     // verification-uri は complete より先に出力されるため、ここで一度だけ
                     // ブラウザを起動する（承認待ちのブロック前に開く）。complete が後続しても
                     // 二重にタブを開かない。UI には complete 受信時に更新情報を再送する.
-                    browserOpened = _urlOpener.TryOpen(verificationUri);
+                    browserOpened = schemeAllowed && _urlOpener.TryOpen(verificationUri);
                     browserOpenAttempted = true;
-                    await LogAsync($"Device authorization received; browser open attempted (opened={browserOpened}).").ConfigureAwait(false);
-                    RaiseStatus(browserOpened
-                        ? "ブラウザで認証ページを開きました。表示されたコードで承認してください。承認待ち..."
-                        : "ブラウザを自動で開けませんでした。表示された URL とコードで手動承認してください。承認待ち...");
+
+                    if (!schemeAllowed)
+                    {
+                        await LogAsync("Rejected non-http(s) verification URI scheme; browser auto-open skipped.").ConfigureAwait(false);
+                        RaiseStatus("gateway が予期しない形式の URL を返したため、自動でブラウザを開きませんでした。承認 URL をご確認ください。");
+                    }
+                    else
+                    {
+                        await LogAsync($"Device authorization received; browser open attempted (opened={browserOpened}).").ConfigureAwait(false);
+                        RaiseStatus(browserOpened
+                            ? "ブラウザで認証ページを開きました。表示されたコードで承認してください。承認待ち..."
+                            : "ブラウザを自動で開けませんでした。表示された URL とコードで手動承認してください。承認待ち...");
+                    }
+
                     RaiseVerification(verificationUri, verificationUriComplete, userCode, browserOpened);
                     break;
 

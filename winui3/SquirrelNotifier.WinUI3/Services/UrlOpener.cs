@@ -4,6 +4,7 @@
 
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using SquirrelNotifier.WinUI3.Helpers;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
@@ -16,6 +17,13 @@ internal sealed class UrlOpener : IUrlOpener
 {
     public bool TryOpen(string url)
     {
+        // sink 側の多層防御（#183）: UseShellExecute=true は任意の OS protocol handler を起動しうる
+        // ため、http / https の absolute URI 以外は Process.Start へ渡さず拒否する.
+        if (!UrlValidator.IsHttpOrHttpsAbsoluteUrl(url))
+        {
+            return false;
+        }
+
         try
         {
             Process.Start(new ProcessStartInfo

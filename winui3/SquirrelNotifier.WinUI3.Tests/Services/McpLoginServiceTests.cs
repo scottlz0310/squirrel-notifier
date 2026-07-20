@@ -153,6 +153,33 @@ public class McpLoginServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LoginAsync_ShouldNotAutoOpenBrowser_WhenVerificationUriSchemeIsNotHttp()
+    {
+        // 悪意ある／侵害された gateway が verification_uri に OS protocol handler の scheme を
+        // 返しても、自動でブラウザ（UseShellExecute）を起動してはならない。
+        string maliciousStdout =
+            "user-code WDJB-MJHT\n" +
+            "verification-uri ms-settings:privacy\n" +
+            "login-status success\n";
+        Mock<IProcessInstance> loginProcess = CreateMockProcess(0, maliciousStdout, string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
+        Mock<IProcessRunner> runner = CreateRunner(loginProcess, versionProcess);
+        var urlOpener = new FakeUrlOpener(result: true);
+
+        var service = new McpLoginService(_settingsService, _loggingService, runner.Object, urlOpener);
+        DeviceVerificationInfo? lastInfo = null;
+        service.VerificationReceived += (_, info) => lastInfo = info;
+
+        McpLoginResult result = await service.LoginAsync(CancellationToken.None);
+
+        // ブラウザは一切起動しない。UI へは URL / code を提示するが browserOpened=false。
+        urlOpener.OpenedUrls.Should().BeEmpty();
+        lastInfo.Should().NotBeNull();
+        lastInfo!.BrowserOpened.Should().BeFalse();
+        lastInfo.UserCode.Should().Be("WDJB-MJHT");
+    }
+
+    [Fact]
     public async Task LoginAsync_ShouldReturnFailed_WhenLoginStatusIsFailed()
     {
         string stdout = "login-status failed\n";
