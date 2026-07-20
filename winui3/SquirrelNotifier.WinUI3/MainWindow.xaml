@@ -38,6 +38,17 @@
                     <Button Content="詳細を見る" Click="OnOpenNotificationDocsClick"/>
                 </InfoBar.ActionButton>
             </InfoBar>
+            <InfoBar x:Name="AuthRequiredInfoBar"
+                     Title="mcp-gateway の認証が必要です"
+                     Message="mcp-gateway への認証が完了していないため、通知の購読やレビュー登録が失敗します。「mcp-gateway にログイン」で device flow 認証を開始してください。"
+                     Severity="Error"
+                     IsOpen="False"
+                     IsClosable="True"
+                     Margin="0,4,0,0">
+                <InfoBar.ActionButton>
+                    <Button Content="mcp-gateway にログイン" Click="OnLoginToGatewayClick"/>
+                </InfoBar.ActionButton>
+            </InfoBar>
             <InfoBar x:Name="CopyFeedbackInfoBar"
                      Severity="Success"
                      IsOpen="False"
@@ -63,10 +74,11 @@
                     <TextBox Grid.Row="1" Grid.Column="1" x:Name="ArgumentsBox" TextChanged="OnSettingChanged"/>
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Gateway URL:" VerticalAlignment="Center"/>
-                    <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                    <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4">
                         <TextBox Grid.Column="0" x:Name="GatewayUrlBox" TextChanged="OnSettingChanged"
                                  PlaceholderText="http://localhost:8080/mcp/thread-owl"/>
                         <Button Grid.Column="1" Content="コンテナから自動設定" Click="OnAutoDetectGatewayUrlClick"/>
+                        <Button Grid.Column="2" x:Name="GatewayLoginButton" Content="ログイン" Click="OnLoginToGatewayClick"/>
                     </Grid>
 
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Resource URIs:" VerticalAlignment="Top" Margin="0,4,0,0"/>
