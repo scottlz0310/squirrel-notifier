@@ -50,6 +50,7 @@ internal sealed partial class MainWindow : Window
     private bool _isSyncingLauncherPresetSelection;
     private bool _isApplyingLauncherPreset;
     private bool _isReviewStartPending;
+    private bool _isLoginPending;
 
     // ライブログウィンドウ（#144）のマネージド参照。保持しないと ExecuteReviewAsync 終了後に
     // Window ラッパーが GC 対象になり、失敗時に診断用として開き続けるべきウィンドウが死ぬ。
@@ -345,6 +346,10 @@ internal sealed partial class MainWindow : Window
             {
                 StatusText.Text = $"Error: {_service.LastError}";
             }
+
+            // 認証が必要な Error になったら、アプリ内ログイン導線（#183）を提示する。
+            // 認証以外のエラーや回復時は閉じる。
+            AuthRequiredInfoBar.IsOpen = state == SubscriptionState.Error && _service.IsAuthenticationRequired;
         });
     }
 
@@ -1447,12 +1452,192 @@ internal sealed partial class MainWindow : Window
             }
             else
             {
+                // 認証エラーはログイン導線（#183）へ誘導する。ダイアログを閉じた後、
+                // 認証 InfoBar の「mcp-gateway にログイン」から復旧できる。
+                AuthRequiredInfoBar.IsOpen = result.IsAuthenticationRequired;
                 await ShowAlertDialogAsync("レビュー登録エラー", result.ErrorMessage).ConfigureAwait(true);
             }
         }
         finally
         {
             EnqueueReviewButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnLoginToGatewayClick(object sender, RoutedEventArgs e)
+    {
+        await StartGatewayLoginAsync();
+    }
+
+    // mcp-gateway の device flow login をアプリ内から開始する（#183）。認証処理自体は
+    // mcp-resource-subscriber が担当し、ここでは起動・進行表示・ブラウザ導線・再購読のみ行う。
+    private async Task StartGatewayLoginAsync()
+    {
+        if (_isLoginPending)
+        {
+            return;
+        }
+
+        string gatewayUrl = GatewayUrlBox.Text;
+        if (string.IsNullOrWhiteSpace(gatewayUrl)
+            || !Uri.TryCreate(gatewayUrl, UriKind.Absolute, out Uri? uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            await ShowAlertDialogAsync("設定エラー", "Gateway URL が正しくありません。先に Gateway URL を http(s):// 形式で設定してください。");
+            return;
+        }
+
+        _isLoginPending = true;
+        GatewayLoginButton.IsEnabled = false;
+
+        var loginService = new McpLoginService(_settingsService, _loggingService);
+        using var cts = new CancellationTokenSource();
+
+        var statusText = new TextBlock { Text = "認証を開始しています...", TextWrapping = TextWrapping.Wrap };
+        var urlValue = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var urlCopyButton = new Button { Content = "URL をコピー", Visibility = Visibility.Collapsed };
+        var codeValue = new TextBox { IsReadOnly = true, FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Visibility = Visibility.Collapsed };
+        var codeCopyButton = new Button { Content = "コードをコピー", Visibility = Visibility.Collapsed };
+
+        var panel = new StackPanel { Spacing = 8, MinWidth = 360 };
+        panel.Children.Add(statusText);
+        panel.Children.Add(new TextBlock { Text = "承認 URL:", FontSize = 12 });
+        panel.Children.Add(urlValue);
+        panel.Children.Add(urlCopyButton);
+        panel.Children.Add(new TextBlock { Text = "認証コード:", FontSize = 12 });
+        panel.Children.Add(codeValue);
+        panel.Children.Add(codeCopyButton);
+
+        DeviceVerificationInfo? latestInfo = null;
+
+        urlCopyButton.Click += (_, _) =>
+        {
+            if (latestInfo != null)
+            {
+                CopyToClipboard(latestInfo.DisplayUri);
+            }
+        };
+        codeCopyButton.Click += (_, _) =>
+        {
+            if (latestInfo != null)
+            {
+                CopyToClipboard(latestInfo.UserCode);
+            }
+        };
+
+        void OnStatus(object? sender, string message)
+        {
+            _ = DispatcherQueue.TryEnqueue(() => statusText.Text = message);
+        }
+
+        void OnVerification(object? sender, DeviceVerificationInfo info)
+        {
+            _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                latestInfo = info;
+                urlValue.Text = info.DisplayUri;
+                urlValue.Visibility = Visibility.Visible;
+                urlCopyButton.Visibility = Visibility.Visible;
+                if (!string.IsNullOrEmpty(info.UserCode))
+                {
+                    codeValue.Text = info.UserCode;
+                    codeValue.Visibility = Visibility.Visible;
+                    codeCopyButton.Visibility = Visibility.Visible;
+                }
+            });
+        }
+
+        loginService.StatusChanged += OnStatus;
+        loginService.VerificationReceived += OnVerification;
+
+        var dialog = new ContentDialog
+        {
+            Title = "mcp-gateway にログイン",
+            Content = panel,
+            CloseButtonText = "キャンセル",
+            XamlRoot = Content.XamlRoot,
+        };
+
+        // ShowAsync を先に開始してからログインを走らせる。逆順だと、認証が極めて速く完了した
+        // 場合に dialog.Hide() が ShowAsync より先に走り、ダイアログが閉じられず残ることがある。
+        IAsyncOperation<ContentDialogResult> showOperation = dialog.ShowAsync(ContentDialogPlacement.Popup);
+
+        Task<Models.McpLoginResult> loginTask = loginService.LoginAsync(cts.Token);
+
+        // 認証完了時にダイアログを自動で閉じ、ShowAsync を終了させる
+        _ = loginTask.ContinueWith(
+            _ => DispatcherQueue.TryEnqueue(dialog.Hide),
+            TaskScheduler.Default);
+
+        try
+        {
+            await showOperation;
+
+            // ShowAsync がユーザー操作（キャンセル）で戻った場合は login を中断する。
+            // 認証完了で dialog.Hide() から戻った場合は既に完了しているため cancel は無害。
+            if (!loginTask.IsCompleted)
+            {
+                cts.Cancel();
+            }
+
+            Models.McpLoginResult result = await loginTask.ConfigureAwait(true);
+            await HandleLoginResultAsync(result).ConfigureAwait(true);
+        }
+        finally
+        {
+            loginService.StatusChanged -= OnStatus;
+            loginService.VerificationReceived -= OnVerification;
+            _isLoginPending = false;
+            GatewayLoginButton.IsEnabled = true;
+        }
+    }
+
+    private async Task HandleLoginResultAsync(Models.McpLoginResult result)
+    {
+        switch (result.Outcome)
+        {
+            case Models.McpLoginOutcome.Succeeded:
+                AuthRequiredInfoBar.IsOpen = false;
+
+                // 認証成功後、購読が停止中または Error なら再購読を開始し、手動レビュー開始を
+                // 再試行できる状態へ戻す（#183 AC）。
+                string message = "mcp-gateway への認証に成功しました。";
+                if (_service.State is SubscriptionState.Stopped or SubscriptionState.Error)
+                {
+                    _service.Start();
+                    message += "\n購読を再開しました。";
+                }
+
+                await ShowAlertDialogAsync("ログイン成功", message);
+                break;
+
+            case Models.McpLoginOutcome.Cancelled:
+                // ユーザー操作による中断のため、追加の通知は出さない。
+                break;
+
+            case Models.McpLoginOutcome.TimedOut:
+                await ShowAlertDialogAsync("ログインがタイムアウトしました", result.ErrorMessage ?? "認証が時間内に完了しませんでした。");
+                break;
+
+            case Models.McpLoginOutcome.Failed:
+            default:
+                await ShowAlertDialogAsync("ログインに失敗しました", result.ErrorMessage ?? "mcp-gateway へのログインに失敗しました。");
+                break;
+        }
+    }
+
+    private void CopyToClipboard(string text)
+    {
+        try
+        {
+            var dataPackage = new DataPackage();
+            dataPackage.SetText(text);
+            Clipboard.SetContent(dataPackage);
+            ShowCopyFeedback("クリップボードにコピーしました。", isError: false);
+        }
+        catch (Exception ex)
+        {
+            ShowCopyFeedback($"コピーに失敗しました: {ex.Message}", isError: true);
         }
     }
 
