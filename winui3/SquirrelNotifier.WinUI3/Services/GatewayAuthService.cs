@@ -12,6 +12,9 @@ using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
+/// <summary>
+/// <c>mcp-resource-subscriber --login</c> を呼び出して mcp-gateway の OAuth device flow 認証を実行・監視するサービス.
+/// </summary>
 internal sealed class GatewayAuthService
 {
     private const int _loginTimeoutMs = 180000; // 3分間
@@ -34,6 +37,14 @@ internal sealed class GatewayAuthService
     private readonly IProcessRunner _processRunner;
     private readonly IBrowserLauncher _browserLauncher;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GatewayAuthService"/> class.
+    /// </summary>
+    /// <param name="settingsService">設定サービス.</param>
+    /// <param name="loggingService">ログサービス.</param>
+    /// <param name="subscriptionService">購読サービス.</param>
+    /// <param name="processRunner">プロセス実行インスタンス（モック用、省略可）.</param>
+    /// <param name="browserLauncher">ブラウザ起動インスタンス（モック用、省略可）.</param>
     public GatewayAuthService(
         SettingsService settingsService,
         LoggingService loggingService,
@@ -48,6 +59,12 @@ internal sealed class GatewayAuthService
         _browserLauncher = browserLauncher ?? new SystemBrowserLauncher();
     }
 
+    /// <summary>
+    /// mcp-gateway 認証を非同期に実行します.
+    /// </summary>
+    /// <param name="progress">進捗通知用のプログレスインターフェース（省略可）.</param>
+    /// <param name="cancellationToken">キャンセルトークン.</param>
+    /// <returns>最終的な認証進捗状況.</returns>
     public async Task<GatewayAuthProgress> LoginAsync(
         IProgress<GatewayAuthProgress>? progress,
         CancellationToken cancellationToken)
@@ -219,6 +236,13 @@ internal sealed class GatewayAuthService
         }
     }
 
+    internal static string SanitizeLogMessage(string message)
+    {
+        // ログに token や secret や Authorization ヘッダーが混入しないよう簡易マスキング
+        string sanitized = Regex.Replace(message, @"(bearer\s+|token[=:]\s*)[A-Za-z0-9_\-\.]+", "$1***", RegexOptions.IgnoreCase);
+        return sanitized;
+    }
+
     private void ProcessOutputLine(
         string line,
         ref string? detectedUrl,
@@ -269,12 +293,5 @@ internal sealed class GatewayAuthService
 
             progress?.Report(resultProgress);
         }
-    }
-
-    private static string SanitizeLogMessage(string message)
-    {
-        // ログに token や secret や Authorization ヘッダーが混入しないよう簡易マスキング
-        string sanitized = Regex.Replace(message, @"(bearer\s+|token[=:]\s*)[A-Za-z0-9_\-\.]+", "$1***", RegexOptions.IgnoreCase);
-        return sanitized;
     }
 }

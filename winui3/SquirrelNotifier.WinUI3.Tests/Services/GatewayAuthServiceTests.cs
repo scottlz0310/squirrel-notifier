@@ -155,4 +155,48 @@ public class GatewayAuthServiceTests : IDisposable
         result.Stage.Should().Be(GatewayAuthStage.Cancelled);
         mockProcess.Verify(p => p.Kill(true), Times.Once);
     }
+
+    [Fact]
+    public void SanitizeLogMessage_ShouldMaskTokensAndBearerHeaders()
+    {
+        // Arrange
+        string raw = "Error with Bearer secret-token-1234 and token=5678";
+
+        // Act
+        string sanitized = GatewayAuthService.SanitizeLogMessage(raw);
+
+        // Assert
+        sanitized.Should().Be("Error with Bearer *** and token=***");
+    }
+
+    [Fact]
+    public async Task LoginAsync_ShouldPassSubscriberArgumentsAndGatewayUrl_ToProcessStartInfo()
+    {
+        // Arrange
+        _settingsService.UpdateSettings(new AppSettings
+        {
+            SubscriberArguments = "--skip-check --verbose",
+            GatewayUrl = "http://localhost:9999/mcp",
+        });
+
+        ProcessStartInfo? capturedPsi = null;
+        var mockProcess = CreateMockProcess(0, string.Empty, string.Empty);
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
+            .Returns(mockProcess.Object);
+
+        var service = new GatewayAuthService(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, null);
+
+        // Act
+        await service.LoginAsync(null, CancellationToken.None);
+
+        // Assert
+        capturedPsi.Should().NotBeNull();
+        capturedPsi!.ArgumentList.Should().Contain("--login");
+        capturedPsi.ArgumentList.Should().Contain("--skip-check");
+        capturedPsi.ArgumentList.Should().Contain("--verbose");
+        capturedPsi.ArgumentList.Should().Contain("--url");
+        capturedPsi.ArgumentList.Should().Contain("http://localhost:9999/mcp");
+    }
 }

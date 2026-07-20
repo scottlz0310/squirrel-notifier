@@ -12,11 +12,18 @@ using Windows.ApplicationModel.DataTransfer;
 
 namespace SquirrelNotifier.WinUI3;
 
+/// <summary>
+/// mcp-gateway の OAuth device flow 認証ダイアログ.
+/// </summary>
 internal sealed partial class GatewayAuthDialog : ContentDialog
 {
     private readonly GatewayAuthService _authService;
     private readonly CancellationTokenSource _cts = new();
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GatewayAuthDialog"/> class.
+    /// </summary>
+    /// <param name="authService">認証サービス.</param>
     public GatewayAuthDialog(GatewayAuthService authService)
     {
         InitializeComponent();
@@ -33,8 +40,15 @@ internal sealed partial class GatewayAuthDialog : ContentDialog
             _cts.Cancel();
         };
 
-        GatewayAuthProgress result = await _authService.LoginAsync(progress, _cts.Token);
-        UpdateUI(result);
+        try
+        {
+            GatewayAuthProgress result = await _authService.LoginAsync(progress, _cts.Token).ConfigureAwait(true);
+            UpdateUI(result);
+        }
+        catch (OperationCanceledException)
+        {
+            // キャンセル時はダイアログを閉じる
+        }
     }
 
     private void UpdateUI(GatewayAuthProgress authProgress)
