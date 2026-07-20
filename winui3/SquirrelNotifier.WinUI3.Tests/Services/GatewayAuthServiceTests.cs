@@ -47,9 +47,9 @@ public class GatewayAuthServiceTests : IDisposable
         }
     }
 
-    private Mock<IProcessInstance> CreateMockProcess(int exitCode, string stdout, string stderr)
+    private static Mock<IProcessInstance> CreateMockProcess(int exitCode, string stdout, string stderr)
     {
-        var mockProcess = new Mock<IProcessInstance>();
+        Mock<IProcessInstance> mockProcess = new();
         mockProcess.SetupGet(p => p.ExitCode).Returns(exitCode);
         mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stdout))));
         mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stderr))));
@@ -62,17 +62,17 @@ public class GatewayAuthServiceTests : IDisposable
     {
         // Arrange
         string stdout = "Please visit https://mcp-gateway.example.com/device?user_code=ABCD-1234 to authenticate.\nuser_code: ABCD-1234\n";
-        var mockProcess = CreateMockProcess(0, stdout, string.Empty);
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, stdout, string.Empty);
 
-        var mockRunner = new Mock<IProcessRunner>();
+        Mock<IProcessRunner> mockRunner = new();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var mockBrowser = new Mock<IBrowserLauncher>();
+        Mock<IBrowserLauncher> mockBrowser = new();
         mockBrowser.Setup(b => b.OpenUrl("https://mcp-gateway.example.com/device?user_code=ABCD-1234")).Returns(true);
 
-        var service = new GatewayAuthService(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, mockBrowser.Object);
+        GatewayAuthService service = new(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, mockBrowser.Object);
         GatewayAuthProgress? reportedProgress = null;
-        var progress = new Progress<GatewayAuthProgress>(p => reportedProgress = p);
+        Progress<GatewayAuthProgress> progress = new(p => reportedProgress = p);
 
         // Act
         GatewayAuthProgress result = await service.LoginAsync(progress, CancellationToken.None);
@@ -91,15 +91,15 @@ public class GatewayAuthServiceTests : IDisposable
     {
         // Arrange
         string stdout = "Open URL: https://mcp-gateway.example.com/device\nUser Code: XYZ-9999\n";
-        var mockProcess = CreateMockProcess(0, stdout, string.Empty);
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, stdout, string.Empty);
 
-        var mockRunner = new Mock<IProcessRunner>();
+        Mock<IProcessRunner> mockRunner = new();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var mockBrowser = new Mock<IBrowserLauncher>();
+        Mock<IBrowserLauncher> mockBrowser = new();
         mockBrowser.Setup(b => b.OpenUrl(It.IsAny<string>())).Returns(false); // ブラウザ起動失敗
 
-        var service = new GatewayAuthService(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, mockBrowser.Object);
+        GatewayAuthService service = new(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, mockBrowser.Object);
 
         // Act
         GatewayAuthProgress result = await service.LoginAsync(null, CancellationToken.None);
@@ -116,12 +116,12 @@ public class GatewayAuthServiceTests : IDisposable
     {
         // Arrange
         string stderr = "Error: invalid client credentials";
-        var mockProcess = CreateMockProcess(1, string.Empty, stderr);
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(1, string.Empty, stderr);
 
-        var mockRunner = new Mock<IProcessRunner>();
+        Mock<IProcessRunner> mockRunner = new();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new GatewayAuthService(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, null);
+        GatewayAuthService service = new(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, null);
 
         // Act
         GatewayAuthProgress result = await service.LoginAsync(null, CancellationToken.None);
@@ -135,18 +135,18 @@ public class GatewayAuthServiceTests : IDisposable
     public async Task LoginAsync_ShouldReturnCancelled_WhenCancellationTokenIsCancelled()
     {
         // Arrange
-        using var cts = new CancellationTokenSource();
+        using CancellationTokenSource cts = new();
         cts.Cancel();
 
-        var mockProcess = new Mock<IProcessInstance>();
+        Mock<IProcessInstance> mockProcess = new();
         mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Array.Empty<byte>())));
         mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Array.Empty<byte>())));
         mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException());
 
-        var mockRunner = new Mock<IProcessRunner>();
+        Mock<IProcessRunner> mockRunner = new();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new GatewayAuthService(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, null);
+        GatewayAuthService service = new(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, null);
 
         // Act
         GatewayAuthProgress result = await service.LoginAsync(null, cts.Token);
@@ -180,13 +180,13 @@ public class GatewayAuthServiceTests : IDisposable
         });
 
         ProcessStartInfo? capturedPsi = null;
-        var mockProcess = CreateMockProcess(0, string.Empty, string.Empty);
-        var mockRunner = new Mock<IProcessRunner>();
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, string.Empty, string.Empty);
+        Mock<IProcessRunner> mockRunner = new();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
             .Returns(mockProcess.Object);
 
-        var service = new GatewayAuthService(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, null);
+        GatewayAuthService service = new(_settingsService, _loggingService, _subscriptionService, mockRunner.Object, null);
 
         // Act
         await service.LoginAsync(null, CancellationToken.None);

@@ -33,7 +33,7 @@ internal sealed partial class GatewayAuthDialog : ContentDialog
 
     private async void OnDialogOpened(ContentDialog sender, ContentDialogOpenedEventArgs args)
     {
-        var progress = new Progress<GatewayAuthProgress>(UpdateUI);
+        Progress<GatewayAuthProgress> progress = new(UpdateUI);
 
         CloseButtonClick += (s, e) =>
         {
@@ -111,7 +111,7 @@ internal sealed partial class GatewayAuthDialog : ContentDialog
     {
         if (!string.IsNullOrEmpty(UrlTextBox.Text))
         {
-            var package = new DataPackage();
+            DataPackage package = new();
             package.SetText(UrlTextBox.Text);
             Clipboard.SetContent(package);
         }
@@ -121,7 +121,7 @@ internal sealed partial class GatewayAuthDialog : ContentDialog
     {
         if (!string.IsNullOrEmpty(UserCodeTextBox.Text))
         {
-            var package = new DataPackage();
+            DataPackage package = new();
             package.SetText(UserCodeTextBox.Text);
             Clipboard.SetContent(package);
         }

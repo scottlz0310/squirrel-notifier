@@ -5,6 +5,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -69,7 +70,7 @@ internal sealed class GatewayAuthService
         IProgress<GatewayAuthProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var resultProgress = new GatewayAuthProgress
+        GatewayAuthProgress resultProgress = new()
         {
             Stage = GatewayAuthStage.Starting,
         };
@@ -80,20 +81,20 @@ internal sealed class GatewayAuthService
         string resolvedPath = SettingsService.ResolveCommandPath(settings.SubscriberCommandPath);
         string gatewayUrl = settings.GatewayUrl;
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(_loginTimeoutMs);
 
         await _loggingService.WriteAsync($"[AUTH] Starting mcp-gateway login process: {resolvedPath} --login").ConfigureAwait(false);
 
-        var psi = new ProcessStartInfo
+        ProcessStartInfo psi = new()
         {
             FileName = resolvedPath,
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            StandardOutputEncoding = System.Text.Encoding.UTF8,
-            StandardErrorEncoding = System.Text.Encoding.UTF8,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
         };
 
         psi.ArgumentList.Add("--login");
@@ -120,7 +121,7 @@ internal sealed class GatewayAuthService
             bool hasLaunchedBrowser = false;
             string? detectedUrl = null;
             string? detectedUserCode = null;
-            var stderrOutput = new System.Text.StringBuilder();
+            StringBuilder stderrOutput = new();
 
             Task readStdoutTask = Task.Run(async () =>
             {
