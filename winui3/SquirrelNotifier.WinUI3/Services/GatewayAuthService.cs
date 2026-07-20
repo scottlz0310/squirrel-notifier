@@ -64,9 +64,11 @@ internal sealed class GatewayAuthService
 
     private sealed class AuthState
     {
-        public string? DetectedUrl;
-        public string? DetectedUserCode;
-        public bool HasLaunchedBrowser;
+        public string? DetectedUrl { get; set; }
+
+        public string? DetectedUserCode { get; set; }
+
+        public bool HasLaunchedBrowser { get; set; }
     }
 
     /// <summary>

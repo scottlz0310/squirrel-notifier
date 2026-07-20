@@ -17,16 +17,24 @@ namespace SquirrelNotifier.WinUI3;
 /// </summary>
 internal sealed partial class GatewayAuthDialog : ContentDialog
 {
-    private readonly GatewayAuthService _authService;
+    private readonly GatewayAuthService? _authService;
     private readonly CancellationTokenSource _cts = new();
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GatewayAuthDialog"/> class.
+    /// </summary>
+    public GatewayAuthDialog()
+    {
+        InitializeComponent();
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GatewayAuthDialog"/> class.
     /// </summary>
     /// <param name="authService">認証サービス.</param>
     public GatewayAuthDialog(GatewayAuthService authService)
+        : this()
     {
-        InitializeComponent();
         _authService = authService;
         Opened += OnDialogOpened;
         Closed += OnDialogClosed;
@@ -34,6 +42,11 @@ internal sealed partial class GatewayAuthDialog : ContentDialog
 
     private async void OnDialogOpened(ContentDialog sender, ContentDialogOpenedEventArgs args)
     {
+        if (_authService == null)
+        {
+            return;
+        }
+
         Progress<GatewayAuthProgress> progress = new(UpdateUI);
 
         try

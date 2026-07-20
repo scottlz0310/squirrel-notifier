@@ -7,7 +7,7 @@
     mc:Ignorable="d"
     Title="mcp-gateway にログイン"
     CloseButtonText="キャンセル"
-    DefaultButton="Close">
+    DefaultButton="None">
 
     <StackPanel Spacing="12" Width="400">
         <StackPanel x:Name="ProgressSection" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
