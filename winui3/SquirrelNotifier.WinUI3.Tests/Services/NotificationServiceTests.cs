@@ -54,4 +54,27 @@ public sealed class NotificationServiceTests
             "レートリミット解除",
             "5時間制限 の制限が解除されました。"));
     }
+
+    [Fact]
+    public void NotifyMethods_ShouldNotThrow_WhenNoSubscribers()
+    {
+        var service = new NotificationService();
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "event-1",
+            Repository = "owner/repo",
+            PrNumber = 181,
+            PrUrl = "https://github.com/owner/repo/pull/181",
+            Reason = "opened",
+            Message = "レビュー対象です。",
+        };
+
+        Action act = () =>
+        {
+            service.NotifyReviewEvent(reviewEvent);
+            service.NotifyRateLimitReset("5時間制限");
+        };
+
+        act.Should().NotThrow();
+    }
 }
