@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
@@ -30,7 +31,6 @@ internal sealed partial class MainWindow : Window
     private readonly ObservableCollection<string> _logEntries = new();
     private readonly ObservableCollection<Models.ReviewEvent> _reviewEvents = new();
     private readonly TrayIconService _trayIconService;
-    private TrayContextMenu? _contextMenu;
     private readonly nint _hwnd;
     private readonly bool _isInitializing = true;
     private readonly INotificationService _notificationService;
@@ -58,17 +58,6 @@ internal sealed partial class MainWindow : Window
     private AgentExecutionWindow? _agentExecutionWindow;
     private CancellationTokenSource? _copyFeedbackCts;
 
-    private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
-
-    private readonly WndProcDelegate? _newWndProcDelegate;
-    private readonly nint _oldWndProc;
-
-    [DllImport("user32.dll")]
-    private static extern nint SetWindowLongPtr(nint hWnd, int nIndex, nint dwNewLong);
-
-    [DllImport("user32.dll")]
-    private static extern nint CallWindowProc(nint lpPrevWndFunc, nint hWnd, uint msg, nint wParam, nint lParam);
-
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
 
@@ -78,11 +67,9 @@ internal sealed partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern nint SendMessage(nint hWnd, uint msg, nint wParam, nint lParam);
 
-    private const int _gwlWndProc = -4;
     private const int _swHide = 0;
     private const int _swShow = 5;
     private const uint _wmSetIcon = 0x0080;
-    private const uint _wmCommand = 0x0111;
     private const uint _iconSmall = 0;
     private const uint _iconBig = 1;
     private const uint _imageIcon = 1;
@@ -99,15 +86,9 @@ internal sealed partial class MainWindow : Window
         EnqueueReviewService enqueueReviewService,
         IRateLimitReminderService rateLimitReminderService,
         RateLimitFileService rateLimitFileService,
-        bool showWindow = true,
-        bool notificationRegistrationFailed = false)
+        bool showWindow = true)
     {
         InitializeComponent();
-
-        if (notificationRegistrationFailed)
-        {
-            NotificationDisabledInfoBar.IsOpen = true;
-        }
 
         // Auto-Pause（#147）の状態はセッション終了時（ライブログウィンドウ側の評価）にも
         // 変わるため、イベント経由でメイン UI の表示へ反映する
@@ -139,8 +120,12 @@ internal sealed partial class MainWindow : Window
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
         _notificationService.ReviewEventReceived += OnReviewEventReceived;
-        _notificationService.LaunchReviewRequested += OnLaunchReviewRequested;
+        _notificationService.NotificationRequested += OnNotificationRequested;
         _rateLimitReminderService.ReminderFired += OnRateLimitReminderFired;
+        ReviewNotificationContent.OpenPrRequested += OnTrayPopupOpenPrRequested;
+        ReviewNotificationContent.LaunchReviewRequested += OnTrayPopupLaunchReviewRequested;
+        ReviewNotificationContent.OpenAppRequested += OnTrayPopupOpenAppRequested;
+        ReviewNotificationContent.DismissRequested += OnTrayPopupDismissRequested;
         LogList.ItemsSource = _logEntries;
         ReviewEventList.ItemsSource = _reviewEvents;
         RateLimitList.ItemsSource = _rateLimits;
@@ -186,22 +171,8 @@ internal sealed partial class MainWindow : Window
         // Check auto-start registration status
         _ = RefreshAutoStartStatusAsync();
 
-        // Setup tray icon
-        _trayIconService = new TrayIconService(this);
-        _trayIconService.LeftClick += OnTrayIconLeftClick;
-        _trayIconService.RightClick += OnTrayIconRightClick;
-        _trayIconService.AddIcon("Squirrel Notifier");
-
-        if (notificationRegistrationFailed)
-        {
-            // Register() 失敗はボタン操作（NotificationInvoked）の受信にのみ影響し、
-            // トースト自体の表示（Show()）は妨げない（README「手動起動」節参照）
-            _trayIconService.ShowBalloonTip("Squirrel Notifier", "通知のボタン操作に反応しない場合があります。イベントはアプリ内のイベント行でご確認ください。");
-        }
-
-        // Hook window messages to process tray icon messages
-        _newWndProcDelegate = new WndProcDelegate(NewWndProc);
-        _oldWndProc = SetWindowLongPtr(_hwnd, _gwlWndProc, Marshal.GetFunctionPointerForDelegate(_newWndProcDelegate));
+        _trayIconService = new TrayIconService(TrayIcon);
+        TrayIcon.Visibility = Visibility.Visible;
 
         // Update control states
         UpdateControls(service.State);
@@ -221,25 +192,6 @@ internal sealed partial class MainWindow : Window
     {
         SettingsExpander.IsExpanded = true;
         _ = DispatcherQueue.TryEnqueue(() => AutoStartToggle.Focus(FocusState.Programmatic));
-    }
-
-    private nint NewWndProc(nint hWnd, uint msg, nint wParam, nint lParam)
-    {
-        // Process tray icon messages
-        _trayIconService?.ProcessWindowMessage(msg, wParam, lParam);
-
-        // Process WM_COMMAND messages for context menu
-        if (msg == _wmCommand)
-        {
-            int commandId = wParam.ToInt32() & 0xFFFF;
-            if (_contextMenu?.ProcessCommand(commandId) == true)
-            {
-                return nint.Zero;
-            }
-        }
-
-        // Call original window procedure
-        return CallWindowProc(_oldWndProc, hWnd, msg, wParam, lParam);
     }
 
     public void ShowWindowFromTray()
@@ -300,22 +252,29 @@ internal sealed partial class MainWindow : Window
         HideWindowToTray();
     }
 
-    private void OnTrayIconLeftClick(object? sender, EventArgs e)
+    private void OnTrayOpenCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
     {
         ShowWindowFromTray();
     }
 
-    private void OnTrayIconRightClick(object? sender, EventArgs e)
+    private void OnTrayStartCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
     {
-        _contextMenu?.Dispose();
-        _contextMenu = new TrayContextMenu();
-        _contextMenu.AddMenuItem("開く(&O)", () => DispatcherQueue.TryEnqueue(ShowWindowFromTray));
-        _contextMenu.AddMenuItem("購読を開始(&S)", () => DispatcherQueue.TryEnqueue(() => _service.Start()));
-        _contextMenu.AddMenuItem("購読を停止(&T)", () => DispatcherQueue.TryEnqueue(async () => await _service.StopAsync()));
-        _contextMenu.AddMenuItem("アプリの更新を確認(&U)", () => DispatcherQueue.TryEnqueue(async () => await CheckForUpdatesAsync(showNoUpdateDialog: true)));
-        _contextMenu.AddSeparator();
-        _contextMenu.AddMenuItem("終了(&X)", () => DispatcherQueue.TryEnqueue(ExitApplication));
-        _contextMenu.Show(_hwnd);
+        _service.Start();
+    }
+
+    private async void OnTrayStopCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
+    {
+        await _service.StopAsync();
+    }
+
+    private async void OnTrayCheckForUpdatesCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
+    {
+        await CheckForUpdatesAsync(showNoUpdateDialog: true);
+    }
+
+    private void OnTrayExitCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
+    {
+        ExitApplication();
     }
 
     private void ExitApplication()
@@ -325,9 +284,12 @@ internal sealed partial class MainWindow : Window
         _service.StateChanged -= OnStateChanged;
         _loggingService.LogAppended -= OnLogAppended;
         _notificationService.ReviewEventReceived -= OnReviewEventReceived;
-        _notificationService.LaunchReviewRequested -= OnLaunchReviewRequested;
+        _notificationService.NotificationRequested -= OnNotificationRequested;
+        ReviewNotificationContent.OpenPrRequested -= OnTrayPopupOpenPrRequested;
+        ReviewNotificationContent.LaunchReviewRequested -= OnTrayPopupLaunchReviewRequested;
+        ReviewNotificationContent.OpenAppRequested -= OnTrayPopupOpenAppRequested;
+        ReviewNotificationContent.DismissRequested -= OnTrayPopupDismissRequested;
         _trayIconService?.Dispose();
-        _contextMenu?.Dispose();
         Close();
     }
 
@@ -367,12 +329,12 @@ internal sealed partial class MainWindow : Window
                 if (_service.IsAuthenticationRequired)
                 {
                     _ = _loggingService.WriteAsync("[UI] Showing authentication required balloon notification.");
-                    _trayIconService.ShowBalloonTip("Squirrel Notifier", _service.LastError);
+                    _trayIconService.ShowNotification("Squirrel Notifier", _service.LastError, H.NotifyIcon.Core.NotificationIcon.Error);
                 }
                 else
                 {
                     _ = _loggingService.WriteAsync("[UI] Showing connection error balloon notification.");
-                    _trayIconService.ShowBalloonTip("Squirrel Notifier", $"接続エラー: {_service.LastError}");
+                    _trayIconService.ShowNotification("Squirrel Notifier", $"接続エラー: {_service.LastError}", H.NotifyIcon.Core.NotificationIcon.Error);
                 }
             }
         }
@@ -1142,11 +1104,6 @@ internal sealed partial class MainWindow : Window
         TryOpenUrl("https://github.com/scottlz0310/squirrel-notifier/blob/main/docs/statusline-integration.md");
     }
 
-    private void OnOpenNotificationDocsClick(object sender, RoutedEventArgs e)
-    {
-        TryOpenUrl("https://github.com/scottlz0310/squirrel-notifier#手動起動");
-    }
-
     private void OnReviewEventReceived(object? sender, Models.ReviewEvent e)
     {
         _ = DispatcherQueue.TryEnqueue(() =>
@@ -1157,7 +1114,16 @@ internal sealed partial class MainWindow : Window
             {
                 _reviewEvents.RemoveAt(_reviewEvents.Count - 1);
             }
+
+            ReviewNotificationContent.SetReviewEvent(e);
+            _trayIconService.ShowReviewPopup();
         });
+    }
+
+    private void OnNotificationRequested(object? sender, Models.NotificationMessage message)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+            _trayIconService.ShowNotification(message.Title, message.Message));
     }
 
     private void OnDismissEventClick(object sender, RoutedEventArgs e)
@@ -1190,29 +1156,34 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private void OnLaunchReviewRequested(object? sender, Models.LaunchReviewRequest request)
+    private void OnTrayPopupOpenPrRequested(object? sender, Models.ReviewEvent reviewEvent)
     {
-        _ = DispatcherQueue.TryEnqueue(async () =>
+        _trayIconService.CloseReviewPopup();
+        if (Helpers.UrlValidator.IsSafeGitHubUrl(
+            reviewEvent.PrUrl,
+            reviewEvent.Repository,
+            reviewEvent.PrNumber))
         {
-            Models.ReviewEvent? targetEvent = null;
-            foreach (Models.ReviewEvent ev in _reviewEvents)
-            {
-                if (ev.EventId == request.EventId)
-                {
-                    targetEvent = ev;
-                    break;
-                }
-            }
+            TryOpenUrl(reviewEvent.PrUrl);
+        }
+    }
 
-            if (targetEvent == null)
-            {
-                await _loggingService.WriteAsync($"Launch request ignored: event with ID {request.EventId} not found in history.").ConfigureAwait(false);
-                return;
-            }
+    private async void OnTrayPopupLaunchReviewRequested(object? sender, Models.ReviewEvent reviewEvent)
+    {
+        _trayIconService.CloseReviewPopup();
+        ShowWindowFromTray();
+        await ExecuteReviewAsync(reviewEvent, Models.LauncherRole.Reviewer);
+    }
 
-            ShowWindowFromTray();
-            await ExecuteReviewAsync(targetEvent, request.Role).ConfigureAwait(false);
-        });
+    private void OnTrayPopupOpenAppRequested(object? sender, EventArgs e)
+    {
+        _trayIconService.CloseReviewPopup();
+        ShowWindowFromTray();
+    }
+
+    private void OnTrayPopupDismissRequested(object? sender, EventArgs e)
+    {
+        _trayIconService.CloseReviewPopup();
     }
 
     private async void OnLaunchReviewerClick(SplitButton sender, SplitButtonClickEventArgs args)
