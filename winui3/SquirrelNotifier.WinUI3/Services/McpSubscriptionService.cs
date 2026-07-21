@@ -239,6 +239,46 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private static bool IsStartOutcomeState(SubscriptionState state)
         => state is SubscriptionState.Running or SubscriptionState.Error or SubscriptionState.Stopped;
 
+    // 購読ループからの状態遷移。停止処理中は書き戻さない（#208）。
+    // StopAsync はロックを解放してから cancel するため、その後にループが Error を書き戻すと、
+    // 通知を受けた側が Stopping ガードをすり抜けて新しいループを開始できてしまう。
+    // その新しいループは StopAsync が捕捉済みの loopTask に含まれず、最後の
+    // _loopTask = null / State = Stopped で実体だけが残る。
+    // Stopped は対象にしない。StopAsync は捕捉した loopTask の完了を待ってから Stopped を
+    // 設定するため、Stopped の時点で生きている購読ループは存在しない。
+    private bool TryTransitionFromLoop(SubscriptionState next)
+    {
+        lock (_lifecycleLock)
+        {
+            if (_state == SubscriptionState.Stopping)
+            {
+                return false;
+            }
+
+            State = next;
+            return true;
+        }
+    }
+
+    // Error 遷移では LastError / IsAuthenticationRequired を StateChanged より先に確定させる。
+    // ハンドラ（トレイのツールチップ・バルーン通知）が LastError を読むため、順序が逆だと
+    // 古い値が表示される
+    private bool TryTransitionToErrorFromLoop(string friendlyMessage, bool authenticationRequired)
+    {
+        lock (_lifecycleLock)
+        {
+            if (_state == SubscriptionState.Stopping)
+            {
+                return false;
+            }
+
+            LastError = friendlyMessage;
+            IsAuthenticationRequired = authenticationRequired;
+            State = SubscriptionState.Error;
+            return true;
+        }
+    }
+
     /// <summary>購読開始要求の受理結果（#208）.</summary>
     private enum StartAttempt
     {
@@ -469,13 +509,20 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         bool preflightPassed = await PreflightCheckAsync(token).ConfigureAwait(false);
         if (!preflightPassed)
         {
-            State = SubscriptionState.Error;
-            ReportStatus($"Error: {LastError}");
+            // 停止要求による preflight のキャンセルを Error として書き戻さない。
+            // 停止処理中に遷移が通らなかった場合は、UI へも古い失敗理由を出さない
+            if (TryTransitionFromLoop(SubscriptionState.Error))
+            {
+                ReportStatus($"Error: {LastError}");
+            }
+
             return;
         }
 
-        State = SubscriptionState.Running;
-        ReportStatus("Subscribed.");
+        if (TryTransitionFromLoop(SubscriptionState.Running))
+        {
+            ReportStatus("Subscribed.");
+        }
 
         AppSettings settings = _settingsService.Settings;
         List<string> allUris = settings.ResourceUris.Count > 0
@@ -688,10 +735,13 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
                 if (retryCount > _maxRetries)
                 {
-                    LastError = friendlyMessage;
-                    IsAuthenticationRequired = tag == _authenticationRequiredErrorTag;
-                    State = SubscriptionState.Error;
-                    ReportStatus($"Error: {friendlyMessage}");
+                    // 停止処理中は Error を書き戻さない（LastError / 状態表示も更新しない）。
+                    // 障害の記録はログに残す
+                    if (TryTransitionToErrorFromLoop(friendlyMessage, tag == _authenticationRequiredErrorTag))
+                    {
+                        ReportStatus($"Error: {friendlyMessage}");
+                    }
+
                     await LogAsync($"[{resourceUri}] Subscription loop error (max retries exceeded) {tag}: {ex.Message}").ConfigureAwait(false);
                     break;
                 }

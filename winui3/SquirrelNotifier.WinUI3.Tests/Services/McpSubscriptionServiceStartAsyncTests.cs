@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -363,6 +364,78 @@ public class McpSubscriptionServiceStartAsyncTests : IDisposable
             SubscriptionState.Stopping,
             because: "停止処理中の開始要求は状態を書き換えない");
         preflightStarts.Should().Be(1, because: "割り込んだ開始要求は新しい購読ループを生成しない");
+        service.State.Should().Be(SubscriptionState.Stopped);
+    }
+
+    [Fact]
+    public async Task SubscriptionLoop_ShouldNotAnnounceErrorOverStopping_WhenPreflightIsCancelledByStop()
+    {
+        // StopAsync はロックを解放してから cancel するため、その後に購読ループが
+        // preflight のキャンセルを失敗として State = Error へ書き戻すと、通知を受けた側が
+        // Stopping ガードをすり抜けて新しいループを開始できてしまう。その新ループは
+        // StopAsync が捕捉済みの loopTask に含まれないため、最後の Stopped 上書きで実体だけが残る。
+        // ここでは停止処理中に届いた通知の瞬間へ Start() を差し込み、この経路を固定する。
+        int preflightStarts = 0;
+        var preflightRunning = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    Interlocked.Increment(ref preflightStarts);
+                    _ = preflightRunning.TrySetResult();
+                }
+
+                return CreateNeverReturningProcess();
+            });
+
+        await using McpSubscriptionService service = CreateService(runner, startTimeoutMs: 30000);
+
+        var statesAnnouncedWhileStopping = new ConcurrentQueue<SubscriptionState>();
+        int stoppingSignalled = 0;
+
+        void OnStateChanged(object? sender, SubscriptionState state)
+        {
+            if (state == SubscriptionState.Stopping)
+            {
+                _ = Interlocked.Exchange(ref stoppingSignalled, 1);
+                return;
+            }
+
+            if (Volatile.Read(ref stoppingSignalled) == 0)
+            {
+                return;
+            }
+
+            statesAnnouncedWhileStopping.Enqueue(state);
+
+            if (state != SubscriptionState.Stopped)
+            {
+                // 修正前はこの割り込みで新しい購読ループが生成された
+                service.Start();
+            }
+        }
+
+        service.StateChanged += OnStateChanged;
+        try
+        {
+            Task<SubscriptionStartResult> startTask = service.StartAsync(CancellationToken.None);
+            await preflightRunning.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            await service.StopAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            _ = await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            service.StateChanged -= OnStateChanged;
+        }
+
+        statesAnnouncedWhileStopping.Should().OnlyContain(
+            s => s == SubscriptionState.Stopped,
+            because: "停止処理中に購読ループが Running / Error を書き戻してはいけない");
+        preflightStarts.Should().Be(1, because: "停止処理中の割り込みで新しい購読ループは生成されない");
         service.State.Should().Be(SubscriptionState.Stopped);
     }
 
