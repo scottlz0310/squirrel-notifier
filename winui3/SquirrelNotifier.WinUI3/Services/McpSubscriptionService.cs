@@ -16,6 +16,10 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private const int _maxRecentEvents = 20;
     private const string _authenticationRequiredErrorTag = "[AUTH_REQUIRED]";
 
+    // 購読は preflight（subscriber の --help）を通れば Running になるため、通常は数秒で確定する。
+    // subscriber がハングした場合に呼び出し側を待たせ続けないための上限（#208）。テストは短い値を注入する.
+    private const int _defaultStartTimeoutMs = 30000;
+
     // mcp-resource-subscriber の ErrorCode のうち、意味が確定していて非認証エラーと
     // 判断してよいもの。ここに含まれない ErrorCode（INTERNAL_ERROR、SUBSCRIPTION_FAILED
     // 等の詳細不明な汎用コード）は legacy 文字列マッチングにフォールバックさせる。
@@ -35,11 +39,15 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private readonly ICacheService? _cacheService;
     private readonly SecretMasker _secretMasker;
     private readonly int _maxRetries;
+    private readonly int _startTimeoutMs;
     private readonly CancellationTokenSource _cts = new();
     private readonly HashSet<string> _seenEventIds = new();
     private readonly Queue<string> _eventIdQueue = new();
     private readonly Queue<CachedReviewEvent> _recentEvents = new();
     private readonly object _lock = new();
+
+    // 開始・停止の状態遷移を直列化する（#208）。イベント記録用の _lock とは用途が異なるため分ける
+    private readonly object _lifecycleLock = new();
     private readonly ConcurrentDictionary<string, IProcessInstance> _activeProcesses = new();
     private readonly SemaphoreSlim _cacheSemaphore = new(1, 1);
 
@@ -87,7 +95,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         IProcessRunner? processRunner = null,
         int maxRetries = 5,
         ICacheService? cacheService = null,
-        SecretMasker? secretMasker = null)
+        SecretMasker? secretMasker = null,
+        int startTimeoutMs = _defaultStartTimeoutMs)
     {
         _settingsService = settingsService;
         _notificationService = notificationService;
@@ -96,29 +105,209 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         _maxRetries = maxRetries;
         _cacheService = cacheService;
         _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
+        _startTimeoutMs = startTimeoutMs;
     }
 
     public void Start()
     {
-        if (State == SubscriptionState.Running || State == SubscriptionState.Starting)
+        _ = TryBeginStart();
+    }
+
+    // 開始可否の判定と、State / _stopCts / _loopTask の差し替えを 1 つの排他区間で行う（#208）。
+    // 判定と生成が分かれていると、その隙間に StopAsync が State = Stopping を書き込んだ場合に
+    // 停止中の購読ループを新たに起動してしまい、StopAsync が新しいループを待ち続けるか、
+    // 後から Stopped を上書きして実体だけが残る。
+    private StartAttempt TryBeginStart()
+    {
+        lock (_lifecycleLock)
         {
-            return;
+            if (_state == SubscriptionState.Running || _state == SubscriptionState.Starting)
+            {
+                return StartAttempt.AlreadyActive;
+            }
+
+            if (_state == SubscriptionState.Stopping)
+            {
+                return StartAttempt.RejectedWhileStopping;
+            }
+
+            LastError = string.Empty;
+            IsAuthenticationRequired = false;
+
+            // StateChanged は購読ループ起動より前に発火させ、Starting → Running の順序を保つ。
+            // ハンドラは排他区間内で走るため、ブロックする処理を持たせてはならない
+            State = SubscriptionState.Starting;
+            _stopCts?.Dispose();
+            _stopCts = new CancellationTokenSource();
+            _loopTask = Task.Run(() => RunSubscriptionLoopAsync(_stopCts.Token));
+            return StartAttempt.Started;
+        }
+    }
+
+    /// <summary>
+    /// 購読を開始し、Running に到達するか失敗が確定するまで待つ（#208）。
+    /// 呼び出し側が状態を polling せずに「購読が有効になってから次の操作へ進む」判断をできるようにする.
+    /// </summary>
+    /// <param name="cancellationToken">待機のキャンセル用トークン.</param>
+    /// <returns>購読開始の結果.</returns>
+    public async Task<SubscriptionStartResult> StartAsync(CancellationToken cancellationToken = default)
+    {
+        // 状態遷移は StateChanged だけで観測する。開始を要求する前に購読しないと、
+        // 開始直後（別スレッドで進むループ）の遷移を取りこぼす。
+        var completion = new TaskCompletionSource<SubscriptionState>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnStateChanged(object? sender, SubscriptionState state)
+        {
+            if (IsStartOutcomeState(state))
+            {
+                _ = completion.TrySetResult(state);
+            }
         }
 
-        LastError = string.Empty;
-        IsAuthenticationRequired = false;
-        State = SubscriptionState.Starting;
-        _stopCts?.Dispose();
-        _stopCts = new CancellationTokenSource();
-        _loopTask = Task.Run(() => RunSubscriptionLoopAsync(_stopCts.Token));
+        StateChanged += OnStateChanged;
+        try
+        {
+            // 停止処理中かどうかの判定は TryBeginStart の排他区間内で行う。ここで
+            // State を先に確認してから開始すると、その隙間に StopAsync が割り込める
+            StartAttempt attempt = TryBeginStart();
+            if (attempt == StartAttempt.RejectedWhileStopping)
+            {
+                return new SubscriptionStartResult
+                {
+                    Outcome = SubscriptionStartOutcome.Failed,
+                    ErrorMessage = "購読の停止処理中です。完了してからもう一度お試しください。",
+                };
+            }
+
+            // 既に Running だった場合と、Starting へ遷移させた直後に結果が確定した場合を拾う
+            if (IsStartOutcomeState(State))
+            {
+                _ = completion.TrySetResult(State);
+            }
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_startTimeoutMs);
+
+            SubscriptionState outcomeState;
+            try
+            {
+                outcomeState = await completion.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    await LogAsync("Subscription start wait was cancelled by caller.").ConfigureAwait(false);
+                    return new SubscriptionStartResult
+                    {
+                        Outcome = SubscriptionStartOutcome.Cancelled,
+                        ErrorMessage = "購読の開始がキャンセルされました。",
+                    };
+                }
+
+                await LogAsync($"Subscription start wait timed out after {_startTimeoutMs} ms.").ConfigureAwait(false);
+                return new SubscriptionStartResult
+                {
+                    Outcome = SubscriptionStartOutcome.TimedOut,
+                    ErrorMessage = "購読の開始が時間内に完了しませんでした。mcp-resource-subscriber の設定と mcp-gateway の起動状態を確認してください。",
+                };
+            }
+
+            if (outcomeState == SubscriptionState.Running)
+            {
+                return new SubscriptionStartResult { Outcome = SubscriptionStartOutcome.Started };
+            }
+
+            // Stopped は開始待ちの最中に StopAsync が走ったケース。Error は preflight 失敗等
+            string message = outcomeState == SubscriptionState.Stopped
+                ? "購読の開始中に購読が停止されました。"
+                : !string.IsNullOrEmpty(LastError) ? LastError : "購読の開始に失敗しました。";
+
+            return new SubscriptionStartResult
+            {
+                Outcome = SubscriptionStartOutcome.Failed,
+                ErrorMessage = message,
+            };
+        }
+        finally
+        {
+            StateChanged -= OnStateChanged;
+        }
+    }
+
+    // 開始待ちを終える状態。Starting / Stopping は途中経過なので待ち続ける
+    private static bool IsStartOutcomeState(SubscriptionState state)
+        => state is SubscriptionState.Running or SubscriptionState.Error or SubscriptionState.Stopped;
+
+    // 購読ループからの状態遷移。停止処理中は書き戻さない（#208）。
+    // StopAsync はロックを解放してから cancel するため、その後にループが Error を書き戻すと、
+    // 通知を受けた側が Stopping ガードをすり抜けて新しいループを開始できてしまう。
+    // その新しいループは StopAsync が捕捉済みの loopTask に含まれず、最後の
+    // _loopTask = null / State = Stopped で実体だけが残る。
+    // Stopped は対象にしない。StopAsync は捕捉した loopTask の完了を待ってから Stopped を
+    // 設定するため、Stopped の時点で生きている購読ループは存在しない。
+    private bool TryTransitionFromLoop(SubscriptionState next)
+    {
+        lock (_lifecycleLock)
+        {
+            if (_state == SubscriptionState.Stopping)
+            {
+                return false;
+            }
+
+            State = next;
+            return true;
+        }
+    }
+
+    // Error 遷移では LastError / IsAuthenticationRequired を StateChanged より先に確定させる。
+    // ハンドラ（トレイのツールチップ・バルーン通知）が LastError を読むため、順序が逆だと
+    // 古い値が表示される
+    private bool TryTransitionToErrorFromLoop(string friendlyMessage, bool authenticationRequired)
+    {
+        lock (_lifecycleLock)
+        {
+            if (_state == SubscriptionState.Stopping)
+            {
+                return false;
+            }
+
+            LastError = friendlyMessage;
+            IsAuthenticationRequired = authenticationRequired;
+            State = SubscriptionState.Error;
+            return true;
+        }
+    }
+
+    /// <summary>購読開始要求の受理結果（#208）.</summary>
+    private enum StartAttempt
+    {
+        /// <summary>新しい購読ループを開始した.</summary>
+        Started,
+
+        /// <summary>既に Running / Starting のため、進行中の開始に相乗りする.</summary>
+        AlreadyActive,
+
+        /// <summary>停止処理中のため開始しなかった.</summary>
+        RejectedWhileStopping,
     }
 
     public async Task StopAsync()
     {
-        State = SubscriptionState.Stopping;
+        CancellationTokenSource? stopCts;
+        Task? loopTask;
+
+        // Stopping への遷移と、待機対象のループ・トークンの取得を TryBeginStart と同じ
+        // 排他区間で行う。これにより Stopping 設定後に新しいループが始まらない（#208）
+        lock (_lifecycleLock)
+        {
+            State = SubscriptionState.Stopping;
+            stopCts = _stopCts;
+            loopTask = _loopTask;
+        }
 
         // Cancel the subscription loop (including backoff delays)
-        _stopCts?.Cancel();
+        stopCts?.Cancel();
 
         // Cancel all active processes immediately
         _activeProcessCts?.Cancel();
@@ -146,23 +335,25 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             }
         }
 
-        if (_loopTask != null)
+        if (loopTask != null)
         {
             try
             {
-                await _loopTask.ConfigureAwait(false);
+                await loopTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 // Expected
             }
-            finally
-            {
-                _loopTask = null;
-            }
         }
 
-        State = SubscriptionState.Stopped;
+        lock (_lifecycleLock)
+        {
+            // 待機したループ以外が入っていることはない（Stopping 中は開始を拒否するため）
+            _loopTask = null;
+            State = SubscriptionState.Stopped;
+        }
+
         await LogAsync("Subscription service stopped by user.").ConfigureAwait(false);
     }
 
@@ -318,13 +509,20 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         bool preflightPassed = await PreflightCheckAsync(token).ConfigureAwait(false);
         if (!preflightPassed)
         {
-            State = SubscriptionState.Error;
-            ReportStatus($"Error: {LastError}");
+            // 停止要求による preflight のキャンセルを Error として書き戻さない。
+            // 停止処理中に遷移が通らなかった場合は、UI へも古い失敗理由を出さない
+            if (TryTransitionFromLoop(SubscriptionState.Error))
+            {
+                ReportStatus($"Error: {LastError}");
+            }
+
             return;
         }
 
-        State = SubscriptionState.Running;
-        ReportStatus("Subscribed.");
+        if (TryTransitionFromLoop(SubscriptionState.Running))
+        {
+            ReportStatus("Subscribed.");
+        }
 
         AppSettings settings = _settingsService.Settings;
         List<string> allUris = settings.ResourceUris.Count > 0
@@ -537,10 +735,13 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
                 if (retryCount > _maxRetries)
                 {
-                    LastError = friendlyMessage;
-                    IsAuthenticationRequired = tag == _authenticationRequiredErrorTag;
-                    State = SubscriptionState.Error;
-                    ReportStatus($"Error: {friendlyMessage}");
+                    // 停止処理中は Error を書き戻さない（LastError / 状態表示も更新しない）。
+                    // 障害の記録はログに残す
+                    if (TryTransitionToErrorFromLoop(friendlyMessage, tag == _authenticationRequiredErrorTag))
+                    {
+                        ReportStatus($"Error: {friendlyMessage}");
+                    }
+
                     await LogAsync($"[{resourceUri}] Subscription loop error (max retries exceeded) {tag}: {ex.Message}").ConfigureAwait(false);
                     break;
                 }
