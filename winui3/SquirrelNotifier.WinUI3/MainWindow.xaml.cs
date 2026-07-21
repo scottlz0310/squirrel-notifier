@@ -1560,6 +1560,8 @@ internal sealed partial class MainWindow : Window
         {
             if (closeGate.MarkOpened())
             {
+                _ = _loggingService.WriteAsync(
+                    "[UI] ログインダイアログの Opened 後に保留中のクローズ要求を実行します。");
                 dialog.Hide();
             }
         };
