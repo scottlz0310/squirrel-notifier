@@ -45,6 +45,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private readonly Queue<string> _eventIdQueue = new();
     private readonly Queue<CachedReviewEvent> _recentEvents = new();
     private readonly object _lock = new();
+
+    // 開始・停止の状態遷移を直列化する（#208）。イベント記録用の _lock とは用途が異なるため分ける
+    private readonly object _lifecycleLock = new();
     private readonly ConcurrentDictionary<string, IProcessInstance> _activeProcesses = new();
     private readonly SemaphoreSlim _cacheSemaphore = new(1, 1);
 
@@ -107,17 +110,38 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
     public void Start()
     {
-        if (State == SubscriptionState.Running || State == SubscriptionState.Starting)
-        {
-            return;
-        }
+        _ = TryBeginStart();
+    }
 
-        LastError = string.Empty;
-        IsAuthenticationRequired = false;
-        State = SubscriptionState.Starting;
-        _stopCts?.Dispose();
-        _stopCts = new CancellationTokenSource();
-        _loopTask = Task.Run(() => RunSubscriptionLoopAsync(_stopCts.Token));
+    // 開始可否の判定と、State / _stopCts / _loopTask の差し替えを 1 つの排他区間で行う（#208）。
+    // 判定と生成が分かれていると、その隙間に StopAsync が State = Stopping を書き込んだ場合に
+    // 停止中の購読ループを新たに起動してしまい、StopAsync が新しいループを待ち続けるか、
+    // 後から Stopped を上書きして実体だけが残る。
+    private StartAttempt TryBeginStart()
+    {
+        lock (_lifecycleLock)
+        {
+            if (_state == SubscriptionState.Running || _state == SubscriptionState.Starting)
+            {
+                return StartAttempt.AlreadyActive;
+            }
+
+            if (_state == SubscriptionState.Stopping)
+            {
+                return StartAttempt.RejectedWhileStopping;
+            }
+
+            LastError = string.Empty;
+            IsAuthenticationRequired = false;
+
+            // StateChanged は購読ループ起動より前に発火させ、Starting → Running の順序を保つ。
+            // ハンドラは排他区間内で走るため、ブロックする処理を持たせてはならない
+            State = SubscriptionState.Starting;
+            _stopCts?.Dispose();
+            _stopCts = new CancellationTokenSource();
+            _loopTask = Task.Run(() => RunSubscriptionLoopAsync(_stopCts.Token));
+            return StartAttempt.Started;
+        }
     }
 
     /// <summary>
@@ -128,23 +152,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     /// <returns>購読開始の結果.</returns>
     public async Task<SubscriptionStartResult> StartAsync(CancellationToken cancellationToken = default)
     {
-        if (State == SubscriptionState.Running)
-        {
-            return new SubscriptionStartResult { Outcome = SubscriptionStartOutcome.Started };
-        }
-
-        // 停止処理中に Start() を呼ぶと、新しいループを起動した直後に StopAsync の後始末が
-        // State = Stopped を書き込み、状態と実体が食い違ったループが残る。ここでは開始しない。
-        if (State == SubscriptionState.Stopping)
-        {
-            return new SubscriptionStartResult
-            {
-                Outcome = SubscriptionStartOutcome.Failed,
-                ErrorMessage = "購読の停止処理中です。完了してからもう一度お試しください。",
-            };
-        }
-
-        // 状態遷移は StateChanged だけで観測する。Start() より先に購読しないと、
+        // 状態遷移は StateChanged だけで観測する。開始を要求する前に購読しないと、
         // 開始直後（別スレッドで進むループ）の遷移を取りこぼす。
         var completion = new TaskCompletionSource<SubscriptionState>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -159,11 +167,19 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         StateChanged += OnStateChanged;
         try
         {
-            // Running / Starting なら no-op になるため、進行中の開始を二重に走らせない
-            Start();
+            // 停止処理中かどうかの判定は TryBeginStart の排他区間内で行う。ここで
+            // State を先に確認してから開始すると、その隙間に StopAsync が割り込める
+            StartAttempt attempt = TryBeginStart();
+            if (attempt == StartAttempt.RejectedWhileStopping)
+            {
+                return new SubscriptionStartResult
+                {
+                    Outcome = SubscriptionStartOutcome.Failed,
+                    ErrorMessage = "購読の停止処理中です。完了してからもう一度お試しください。",
+                };
+            }
 
-            // Start() が同期的に Starting へ遷移させた後も、購読前に結果が確定している
-            // 可能性がある（ループは別スレッドで進む）
+            // 既に Running だった場合と、Starting へ遷移させた直後に結果が確定した場合を拾う
             if (IsStartOutcomeState(State))
             {
                 _ = completion.TrySetResult(State);
@@ -223,12 +239,35 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private static bool IsStartOutcomeState(SubscriptionState state)
         => state is SubscriptionState.Running or SubscriptionState.Error or SubscriptionState.Stopped;
 
+    /// <summary>購読開始要求の受理結果（#208）.</summary>
+    private enum StartAttempt
+    {
+        /// <summary>新しい購読ループを開始した.</summary>
+        Started,
+
+        /// <summary>既に Running / Starting のため、進行中の開始に相乗りする.</summary>
+        AlreadyActive,
+
+        /// <summary>停止処理中のため開始しなかった.</summary>
+        RejectedWhileStopping,
+    }
+
     public async Task StopAsync()
     {
-        State = SubscriptionState.Stopping;
+        CancellationTokenSource? stopCts;
+        Task? loopTask;
+
+        // Stopping への遷移と、待機対象のループ・トークンの取得を TryBeginStart と同じ
+        // 排他区間で行う。これにより Stopping 設定後に新しいループが始まらない（#208）
+        lock (_lifecycleLock)
+        {
+            State = SubscriptionState.Stopping;
+            stopCts = _stopCts;
+            loopTask = _loopTask;
+        }
 
         // Cancel the subscription loop (including backoff delays)
-        _stopCts?.Cancel();
+        stopCts?.Cancel();
 
         // Cancel all active processes immediately
         _activeProcessCts?.Cancel();
@@ -256,23 +295,25 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
             }
         }
 
-        if (_loopTask != null)
+        if (loopTask != null)
         {
             try
             {
-                await _loopTask.ConfigureAwait(false);
+                await loopTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 // Expected
             }
-            finally
-            {
-                _loopTask = null;
-            }
         }
 
-        State = SubscriptionState.Stopped;
+        lock (_lifecycleLock)
+        {
+            // 待機したループ以外が入っていることはない（Stopping 中は開始を拒否するため）
+            _loopTask = null;
+            State = SubscriptionState.Stopped;
+        }
+
         await LogAsync("Subscription service stopped by user.").ConfigureAwait(false);
     }
 

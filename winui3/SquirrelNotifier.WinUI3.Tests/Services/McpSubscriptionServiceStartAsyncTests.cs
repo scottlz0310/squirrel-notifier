@@ -299,6 +299,73 @@ public class McpSubscriptionServiceStartAsyncTests : IDisposable
         service.State.Should().Be(SubscriptionState.Stopped);
     }
 
+    [Fact]
+    public async Task Start_ShouldBeRejected_WhenRequestedAtTheExactMomentStoppingIsSignalled()
+    {
+        // StopAsync が Stopping を設定した「まさにその瞬間」に開始を割り込ませ、
+        // 判定と生成の間に停止が入り込む interleaving を決定的に再現する。
+        // StateChanged は状態遷移と同じ排他区間で発火するため、このハンドラは
+        // 「Stopping 設定直後・後続処理の前」という critical point で実行される。
+        int preflightStarts = 0;
+        var subscribeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var exitSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    Interlocked.Increment(ref preflightStarts);
+                    return CreateMockProcess(0, "help", string.Empty);
+                }
+
+                _ = subscribeStarted.TrySetResult();
+                return CreateManuallyExitedProcess(exitSignal);
+            });
+
+        await using McpSubscriptionService service = CreateService(runner, startTimeoutMs: 30000);
+        await service.StartAsync(CancellationToken.None);
+        await subscribeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        int interleavedStartAttempts = 0;
+        SubscriptionState stateAfterInterleavedStart = default;
+
+        void OnStateChanged(object? sender, SubscriptionState state)
+        {
+            if (state != SubscriptionState.Stopping)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref interleavedStartAttempts);
+            service.Start();
+
+            // 直列化されていれば Stopping のまま。直列化されていなければ Start() が
+            // Starting へ遷移させ、新しい _stopCts / _loopTask を生成してしまう
+            stateAfterInterleavedStart = service.State;
+        }
+
+        service.StateChanged += OnStateChanged;
+        try
+        {
+            Task stopTask = service.StopAsync();
+            _ = exitSignal.TrySetResult();
+            await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            service.StateChanged -= OnStateChanged;
+        }
+
+        interleavedStartAttempts.Should().Be(1, because: "割り込みが実際に起きたことを確かめる");
+        stateAfterInterleavedStart.Should().Be(
+            SubscriptionState.Stopping,
+            because: "停止処理中の開始要求は状態を書き換えない");
+        preflightStarts.Should().Be(1, because: "割り込んだ開始要求は新しい購読ループを生成しない");
+        service.State.Should().Be(SubscriptionState.Stopped);
+    }
+
     private static async Task WaitForStateAsync(McpSubscriptionService service, SubscriptionState expected)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
