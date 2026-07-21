@@ -41,6 +41,7 @@ internal sealed class TrayIconService : IDisposable
 
     public void ShowReviewPopup()
     {
+        // PopupPlacement.Bottom では H.NotifyIcon がシステムトレイの位置を解決するため、引数の座標は使用されない。
         _taskbarIcon.ShowTrayPopup(System.Drawing.Point.Empty);
     }
 

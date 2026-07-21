@@ -56,7 +56,7 @@ public sealed class NotificationServiceTests
     }
 
     [Fact]
-    public void NotifyMethods_ShouldNotThrow_WhenNoSubscribers()
+    public void NotifyReviewEvent_ShouldThrow_WhenNoSubscribers()
     {
         var service = new NotificationService();
         var reviewEvent = new ReviewEvent
@@ -69,11 +69,39 @@ public sealed class NotificationServiceTests
             Message = "レビュー対象です。",
         };
 
-        Action act = () =>
+        Action act = () => service.NotifyReviewEvent(reviewEvent);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("レビューイベントの通知先が登録されていません。");
+    }
+
+    [Fact]
+    public void NotifyReviewEvent_ShouldPropagate_WhenSubscriberThrows()
+    {
+        var service = new NotificationService();
+        var reviewEvent = new ReviewEvent
         {
-            service.NotifyReviewEvent(reviewEvent);
-            service.NotifyRateLimitReset("5時間制限");
+            EventId = "event-1",
+            Repository = "owner/repo",
+            PrNumber = 181,
+            PrUrl = "https://github.com/owner/repo/pull/181",
+            Reason = "opened",
+            Message = "レビュー対象です。",
         };
+        service.ReviewEventReceived += (_, _) => throw new InvalidOperationException("配送失敗");
+
+        Action act = () => service.NotifyReviewEvent(reviewEvent);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("配送失敗");
+    }
+
+    [Fact]
+    public void NotifyRateLimitReset_ShouldNotThrow_WhenNoSubscribers()
+    {
+        var service = new NotificationService();
+
+        Action act = () => service.NotifyRateLimitReset("5時間制限");
 
         act.Should().NotThrow();
     }

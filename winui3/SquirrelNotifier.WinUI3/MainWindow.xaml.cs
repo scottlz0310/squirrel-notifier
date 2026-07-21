@@ -1106,7 +1106,7 @@ internal sealed partial class MainWindow : Window
 
     private void OnReviewEventReceived(object? sender, Models.ReviewEvent e)
     {
-        _ = DispatcherQueue.TryEnqueue(() =>
+        bool enqueued = DispatcherQueue.TryEnqueue(() =>
         {
             _reviewEvents.Insert(0, e);
             const int maxEvents = 20;
@@ -1118,6 +1118,11 @@ internal sealed partial class MainWindow : Window
             ReviewNotificationContent.SetReviewEvent(e);
             _trayIconService.ShowReviewPopup();
         });
+
+        if (!enqueued)
+        {
+            throw new InvalidOperationException("レビューイベントを UI スレッドへ配送できませんでした。");
+        }
     }
 
     private void OnNotificationRequested(object? sender, Models.NotificationMessage message)

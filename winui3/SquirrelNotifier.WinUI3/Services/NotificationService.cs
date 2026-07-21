@@ -17,7 +17,9 @@ internal sealed class NotificationService : INotificationService
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
 
-        ReviewEventReceived?.Invoke(this, reviewEvent);
+        EventHandler<ReviewEvent> handler = ReviewEventReceived
+            ?? throw new InvalidOperationException("レビューイベントの通知先が登録されていません。");
+        handler.Invoke(this, reviewEvent);
     }
 
     public void NotifyRateLimitReset(string label)
