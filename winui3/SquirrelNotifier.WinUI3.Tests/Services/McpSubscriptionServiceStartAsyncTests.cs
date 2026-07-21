@@ -66,6 +66,18 @@ public class McpSubscriptionServiceStartAsyncTests : IDisposable
         return mock.Object;
     }
 
+    // キャンセルでは終了せず、テストが明示的に完了させるまでブロックするプロセス。
+    // StopAsync は購読ループの終了を待つため、Stopping 状態を競合なく再現できる
+    private static IProcessInstance CreateManuallyExitedProcess(TaskCompletionSource exitSignal)
+    {
+        var mock = new Mock<IProcessInstance>();
+        mock.SetupGet(p => p.ExitCode).Returns(0);
+        mock.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream()));
+        mock.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+        mock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>())).Returns(exitSignal.Task);
+        return mock.Object;
+    }
+
     private McpSubscriptionService CreateService(Mock<IProcessRunner> runner, int startTimeoutMs = 5000)
         => new(
             _settingsService,
@@ -169,26 +181,30 @@ public class McpSubscriptionServiceStartAsyncTests : IDisposable
     [Fact]
     public async Task StartAsync_ShouldReturnImmediately_WhenAlreadyRunning()
     {
+        // 購読ループの開始回数は preflight（--help）の起動回数で数える。State = Running は
+        // 購読プロセスの起動より先に設定されるため、購読プロセス数で数えると競合する
+        int preflightStarts = 0;
         var runner = new Mock<IProcessRunner>();
-        int startCount = 0;
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns<ProcessStartInfo>(psi =>
             {
-                Interlocked.Increment(ref startCount);
-                return psi.ArgumentList.Contains("--help")
-                    ? CreateMockProcess(0, "help", string.Empty)
-                    : CreateNeverReturningProcess();
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    Interlocked.Increment(ref preflightStarts);
+                    return CreateMockProcess(0, "help", string.Empty);
+                }
+
+                return CreateNeverReturningProcess();
             });
 
         await using McpSubscriptionService service = CreateService(runner);
 
         await service.StartAsync(CancellationToken.None);
-        int countAfterFirstStart = startCount;
 
         SubscriptionStartResult second = await service.StartAsync(CancellationToken.None);
 
         second.Outcome.Should().Be(SubscriptionStartOutcome.Started);
-        startCount.Should().Be(countAfterFirstStart, because: "Running 中の StartAsync は新しいプロセスを起動しない");
+        preflightStarts.Should().Be(1, because: "Running 中の StartAsync は新しい購読ループを開始しない");
     }
 
     [Fact]
@@ -242,32 +258,44 @@ public class McpSubscriptionServiceStartAsyncTests : IDisposable
     [Fact]
     public async Task StartAsync_ShouldNotStartNewLoop_WhileStopping()
     {
-        int subscriptionStarts = 0;
+        int preflightStarts = 0;
+        var subscribeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var exitSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns<ProcessStartInfo>(psi =>
             {
                 if (psi.ArgumentList.Contains("--help"))
                 {
+                    Interlocked.Increment(ref preflightStarts);
                     return CreateMockProcess(0, "help", string.Empty);
                 }
 
-                Interlocked.Increment(ref subscriptionStarts);
-                return CreateNeverReturningProcess();
+                _ = subscribeStarted.TrySetResult();
+                return CreateManuallyExitedProcess(exitSignal);
             });
 
         await using McpSubscriptionService service = CreateService(runner, startTimeoutMs: 30000);
         await service.StartAsync(CancellationToken.None);
-        int startsBeforeStop = subscriptionStarts;
 
-        // 停止処理中に開始を要求しても、状態と実体が食い違うループを増やさない
+        // 購読プロセスが起動するまで待つ。State = Running はその手前で設定されるため、
+        // ここを待たないと StopAsync が待機すべきループを掴めず Stopping に留まらない
+        await subscribeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // 購読プロセスがキャンセルで終了しないため、StopAsync はループ終了待ちで止まる
         Task stopTask = service.StopAsync();
+        service.State.Should().Be(SubscriptionState.Stopping);
+
         SubscriptionStartResult result = await service.StartAsync(CancellationToken.None);
-        await stopTask;
 
         result.Outcome.Should().Be(SubscriptionStartOutcome.Failed);
         result.ErrorMessage.Should().Contain("停止処理中");
-        subscriptionStarts.Should().Be(startsBeforeStop);
+        preflightStarts.Should().Be(1, because: "Stopping 中は新しい購読ループを開始しない");
+
+        _ = exitSignal.TrySetResult();
+        await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+
         service.State.Should().Be(SubscriptionState.Stopped);
     }
 
