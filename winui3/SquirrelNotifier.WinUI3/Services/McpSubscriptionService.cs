@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -32,6 +33,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
     private readonly ICacheService? _cacheService;
+    private readonly SecretMasker _secretMasker;
     private readonly int _maxRetries;
     private readonly CancellationTokenSource _cts = new();
     private readonly HashSet<string> _seenEventIds = new();
@@ -84,7 +86,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         LoggingService loggingService,
         IProcessRunner? processRunner = null,
         int maxRetries = 5,
-        ICacheService? cacheService = null)
+        ICacheService? cacheService = null,
+        SecretMasker? secretMasker = null)
     {
         _settingsService = settingsService;
         _notificationService = notificationService;
@@ -92,6 +95,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         _processRunner = processRunner ?? new ProcessRunner();
         _maxRetries = maxRetries;
         _cacheService = cacheService;
+        _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
     }
 
     public void Start()
@@ -265,10 +269,29 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
 
                 await _activeProcess.WaitForExitAsync(processToken).ConfigureAwait(false);
 
-                await stdoutTask.ConfigureAwait(false);
-                await stderrTask.ConfigureAwait(false);
+                string stdout = await stdoutTask.ConfigureAwait(false);
+                string stderr = await stderrTask.ConfigureAwait(false);
 
-                return _activeProcess.ExitCode == 0;
+                int exitCode = _activeProcess.ExitCode;
+                if (exitCode == 0)
+                {
+                    return true;
+                }
+
+                // 終了コードだけでは原因が判別できないため、出力の要約を LastError へ含める。
+                // --help の失敗理由は stderr に出るのが通例だが、stdout にしか出さない実装も
+                // ありうるので stderr が空なら stdout を使う（#201）。
+                string detail = ProcessOutputSummarizer.Summarize(stderr, _secretMasker);
+                if (string.IsNullOrEmpty(detail))
+                {
+                    detail = ProcessOutputSummarizer.Summarize(stdout, _secretMasker);
+                }
+
+                LastError = string.IsNullOrEmpty(detail)
+                    ? $"mcp-resource-subscriber の起動確認に失敗しました（--help が終了コード {exitCode} で終了し、出力もありませんでした）。Subscriber Command Path 設定とインストール状況を確認してください。"
+                    : $"mcp-resource-subscriber の起動確認に失敗しました（--help が終了コード {exitCode} で終了）: {detail}";
+                await LogAsync($"Preflight check failed. ExitCode={exitCode}. Detail: {detail}").ConfigureAwait(false);
+                return false;
             }
         }
         catch (Exception ex)
@@ -296,7 +319,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable
         if (!preflightPassed)
         {
             State = SubscriptionState.Error;
-            ReportStatus("Preflight check failed.");
+            ReportStatus($"Error: {LastError}");
             return;
         }
 

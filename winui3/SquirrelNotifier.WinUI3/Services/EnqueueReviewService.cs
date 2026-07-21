@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -34,15 +35,18 @@ internal sealed class EnqueueReviewService
     private readonly SettingsService _settingsService;
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
+    private readonly SecretMasker _secretMasker;
 
     public EnqueueReviewService(
         SettingsService settingsService,
         LoggingService loggingService,
-        IProcessRunner? processRunner = null)
+        IProcessRunner? processRunner = null,
+        SecretMasker? secretMasker = null)
     {
         _settingsService = settingsService;
         _loggingService = loggingService;
         _processRunner = processRunner ?? new ProcessRunner();
+        _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
     }
 
     public async Task<EnqueueReviewResult> EnqueueAsync(PrReference reference, string reason, CancellationToken cancellationToken)
@@ -173,14 +177,23 @@ internal sealed class EnqueueReviewService
         {
             process = _processRunner.Start(psi);
 
+            // stderr を読み進めないと、subscriber がパイプバッファを超える出力をした時点で
+            // 子プロセスが書き込みでブロックし WaitForExitAsync が返らなくなる（#201）。
             Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             string stdout = await stdoutTask.ConfigureAwait(false);
+            string stderr = await stderrTask.ConfigureAwait(false);
 
             Match match = _versionRegex.Match(stdout);
             if (!match.Success)
             {
-                return $"mcp-resource-subscriber のバージョンを確認できませんでした（--version の出力: \"{stdout.Trim()}\"）。call サブコマンドには v{_minimumSubscriberVersion} 以上が必要です。";
+                string stdoutDetail = ProcessOutputSummarizer.Summarize(stdout, _secretMasker);
+                string stderrDetail = ProcessOutputSummarizer.Summarize(stderr, _secretMasker);
+                string outputDetail = string.IsNullOrEmpty(stderrDetail)
+                    ? $"\"{stdoutDetail}\""
+                    : $"\"{stdoutDetail}\", stderr: \"{stderrDetail}\"";
+                return $"mcp-resource-subscriber のバージョンを確認できませんでした（--version の出力: {outputDetail}）。call サブコマンドには v{_minimumSubscriberVersion} 以上が必要です。";
             }
 
             var detected = new Version(

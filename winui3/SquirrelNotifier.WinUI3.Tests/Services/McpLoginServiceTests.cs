@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Moq;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
@@ -265,5 +266,51 @@ public class McpLoginServiceTests : IDisposable
 
         result.Outcome.Should().Be(McpLoginOutcome.TimedOut);
         loginProcess.Verify(p => p.Kill(true), Times.Once);
+    }
+
+    [Fact]
+    public async Task LoginAsync_ShouldDrainVersionCheckStderr_WhenSubscriberFillsThePipeBuffer()
+    {
+        // --version の stderr を読み進めない実装では、パイプバッファを超えた時点で
+        // 子プロセスが書き込みでブロックし WaitForExitAsync が返らなくなる（#201）。
+        // この double は stderr が読み切られるまで終了しないため、stderr 未読なら
+        // login timeout に達して TimedOut になる。
+        Mock<IProcessInstance> versionProcess =
+            StderrDrainProcessDouble.CreateBlockingOnStderr("mcp-resource-subscriber v0.5.0");
+        Mock<IProcessInstance> loginProcess = CreateMockProcess(0, _successStdout, string.Empty);
+        Mock<IProcessRunner> runner = CreateRunner(loginProcess, versionProcess);
+
+        var service = new McpLoginService(
+            _settingsService, _loggingService, runner.Object, new FakeUrlOpener(true), loginTimeoutMs: 5000);
+
+        McpLoginResult result = await service.LoginAsync(CancellationToken.None);
+
+        result.Outcome.Should().Be(McpLoginOutcome.Succeeded);
+        runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("--login"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task LoginAsync_ShouldIncludeMaskedStderr_WhenVersionCannotBeDetermined()
+    {
+        const string secret = "super-secret-token-value";
+        Mock<IProcessInstance> versionProcess = CreateMockProcess(
+            1, string.Empty, $"failed to read config: MCP_PROBE_AUTH_TOKEN={secret}");
+        Mock<IProcessInstance> loginProcess = CreateMockProcess(0, _successStdout, string.Empty);
+        Mock<IProcessRunner> runner = CreateRunner(loginProcess, versionProcess);
+
+        var service = new McpLoginService(
+            _settingsService,
+            _loggingService,
+            runner.Object,
+            new FakeUrlOpener(true),
+            secretMasker: new SecretMasker([secret]));
+
+        McpLoginResult result = await service.LoginAsync(CancellationToken.None);
+
+        result.Outcome.Should().Be(McpLoginOutcome.Failed);
+        result.ErrorMessage.Should().Contain("failed to read config");
+        result.ErrorMessage.Should().NotContain(secret);
+        result.ErrorMessage.Should().Contain("***");
+        runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("--login"))), Times.Never);
     }
 }

@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Moq;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
@@ -288,6 +289,56 @@ public class EnqueueReviewServiceTests : IDisposable
         // Assert
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("バージョンを確認できません");
+        mockRunner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("call"))), Times.Never);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ShouldDrainVersionCheckStderr_WhenSubscriberFillsThePipeBuffer()
+    {
+        // --version の stderr を読み進めない実装では、パイプバッファを超えた時点で
+        // 子プロセスが書き込みでブロックし WaitForExitAsync が返らなくなる（#201）。
+        // この double は stderr が読み切られるまで終了しないため、stderr 未読なら
+        // call timeout に達して失敗する。
+        var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
+        Mock<IProcessInstance> versionProcess =
+            StderrDrainProcessDouble.CreateBlockingOnStderr("mcp-resource-subscriber v0.4.0");
+        Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
+
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
+
+        var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        EnqueueReviewResult result = await service.EnqueueAsync(reference, "opened", CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        mockRunner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("call"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ShouldIncludeMaskedStderr_WhenVersionCannotBeDetermined()
+    {
+        // Arrange
+        const string secret = "super-secret-token-value";
+        var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
+        Mock<IProcessInstance> versionProcess = CreateMockProcess(
+            1, string.Empty, $"failed to read config: MCP_PROBE_AUTH_TOKEN={secret}");
+        Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
+
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
+
+        var service = new EnqueueReviewService(
+            _settingsService, _loggingService, mockRunner.Object, new SecretMasker([secret]));
+
+        // Act
+        EnqueueReviewResult result = await service.EnqueueAsync(reference, "opened", CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("failed to read config");
+        result.ErrorMessage.Should().NotContain(secret);
+        result.ErrorMessage.Should().Contain("***");
         mockRunner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.ArgumentList.Contains("call"))), Times.Never);
     }
 
