@@ -14,19 +14,24 @@
           RowSpacing="12">
         <Grid.Resources>
             <XamlUICommand x:Key="TrayOpenCommand" ExecuteRequested="OnTrayOpenCommandExecuteRequested"/>
-            <XamlUICommand x:Key="TrayStartCommand" ExecuteRequested="OnTrayStartCommandExecuteRequested"/>
-            <XamlUICommand x:Key="TrayStopCommand" ExecuteRequested="OnTrayStopCommandExecuteRequested"/>
-            <XamlUICommand x:Key="TrayCheckForUpdatesCommand" ExecuteRequested="OnTrayCheckForUpdatesCommandExecuteRequested"/>
-            <XamlUICommand x:Key="TrayExitCommand" ExecuteRequested="OnTrayExitCommandExecuteRequested"/>
+            <XamlUICommand x:Key="TrayRightClickCommand" ExecuteRequested="OnTrayRightClickCommandExecuteRequested"/>
         </Grid.Resources>
+        <!--
+            右クリックメニューは ContextFlyout ではなく Win32 のポップアップメニューで表示する。
+            H.NotifyIcon の ContextMenuMode.PopupMenu はネイティブメニューへ変換する際に
+            MenuFlyoutItem.IsEnabled も ContextMenuThemeMode も反映しないため、活性制御と
+            ダークテーマ追従のどちらも実現できない（#202）。MenuActivation="None" で
+            ライブラリ側のメニュー表示を止め、RightClickCommand から自前で表示する。
+        -->
         <tb:TaskbarIcon x:Name="TrayIcon"
                         Visibility="Collapsed"
                         IconSource="ms-appx:///Assets/squirrel-notifier.ico"
                         ToolTipText="Squirrel Notifier"
                         NoLeftClickDelay="True"
                         PopupActivation="None"
-                        MenuActivation="RightClick"
-                        LeftClickCommand="{StaticResource TrayOpenCommand}">
+                        MenuActivation="None"
+                        LeftClickCommand="{StaticResource TrayOpenCommand}"
+                        RightClickCommand="{StaticResource TrayRightClickCommand}">
             <!--
                 TrayPopup には Popup を挟まずコンテンツを直接置く。Popup を挟むと
                 TaskbarIcon.TrayPopupResolved がその Popup をそのまま採用し、視覚ツリーに
@@ -35,16 +40,6 @@
             <tb:TaskbarIcon.TrayPopup>
                 <local:ReviewNotificationPopup x:Name="ReviewNotificationContent"/>
             </tb:TaskbarIcon.TrayPopup>
-            <tb:TaskbarIcon.ContextFlyout>
-                <MenuFlyout>
-                    <MenuFlyoutItem Text="開く" Command="{StaticResource TrayOpenCommand}"/>
-                    <MenuFlyoutItem Text="購読を開始" Command="{StaticResource TrayStartCommand}"/>
-                    <MenuFlyoutItem Text="購読を停止" Command="{StaticResource TrayStopCommand}"/>
-                    <MenuFlyoutItem Text="アプリの更新を確認" Command="{StaticResource TrayCheckForUpdatesCommand}"/>
-                    <MenuFlyoutSeparator/>
-                    <MenuFlyoutItem Text="終了" Command="{StaticResource TrayExitCommand}"/>
-                </MenuFlyout>
-            </tb:TaskbarIcon.ContextFlyout>
         </tb:TaskbarIcon>
         <StackPanel Spacing="6">
             <TextBlock Text="Squirrel Notifier"

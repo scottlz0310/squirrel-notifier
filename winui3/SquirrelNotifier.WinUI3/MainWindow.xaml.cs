@@ -257,24 +257,32 @@ internal sealed partial class MainWindow : Window
         ShowWindowFromTray();
     }
 
-    private void OnTrayStartCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
+    private async void OnTrayRightClickCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
     {
-        _service.Start();
-    }
+        // 表示のたびに現在の購読状態でメニューを組み直す（#202）
+        TrayMenuCommand? selected = TrayContextMenu.Show(_hwnd, TrayMenuLayout.Build(_service.State));
 
-    private async void OnTrayStopCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
-    {
-        await _service.StopAsync();
-    }
-
-    private async void OnTrayCheckForUpdatesCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
-    {
-        await CheckForUpdatesAsync(showNoUpdateDialog: true);
-    }
-
-    private void OnTrayExitCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
-    {
-        ExitApplication();
+        switch (selected)
+        {
+            case TrayMenuCommand.Open:
+                ShowWindowFromTray();
+                break;
+            case TrayMenuCommand.Start:
+                _service.Start();
+                break;
+            case TrayMenuCommand.Stop:
+                await _service.StopAsync();
+                break;
+            case TrayMenuCommand.CheckForUpdates:
+                await CheckForUpdatesAsync(showNoUpdateDialog: true);
+                break;
+            case TrayMenuCommand.Exit:
+                ExitApplication();
+                break;
+            case null:
+            default:
+                break;
+        }
     }
 
     private void ExitApplication()
@@ -349,32 +357,13 @@ internal sealed partial class MainWindow : Window
 
     private void UpdateControls(SubscriptionState state)
     {
+        SubscriptionControlAvailability availability = SubscriptionControlAvailability.For(state);
+
         _ = DispatcherQueue.TryEnqueue(() =>
         {
-            switch (state)
-            {
-                case SubscriptionState.Running:
-                    StartButton.IsEnabled = false;
-                    StopButton.IsEnabled = true;
-                    RetryButton.IsEnabled = false;
-                    break;
-                case SubscriptionState.Stopped:
-                    StartButton.IsEnabled = true;
-                    StopButton.IsEnabled = false;
-                    RetryButton.IsEnabled = false;
-                    break;
-                case SubscriptionState.Starting:
-                case SubscriptionState.Stopping:
-                    StartButton.IsEnabled = false;
-                    StopButton.IsEnabled = false;
-                    RetryButton.IsEnabled = false;
-                    break;
-                case SubscriptionState.Error:
-                    StartButton.IsEnabled = true;
-                    StopButton.IsEnabled = false;
-                    RetryButton.IsEnabled = true;
-                    break;
-            }
+            StartButton.IsEnabled = availability.CanStart;
+            StopButton.IsEnabled = availability.CanStop;
+            RetryButton.IsEnabled = availability.CanRetry;
         });
     }
 
