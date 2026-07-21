@@ -1488,12 +1488,16 @@ internal sealed partial class MainWindow : Window
         var codeValue = new TextBox { IsReadOnly = true, FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Visibility = Visibility.Collapsed };
         var codeCopyButton = new Button { Content = "コードをコピー", Visibility = Visibility.Collapsed };
 
+        // 値が届く前にラベルだけが並ぶと何を待っているのか分からないため、値と同時に表示する
+        var urlLabel = new TextBlock { Text = "承認 URL:", FontSize = 12, Visibility = Visibility.Collapsed };
+        var codeLabel = new TextBlock { Text = "認証コード:", FontSize = 12, Visibility = Visibility.Collapsed };
+
         var panel = new StackPanel { Spacing = 8, MinWidth = 360 };
         panel.Children.Add(statusText);
-        panel.Children.Add(new TextBlock { Text = "承認 URL:", FontSize = 12 });
+        panel.Children.Add(urlLabel);
         panel.Children.Add(urlValue);
         panel.Children.Add(urlCopyButton);
-        panel.Children.Add(new TextBlock { Text = "認証コード:", FontSize = 12 });
+        panel.Children.Add(codeLabel);
         panel.Children.Add(codeValue);
         panel.Children.Add(codeCopyButton);
 
@@ -1525,11 +1529,13 @@ internal sealed partial class MainWindow : Window
             {
                 latestInfo = info;
                 urlValue.Text = info.DisplayUri;
+                urlLabel.Visibility = Visibility.Visible;
                 urlValue.Visibility = Visibility.Visible;
                 urlCopyButton.Visibility = Visibility.Visible;
                 if (!string.IsNullOrEmpty(info.UserCode))
                 {
                     codeValue.Text = info.UserCode;
+                    codeLabel.Visibility = Visibility.Visible;
                     codeValue.Visibility = Visibility.Visible;
                     codeCopyButton.Visibility = Visibility.Visible;
                 }
@@ -1547,15 +1553,39 @@ internal sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
         };
 
-        // ShowAsync を先に開始してからログインを走らせる。逆順だと、認証が極めて速く完了した
-        // 場合に dialog.Hide() が ShowAsync より先に走り、ダイアログが閉じられず残ることがある。
+        // ShowAsync を呼んでもダイアログは即座に開き終わらない。開く途中で Hide() が到達すると
+        // 無視され「認証を開始しています...」のまま残るため、Opened を待ってから閉じる（#200）。
+        var closeGate = new Helpers.DeferredDialogCloseGate();
+        dialog.Opened += (_, _) =>
+        {
+            if (closeGate.MarkOpened())
+            {
+                dialog.Hide();
+            }
+        };
+
         IAsyncOperation<ContentDialogResult> showOperation = dialog.ShowAsync(ContentDialogPlacement.Popup);
 
         Task<Models.McpLoginResult> loginTask = loginService.LoginAsync(cts.Token);
 
         // 認証完了時にダイアログを自動で閉じ、ShowAsync を終了させる
         _ = loginTask.ContinueWith(
-            _ => DispatcherQueue.TryEnqueue(dialog.Hide),
+            _ =>
+            {
+                bool enqueued = DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (closeGate.RequestClose())
+                    {
+                        dialog.Hide();
+                    }
+                });
+
+                if (!enqueued)
+                {
+                    _ = _loggingService.WriteAsync(
+                        "[UI] ログインダイアログのクローズ要求を UI スレッドへ配送できませんでした。");
+                }
+            },
             TaskScheduler.Default);
 
         try
