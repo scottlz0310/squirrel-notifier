@@ -11,6 +11,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Moq;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
@@ -547,11 +548,16 @@ public class McpSubscriptionServiceTests : IDisposable
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", null);
     }
 
-    [Fact]
-    public async Task PreflightCheck_ShouldReturnFalseWhenExitCodeIsNonZero()
+    [Theory]
+    [InlineData(1, "", "subscriber: unknown option '--help'", "unknown option '--help'")]
+    [InlineData(127, "usage error: gateway url is required", "", "gateway url is required")]
+    [InlineData(2, "", "", "")]
+    public async Task PreflightCheck_ShouldReportExitCodeAndOutput_WhenExitCodeIsNonZero(
+        int exitCode, string stdout, string stderr, string expectedDetail)
     {
-        // Arrange
-        var mockProcess = CreateMockProcess(1, "", "");
+        // Arrange: 終了コードだけでは原因が判別できないため、LastError には終了コードと
+        // 出力の要約が入る。stderr が空なら stdout を使う（#201）
+        var mockProcess = CreateMockProcess(exitCode, stdout, stderr);
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess);
 
@@ -562,6 +568,63 @@ public class McpSubscriptionServiceTests : IDisposable
 
         // Assert
         result.Should().BeFalse();
+        service.LastError.Should().NotBeEmpty();
+        service.LastError.Should().Contain(exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (!string.IsNullOrEmpty(expectedDetail))
+        {
+            service.LastError.Should().Contain(expectedDetail);
+        }
+    }
+
+    [Fact]
+    public async Task PreflightCheck_ShouldMaskSecretsInLastError()
+    {
+        // Arrange
+        const string secret = "super-secret-token-value";
+        var mockProcess = CreateMockProcess(1, "", $"auth rejected: MCP_PROBE_AUTH_TOKEN={secret}");
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess);
+
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            secretMasker: new SecretMasker([secret]));
+
+        // Act
+        bool result = await service.PreflightCheckAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().BeFalse();
+        service.LastError.Should().NotContain(secret);
+        service.LastError.Should().Contain("***");
+    }
+
+    [Fact]
+    public async Task Start_ShouldSurfacePreflightFailureDetail_InsteadOfEmptyError()
+    {
+        // Arrange: preflight 失敗で Error 状態になったとき、UI（トレイバルーン）が
+        // 空メッセージを表示しないことを保証する（#201）
+        var preflightProcess = CreateMockProcess(1, "", "connection refused to gateway");
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(preflightProcess);
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
+        var statusTexts = new List<string>();
+        service.StatusTextChanged += (_, text) => statusTexts.Add(text);
+
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
+        await task;
+
+        // Assert
+        service.State.Should().Be(SubscriptionState.Error);
+        service.LastError.Should().NotBeEmpty();
+        service.LastError.Should().Contain("connection refused to gateway");
+        statusTexts.Should().Contain(text => text.Contains("connection refused to gateway", StringComparison.Ordinal));
     }
 
     [Fact]

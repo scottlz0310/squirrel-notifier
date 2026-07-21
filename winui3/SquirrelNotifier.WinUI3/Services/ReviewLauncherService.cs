@@ -206,7 +206,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             await LogAsync($"Review process finished. ExitCode={exitCode}; WorkingDirectory={workingDirectory}").ConfigureAwait(false);
             if (exitCode != 0 && !string.IsNullOrWhiteSpace(stderr))
             {
-                await LogAsync($"Review process stderr summary: {BuildStderrSummary(stderr)}").ConfigureAwait(false);
+                await LogAsync($"Review process stderr summary: {ProcessOutputSummarizer.Summarize(stderr, _secretMasker)}").ConfigureAwait(false);
             }
 
             session.Complete(
@@ -341,16 +341,6 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             {
             }
         }
-    }
-
-    private string BuildStderrSummary(string stderr)
-    {
-        const int maxLength = 500;
-        string summary = string.Join(" | ", stderr
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Take(3)
-            .Select(line => _secretMasker.Mask(AnsiControlSanitizer.Sanitize(line))));
-        return summary.Length <= maxLength ? summary : summary[..maxLength];
     }
 
     // スロットはユーザーが押したアクションのロールだけで決まる（#127）

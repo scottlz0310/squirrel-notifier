@@ -37,6 +37,7 @@ internal sealed class McpLoginService
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
     private readonly IUrlOpener _urlOpener;
+    private readonly SecretMasker _secretMasker;
     private readonly int _loginTimeoutMs;
 
     /// <summary>進行状況を表す短いテキスト（UI 表示用）。トークン・URL・code は含まない.</summary>
@@ -50,13 +51,15 @@ internal sealed class McpLoginService
         LoggingService loggingService,
         IProcessRunner? processRunner = null,
         IUrlOpener? urlOpener = null,
-        int loginTimeoutMs = _defaultLoginTimeoutMs)
+        int loginTimeoutMs = _defaultLoginTimeoutMs,
+        SecretMasker? secretMasker = null)
     {
         _settingsService = settingsService;
         _loggingService = loggingService;
         _processRunner = processRunner ?? new ProcessRunner();
         _urlOpener = urlOpener ?? new UrlOpener();
         _loginTimeoutMs = loginTimeoutMs;
+        _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
     }
 
     public async Task<McpLoginResult> LoginAsync(CancellationToken cancellationToken)
@@ -233,7 +236,7 @@ internal sealed class McpLoginService
 
         // subscriber は失敗理由を stderr の "login failed: <message>" に出力する。
         // トークンは含まれないが、gateway 到達不可・device flow 拒否等の診断に有用.
-        string detail = ExtractFailureDetail(stderr);
+        string detail = _secretMasker.Mask(ExtractFailureDetail(stderr));
 
         string message = errorCode switch
         {
@@ -291,14 +294,23 @@ internal sealed class McpLoginService
         {
             process = _processRunner.Start(psi);
 
+            // stderr を読み進めないと、subscriber がパイプバッファを超える出力をした時点で
+            // 子プロセスが書き込みでブロックし WaitForExitAsync が返らなくなる（#201）。
             Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             string stdout = await stdoutTask.ConfigureAwait(false);
+            string stderr = await stderrTask.ConfigureAwait(false);
 
             Match match = _versionRegex.Match(stdout);
             if (!match.Success)
             {
-                return $"mcp-resource-subscriber のバージョンを確認できませんでした（--version の出力: \"{stdout.Trim()}\"）。--login には v{_minimumSubscriberVersion} 以上が必要です。";
+                string stdoutDetail = ProcessOutputSummarizer.Summarize(stdout, _secretMasker);
+                string stderrDetail = ProcessOutputSummarizer.Summarize(stderr, _secretMasker);
+                string outputDetail = string.IsNullOrEmpty(stderrDetail)
+                    ? $"\"{stdoutDetail}\""
+                    : $"\"{stdoutDetail}\", stderr: \"{stderrDetail}\"";
+                return $"mcp-resource-subscriber のバージョンを確認できませんでした（--version の出力: {outputDetail}）。--login には v{_minimumSubscriberVersion} 以上が必要です。";
             }
 
             var detected = new Version(
