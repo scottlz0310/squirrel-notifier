@@ -279,6 +279,6 @@ Windows はダークモード（`HKCU:\...\Themes\Personalize` の `AppsUseLight
 - [ ] 実 gateway の device flow 成功パス（トークン取得・`tokens.db` への書き込み・成功ダイアログ・InfoBar クローズ・購読再開）を、ユーザー本人の承認を伴って確認
 - [x] preflight 失敗時の `LastError` 未設定を修正（#201 で実施）
 - [x] `CheckSubscriberVersionAsync` の stderr 未読を修正（#201 で実施。`EnqueueReviewService` の同一パターンも併せて修正）
-- [ ] トレイ MenuFlyout のテーマ追従
-- [ ] トレイメニューの Start / Stop の活性制御
+- [x] トレイ MenuFlyout のテーマ追従（#202 で実施。実機でライト／ダーク・実行中切り替えを確認）
+- [x] トレイメニューの Start / Stop の活性制御（#202 で実施。実機で Running / Stopped 双方を確認）
 - [x] ログインダイアログのラベル表示制御（#200 で実施）

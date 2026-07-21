@@ -4,6 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.UI.Xaml;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Services;
 
 namespace SquirrelNotifier.WinUI3;
@@ -30,6 +31,10 @@ public partial class App : Application
         InitializeComponent();
 
         UnhandledException += OnApplicationUnhandledException;
+
+        // トレイの右クリックメニューはネイティブメニューとして描画されるため、
+        // XAML のテーマとは別に、プロセス単位でシステムテーマ追従を有効にする（#202）。
+        NativeMenuTheme.EnableSystemThemeForPopupMenus();
 
         try
         {
