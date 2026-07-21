@@ -6,7 +6,13 @@
     <!-- WinUI3 Application -->
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
-    <PackageVersion Include="H.NotifyIcon.WinUI" Version="2.4.1" />
+    <!--
+      2.4.1 の TrayPopup は WinUI3 で XamlRoot 未設定の Popup を開くため、レビュー通知の表示が
+      必ず E_UNEXPECTED で落ちる（#199）。2.5.0 系で TrayPopup が専用 Window 方式へ書き直され
+      解消しているが、正式版が未リリースのため beta を明示的に採用する。
+      正式版が出たら安定版へ戻すこと（#199）。
+    -->
+    <PackageVersion Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.1" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="1.4.1" />
     <PackageVersion Include="System.Drawing.Common" Version="10.0.10" />
 
@@ -29,3 +35,4 @@
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 </Project>
+

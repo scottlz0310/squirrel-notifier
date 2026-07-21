@@ -27,10 +27,13 @@
                         PopupActivation="None"
                         MenuActivation="RightClick"
                         LeftClickCommand="{StaticResource TrayOpenCommand}">
+            <!--
+                TrayPopup には Popup を挟まずコンテンツを直接置く。Popup を挟むと
+                TaskbarIcon.TrayPopupResolved がその Popup をそのまま採用し、視覚ツリーに
+                属さない＝XamlRoot 未設定の Popup を開くことになり E_UNEXPECTED で落ちる（#199）。
+            -->
             <tb:TaskbarIcon.TrayPopup>
-                <Popup IsLightDismissEnabled="True">
-                    <local:ReviewNotificationPopup x:Name="ReviewNotificationContent"/>
-                </Popup>
+                <local:ReviewNotificationPopup x:Name="ReviewNotificationContent"/>
             </tb:TaskbarIcon.TrayPopup>
             <tb:TaskbarIcon.ContextFlyout>
                 <MenuFlyout>

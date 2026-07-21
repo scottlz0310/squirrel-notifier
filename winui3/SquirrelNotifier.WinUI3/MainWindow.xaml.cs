@@ -1115,8 +1115,21 @@ internal sealed partial class MainWindow : Window
                 _reviewEvents.RemoveAt(_reviewEvents.Count - 1);
             }
 
-            ReviewNotificationContent.SetReviewEvent(e);
-            _trayIconService.ShowReviewPopup();
+            try
+            {
+                ReviewNotificationContent.SetReviewEvent(e);
+                _trayIconService.ShowReviewPopup();
+            }
+            catch (Exception ex)
+            {
+                // ポップアップ表示の失敗でプロセスを落とさない。イベントは一覧に残っているため、
+                // 原因をログへ残したうえでバルーン通知へフォールバックする（#199）。
+                _ = _loggingService.WriteAsync($"[UI] Failed to show review popup: {ex.Message}");
+                _trayIconService.ShowNotification(
+                    "レビュー通知",
+                    $"{e.Reason}: {e.Repository}#{e.PrNumber}",
+                    H.NotifyIcon.Core.NotificationIcon.Info);
+            }
         });
 
         if (!enqueued)
