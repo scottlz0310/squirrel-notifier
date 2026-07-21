@@ -36,7 +36,7 @@ internal sealed partial class MainWindow : Window
     private readonly INotificationService _notificationService;
     private readonly IReviewLauncherService _launcherService;
     private readonly ITaskSchedulerService _taskSchedulerService;
-    private readonly EnqueueReviewService _enqueueReviewService;
+    private readonly ReviewRegistrationService _reviewRegistrationService;
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitFileService _rateLimitFileService;
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
@@ -83,7 +83,7 @@ internal sealed partial class MainWindow : Window
         INotificationService notificationService,
         IReviewLauncherService launcherService,
         ITaskSchedulerService taskSchedulerService,
-        EnqueueReviewService enqueueReviewService,
+        ReviewRegistrationService reviewRegistrationService,
         IRateLimitReminderService rateLimitReminderService,
         RateLimitFileService rateLimitFileService,
         bool showWindow = true)
@@ -111,7 +111,7 @@ internal sealed partial class MainWindow : Window
         _notificationService = notificationService;
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
-        _enqueueReviewService = enqueueReviewService;
+        _reviewRegistrationService = reviewRegistrationService;
         _rateLimitReminderService = rateLimitReminderService;
         _rateLimitFileService = rateLimitFileService;
         _rateLimitSnapshotService = new RateLimitSnapshotService(rateLimitFileService);
@@ -1415,31 +1415,64 @@ internal sealed partial class MainWindow : Window
         EnqueueReviewButton.IsEnabled = false;
         try
         {
-            Models.EnqueueReviewResult result = await _enqueueReviewService.EnqueueAsync(reference, reason, CancellationToken.None).ConfigureAwait(true);
+            Models.ReviewRegistrationResult result = await _reviewRegistrationService.RegisterAsync(
+                reference,
+                reason,
+                ConfirmSubscriptionStartAsync,
+                CancellationToken.None).ConfigureAwait(true);
 
-            if (result.Success)
+            switch (result.Outcome)
             {
-                string message = $"{reference.Owner}/{reference.Repo}#{reference.PrNumber} を reason={reason} で登録しました。";
-                if (_service.State != SubscriptionState.Running)
-                {
-                    message += "\n購読が停止中のため、通知は届きません。先に購読を開始してください。";
-                }
+                case Models.ReviewRegistrationOutcome.Registered:
+                    await ShowAlertDialogAsync(
+                        "レビュー登録完了",
+                        $"{reference.Owner}/{reference.Repo}#{reference.PrNumber} を reason={reason} で登録しました。\nこの画面を閉じても登録は取り消されません。")
+                        .ConfigureAwait(true);
+                    PrReferenceBox.Text = string.Empty;
+                    break;
 
-                await ShowAlertDialogAsync("レビュー登録完了", message).ConfigureAwait(true);
-                PrReferenceBox.Text = string.Empty;
-            }
-            else
-            {
-                // 認証エラーはログイン導線（#183）へ誘導する。ダイアログを閉じた後、
-                // 認証 InfoBar の「mcp-gateway にログイン」から復旧できる。
-                AuthRequiredInfoBar.IsOpen = result.IsAuthenticationRequired;
-                await ShowAlertDialogAsync("レビュー登録エラー", result.ErrorMessage).ConfigureAwait(true);
+                case Models.ReviewRegistrationOutcome.Cancelled:
+                case Models.ReviewRegistrationOutcome.AlreadyInProgress:
+                    break;
+
+                case Models.ReviewRegistrationOutcome.SubscriptionStartFailed:
+                case Models.ReviewRegistrationOutcome.EnqueueFailed:
+                default:
+                    // 認証エラーはログイン導線（#183）へ誘導する。ダイアログを閉じた後、
+                    // 認証 InfoBar の「mcp-gateway にログイン」から復旧できる。
+                    AuthRequiredInfoBar.IsOpen = result.IsAuthenticationRequired;
+                    string title = result.Outcome == Models.ReviewRegistrationOutcome.SubscriptionStartFailed
+                        ? "購読開始エラー"
+                        : "レビュー登録エラー";
+                    await ShowAlertDialogAsync(title, result.ErrorMessage).ConfigureAwait(true);
+                    break;
             }
         }
         finally
         {
             EnqueueReviewButton.IsEnabled = true;
         }
+    }
+
+    private async Task<bool> ConfirmSubscriptionStartAsync(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = "購読が停止しています",
+            Content = "レビューを登録する前に購読を開始します。",
+            PrimaryButtonText = "購読を開始して登録",
+            CloseButtonText = "キャンセル",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot,
+        };
+
+        ContentDialogResult result = await dialog.ShowAsync(ContentDialogPlacement.Popup);
+        return result == ContentDialogResult.Primary;
     }
 
     private async void OnLoginToGatewayClick(object sender, RoutedEventArgs e)
