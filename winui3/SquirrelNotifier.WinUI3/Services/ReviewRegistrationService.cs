@@ -86,10 +86,6 @@ internal sealed class ReviewRegistrationService
                     ErrorMessage = enqueueResult.ErrorMessage,
                 };
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return CreateCancelledResult();
-        }
         finally
         {
             _operationGate.Release();
