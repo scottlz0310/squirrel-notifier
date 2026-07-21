@@ -1,0 +1,51 @@
+<UserControl
+    x:Class="SquirrelNotifier.WinUI3.ReviewNotificationPopup"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border Width="380"
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+        <StackPanel Spacing="12">
+            <TextBlock x:Name="TitleText"
+                       FontSize="16"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap"/>
+            <TextBlock x:Name="MessageText"
+                       MaxHeight="120"
+                       TextWrapping="Wrap"/>
+            <Grid ColumnSpacing="8"
+                  RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Button x:Name="OpenPrButton"
+                        HorizontalAlignment="Stretch"
+                        Content="PRを開く"
+                        Click="OnOpenPrClick"/>
+                <Button x:Name="LaunchReviewButton"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Content="レビューする"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Click="OnLaunchReviewClick"/>
+                <Button Grid.Row="1"
+                        HorizontalAlignment="Stretch"
+                        Content="アプリを開く"
+                        Click="OnOpenAppClick"/>
+                <Button Grid.Row="1"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Content="閉じる"
+                        Click="OnDismissClick"/>
+            </Grid>
+        </StackPanel>
+    </Border>
+</UserControl>

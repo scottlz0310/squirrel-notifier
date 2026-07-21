@@ -18,7 +18,7 @@
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SupportedOSPlatformVersion>10.0.26100.0</SupportedOSPlatformVersion>
-    <WindowsSdkPackageVersion>10.0.26100.38</WindowsSdkPackageVersion>
+    <WindowsSdkPackageVersion>10.0.26100.84</WindowsSdkPackageVersion>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest-all</AnalysisLevel>
@@ -33,6 +33,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="H.NotifyIcon.WinUI" />
     <PackageReference Include="ModelContextProtocol.Core" />
     <PackageReference Include="System.Drawing.Common" />
 
