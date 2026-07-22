@@ -4,7 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- WinUI3 Application -->
-    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
     <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
     <!--
       2.4.1 の TrayPopup は WinUI3 で XamlRoot 未設定の Popup を開くため、レビュー通知の表示が
