@@ -1058,6 +1058,209 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Start_WithCandidateInInitialText_ShouldNotifyAndContinueSubscribing()
+    {
+        // Arrange
+        string initialPayload = @"{""eventId"":""evt_initial"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}";
+        string timeoutJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "timeout",
+            ErrorCode = "NOTIFICATION_TIMEOUT",
+            Subscribed = true,
+            NotificationReceived = false,
+            InitialText = initialPayload,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var testCts = new CancellationTokenSource();
+        int subscriptionCallCount = 0;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(1, timeoutJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert
+        _mockNotificationService.Verify(
+            n => n.NotifyReviewEvent(It.Is<ReviewEvent>(reviewEvent => reviewEvent.EventId == "evt_initial")),
+            Times.Once);
+        subscriptionCallCount.Should().Be(2);
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{invalid-json}")]
+    public async Task Start_WithEmptyOrMalformedInitialText_ShouldContinueSubscribing(string? initialText)
+    {
+        // Arrange
+        string timeoutJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "timeout",
+            ErrorCode = "NOTIFICATION_TIMEOUT",
+            Subscribed = true,
+            NotificationReceived = false,
+            InitialText = initialText,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var testCts = new CancellationTokenSource();
+        int subscriptionCallCount = 0;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(1, timeoutJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert
+        _mockNotificationService.Verify(n => n.NotifyReviewEvent(It.IsAny<ReviewEvent>()), Times.Never);
+        subscriptionCallCount.Should().Be(2);
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Start_WithSameCandidateInInitialAndFinalText_ShouldNotifyOnce()
+    {
+        // Arrange
+        string eventPayload = @"{""eventId"":""evt_duplicate"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}";
+        string resultJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = true,
+            InitialText = eventPayload,
+            FinalText = eventPayload,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var testCts = new CancellationTokenSource();
+        int subscriptionCallCount = 0;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(0, resultJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert
+        _mockNotificationService.Verify(
+            n => n.NotifyReviewEvent(It.Is<ReviewEvent>(reviewEvent => reviewEvent.EventId == "evt_duplicate")),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task Start_WithPreCompletionRoute_ShouldNotifyFromInitialAndFinalText()
+    {
+        // Arrange
+        string initialPayload = @"{""eventId"":""evt_pre_initial"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Initial review requested""}";
+        string finalPayload = @"{""eventId"":""evt_pre_final"",""repository"":""owner/repo"",""prNumber"":2,""prUrl"":""https://github.com/owner/repo/pull/2"",""reason"":""synchronize"",""source"":""thread-owl"",""message"":""Updated review requested""}";
+        string resultJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "pre-completion",
+            Subscribed = true,
+            NotificationReceived = false,
+            InitialText = initialPayload,
+            FinalText = finalPayload,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var testCts = new CancellationTokenSource();
+        int subscriptionCallCount = 0;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(0, resultJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert
+        _mockNotificationService.Verify(
+            n => n.NotifyReviewEvent(It.Is<ReviewEvent>(reviewEvent => reviewEvent.EventId == "evt_pre_initial")),
+            Times.Once);
+        _mockNotificationService.Verify(
+            n => n.NotifyReviewEvent(It.Is<ReviewEvent>(reviewEvent => reviewEvent.EventId == "evt_pre_final")),
+            Times.Once);
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task CacheService_ShouldRestoreSeenIdsOnStart()
     {
         // Arrange: キャッシュに evt_cached を保存
@@ -1071,16 +1274,18 @@ public class McpSubscriptionServiceTests : IDisposable
 
         string eventJson = JsonSerializer.Serialize(new SubscriptionResult
         {
-            Route = "subscription",
-            NotificationReceived = true,
-            FinalText = @"{""eventId"":""evt_cached"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}",
+            Route = "timeout",
+            ErrorCode = "NOTIFICATION_TIMEOUT",
+            Subscribed = true,
+            NotificationReceived = false,
+            InitialText = @"{""eventId"":""evt_cached"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}",
         });
 
         var preflightProcess = CreateMockProcess(0, "help", "");
-        var subscriptionProcess = CreateMockProcess(0, eventJson, "");
 
         var mockRunner = new Mock<IProcessRunner>();
         var testCts = new CancellationTokenSource();
+        int subscriptionCallCount = 0;
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns<ProcessStartInfo>(psi =>
             {
@@ -1089,8 +1294,13 @@ public class McpSubscriptionServiceTests : IDisposable
                     return preflightProcess;
                 }
 
-                testCts.Cancel();
-                return subscriptionProcess;
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(1, eventJson, "");
             });
 
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, cacheService: mockCacheService.Object);
