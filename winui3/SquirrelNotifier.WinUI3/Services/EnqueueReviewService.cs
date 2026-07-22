@@ -21,7 +21,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 /// queue をバイパスして直接ランチャーを起動する経路は作らない（重複排除・通知記録を通る
 /// 正規経路を維持するため）.
 /// </summary>
-internal sealed class EnqueueReviewService
+internal sealed class EnqueueReviewService : IEnqueueReviewService
 {
     private const string _toolName = "enqueue_review";
     private const int _callTimeoutMs = 30000;

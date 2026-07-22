@@ -11,7 +11,7 @@ using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
-internal sealed class McpSubscriptionService : IAsyncDisposable
+internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscriptionService
 {
     private const int _maxRecentEvents = 20;
     private const string _authenticationRequiredErrorTag = "[AUTH_REQUIRED]";

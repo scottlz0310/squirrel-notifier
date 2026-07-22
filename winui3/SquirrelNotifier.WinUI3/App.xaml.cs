@@ -22,7 +22,7 @@ public partial class App : Application
     private readonly AutoUpdateService _autoUpdateService;
     private readonly ReviewLauncherService _launcherService;
     private readonly TaskSchedulerService _taskSchedulerService = new();
-    private readonly EnqueueReviewService _enqueueReviewService;
+    private readonly ReviewRegistrationService _reviewRegistrationService;
     private readonly RateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitFileService _rateLimitFileService;
 
@@ -48,7 +48,8 @@ public partial class App : Application
         _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, cacheService: _cacheService);
         _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
-        _enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
+        var enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
+        _reviewRegistrationService = new ReviewRegistrationService(_subscriptionService, enqueueReviewService);
         _rateLimitReminderService = new RateLimitReminderService(_notificationService);
         _rateLimitFileService = new RateLimitFileService(_settingsService.SettingsDirectory);
     }
@@ -59,7 +60,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _enqueueReviewService, _rateLimitReminderService, _rateLimitFileService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _reviewRegistrationService, _rateLimitReminderService, _rateLimitFileService, showWindow);
         _window.Closed += OnWindowClosed;
 
         _window.Activate();
