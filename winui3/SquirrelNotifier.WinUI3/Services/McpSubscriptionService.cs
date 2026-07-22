@@ -642,6 +642,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
 
                     if (isIdleTimeout)
                     {
+                        result!.Validate();
+                        await ProcessReviewEventPayloadAsync(result.InitialText, resourceUri, "InitialText").ConfigureAwait(false);
                         await LogAsync($"[{resourceUri}] No notification within timeout window; re-subscribing.").ConfigureAwait(false);
                     }
                     else if (process.ExitCode != 0)
@@ -671,40 +673,14 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                             throw new SubscriberProcessException($"Subscription failure: Route={result.Route}, ErrorCode={result.ErrorCode}, Message={result.FinalText}", result.ErrorCode, result.FinalText);
                         }
 
+                        if (result.Route == "subscription")
+                        {
+                            await ProcessReviewEventPayloadAsync(result.InitialText, resourceUri, "InitialText").ConfigureAwait(false);
+                        }
+
                         if (result.Route == "subscription" && result.NotificationReceived == true)
                         {
-                            await LogAsync($"Notification payload received: {result.FinalText}").ConfigureAwait(false);
-
-                            List<ReviewEvent> reviewEvents = ReviewEventParser.Parse(result.FinalText, resourceUri);
-                            if (reviewEvents.Count == 0)
-                            {
-                                await LogAsync($"Warning: Malformed or unsupported review event payload received: {result.FinalText}").ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                foreach (ReviewEvent reviewEvent in reviewEvents)
-                                {
-                                    if (TryMarkAsSeen(reviewEvent.EventId, reviewEvent))
-                                    {
-                                        try
-                                        {
-                                            _notificationService.NotifyReviewEvent(reviewEvent);
-                                            await PersistCacheAsync().ConfigureAwait(false);
-                                        }
-                                        catch (Exception notifyEx)
-                                        {
-                                            // 通知失敗時は claim を解除し、ディスクにも反映して再起動後の duplicate 扱いを防ぐ
-                                            UndoMarkAsSeen(reviewEvent.EventId);
-                                            await PersistCacheAsync().ConfigureAwait(false);
-                                            await LogAsync($"Error: Failed to dispatch review notification: {notifyEx.Message}").ConfigureAwait(false);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
-                                    }
-                                }
-                            }
+                            await ProcessReviewEventPayloadAsync(result.FinalText, resourceUri, "FinalText").ConfigureAwait(false);
                         }
                         else
                         {
@@ -759,6 +735,46 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 }
 
                 retryDelayMs = Math.Min(retryDelayMs * 2, 32000);
+            }
+        }
+    }
+
+    private async Task ProcessReviewEventPayloadAsync(string? payload, string resourceUri, string payloadName)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return;
+        }
+
+        await LogAsync($"{payloadName} payload received: {payload}").ConfigureAwait(false);
+
+        List<ReviewEvent> reviewEvents = ReviewEventParser.Parse(payload, resourceUri);
+        if (reviewEvents.Count == 0)
+        {
+            await LogAsync($"Warning: Malformed or unsupported {payloadName} review event payload received: {payload}").ConfigureAwait(false);
+            return;
+        }
+
+        foreach (ReviewEvent reviewEvent in reviewEvents)
+        {
+            if (TryMarkAsSeen(reviewEvent.EventId, reviewEvent))
+            {
+                try
+                {
+                    _notificationService.NotifyReviewEvent(reviewEvent);
+                    await PersistCacheAsync().ConfigureAwait(false);
+                }
+                catch (Exception notifyEx)
+                {
+                    // 通知失敗時は claim を解除し、ディスクにも反映して再起動後の duplicate 扱いを防ぐ
+                    UndoMarkAsSeen(reviewEvent.EventId);
+                    await PersistCacheAsync().ConfigureAwait(false);
+                    await LogAsync($"Error: Failed to dispatch review notification: {notifyEx.Message}").ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                await LogAsync($"Duplicate event ignored: {reviewEvent.EventId}").ConfigureAwait(false);
             }
         }
     }
