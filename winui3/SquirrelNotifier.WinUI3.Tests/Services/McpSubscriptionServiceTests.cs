@@ -1207,6 +1207,60 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Start_WithPreCompletionRoute_ShouldNotifyFromInitialAndFinalText()
+    {
+        // Arrange
+        string initialPayload = @"{""eventId"":""evt_pre_initial"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Initial review requested""}";
+        string finalPayload = @"{""eventId"":""evt_pre_final"",""repository"":""owner/repo"",""prNumber"":2,""prUrl"":""https://github.com/owner/repo/pull/2"",""reason"":""synchronize"",""source"":""thread-owl"",""message"":""Updated review requested""}";
+        string resultJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "pre-completion",
+            Subscribed = true,
+            NotificationReceived = false,
+            InitialText = initialPayload,
+            FinalText = finalPayload,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", "");
+        var testCts = new CancellationTokenSource();
+        int subscriptionCallCount = 0;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                subscriptionCallCount++;
+                if (subscriptionCallCount >= 2)
+                {
+                    testCts.Cancel();
+                }
+
+                return CreateMockProcess(0, resultJson, "");
+            });
+
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object);
+        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        // Act
+        var task = (Task)runMethod!.Invoke(service, new object[] { testCts.Token })!;
+        await task;
+
+        // Assert
+        _mockNotificationService.Verify(
+            n => n.NotifyReviewEvent(It.Is<ReviewEvent>(reviewEvent => reviewEvent.EventId == "evt_pre_initial")),
+            Times.Once);
+        _mockNotificationService.Verify(
+            n => n.NotifyReviewEvent(It.Is<ReviewEvent>(reviewEvent => reviewEvent.EventId == "evt_pre_final")),
+            Times.Once);
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task CacheService_ShouldRestoreSeenIdsOnStart()
     {
         // Arrange: キャッシュに evt_cached を保存

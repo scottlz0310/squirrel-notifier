@@ -673,12 +673,12 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                             throw new SubscriberProcessException($"Subscription failure: Route={result.Route}, ErrorCode={result.ErrorCode}, Message={result.FinalText}", result.ErrorCode, result.FinalText);
                         }
 
-                        if (result.Route == "subscription")
+                        if (result.Route == "subscription" || result.Route == "pre-completion")
                         {
                             await ProcessReviewEventPayloadAsync(result.InitialText, resourceUri, "InitialText").ConfigureAwait(false);
                         }
 
-                        if (result.Route == "subscription" && result.NotificationReceived == true)
+                        if ((result.Route == "subscription" && result.NotificationReceived == true) || result.Route == "pre-completion")
                         {
                             await ProcessReviewEventPayloadAsync(result.FinalText, resourceUri, "FinalText").ConfigureAwait(false);
                         }
