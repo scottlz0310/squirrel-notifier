@@ -235,6 +235,16 @@ git push --no-verify
 dotnet test winui3/SquirrelNotifier.WinUI3.sln
 ```
 
+### Windows 統合 E2E
+
+Windows 配布物、外部 CLI、gateway、認証、通知、WinUI を跨ぐ統合 E2E は、
+[Windows 統合 E2E 設計](docs/windows-integration-e2e.md) に従って Phase 1
+（GitHub-hosted の headless E2E）と Phase 2（専用 Windows VM の実デスクトップ E2E）へ
+分けて段階導入します。
+
+現在は Issue [#184](https://github.com/scottlz0310/squirrel-notifier/issues/184) で追跡中です。
+ローカル実行スクリプトは設計に記載した子 Issue で追加します。
+
 ### コード品質
 
 プロジェクトには厳格な品質基準が設定されています:
