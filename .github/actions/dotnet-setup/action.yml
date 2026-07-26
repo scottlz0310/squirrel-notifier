@@ -1,0 +1,28 @@
+name: .NET セットアップ
+description: .NET SDK を導入し、NuGet global packages folder をキャッシュから復元する。
+
+inputs:
+  dotnet-version:
+    description: 導入する .NET SDK のバージョン指定。
+    required: false
+    default: "10.0.x"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - name: Restore NuGet cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.nuget/packages
+        # 中央パッケージ管理により全依存は Directory.Packages.props で厳密固定されるため、
+        # SDK・パッケージ定義・feed 設定のいずれかが変われば別キーになる。
+        key: nuget-${{ runner.os }}-${{ hashFiles('global.json', 'nuget.config', '**/Directory.Packages.props', '**/*.csproj', '**/*.wixproj') }}
+        # global packages folder は package id/version 単位の不変ディレクトリで構成されるため、
+        # 部分一致で復元しても restore が不足分を取得する。古い版が誤用されることはない。
+        restore-keys: |
+          nuget-${{ runner.os }}-
