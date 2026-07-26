@@ -340,7 +340,7 @@ Phase 1 を required check にするには、次をすべて満たす。
 - 少なくとも 2 つの runner image 更新日を跨いで成功している。
 - timeout、artifact、failure reason、cleanup、secret scan が実際の失敗ケースで検証済みである。
 - 未分類失敗と既知の flaky test が 0 件である。
-- #220 で定義する PR CI 全体の wall clock budget を超えない。
+- [`docs/ci-wall-clock.md`](ci-wall-clock.md) が定義する PR CI 全体の wall clock budget を超えない。
 - branch protection へ追加する check 名が固定されている。
 - rollback 手順と一時的に required から外す判断基準が文書化されている。
 
@@ -373,7 +373,7 @@ Phase 1 を required check にするには、次をすべて満たす。
 ## 関連
 
 - Epic: #184
-- CI 壁時計最適化: #220
+- CI 壁時計最適化: #220 / [`docs/ci-wall-clock.md`](ci-wall-clock.md)
 - Phase 1 配布物 E2E: #221
 - Phase 1 CLI / gateway / 認証 E2E: #222
 - Phase 1 プロセス境界 E2E: #223
