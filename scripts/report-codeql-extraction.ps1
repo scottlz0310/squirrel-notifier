@@ -44,38 +44,56 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $srcZip = Join-Path $db "src.zip"
 $zip = [System.IO.Compression.ZipFile]::OpenRead($srcZip)
 try {
-    $csFiles = @($zip.Entries |
-            Where-Object { $_.FullName.EndsWith(".cs", [StringComparison]::OrdinalIgnoreCase) } |
-            ForEach-Object { $_.FullName } |
-            Sort-Object)
+    $entries = @($zip.Entries | Where-Object { $_.FullName.EndsWith(".cs", [StringComparison]::OrdinalIgnoreCase) })
+    $records = foreach ($entry in $entries) {
+        $reader = New-Object System.IO.StreamReader($entry.Open())
+        try { $loc = ($reader.ReadToEnd() -split "`n").Count }
+        finally { $reader.Dispose() }
+
+        # 依存パッケージ・SDK 由来のソースは製品コードではないため分けて数える。
+        $isExternal = $entry.FullName -match '\.nuget/packages/' -or
+        $entry.FullName -match 'hostedtoolcache/' -or
+        $entry.FullName -match 'Program Files/'
+        $isGenerated = $entry.FullName -match '/obj/' -or $entry.FullName -match '\.g\.i?\.cs$'
+
+        [pscustomobject]@{
+            Path     = $entry.FullName
+            Loc      = $loc
+            Category = if ($isExternal) { "external" } elseif ($isGenerated) { "generated" } else { "repo" }
+        }
+    }
 }
 finally {
     $zip.Dispose()
 }
 
-# obj 配下と *.g.cs / *.g.i.cs はビルド生成物。手書きソースの抽出漏れを見るため分けて数える。
-$generated = @($csFiles | Where-Object { $_ -match '/obj/' -or $_ -match '\.g\.cs$' -or $_ -match '\.g\.i\.cs$' })
-$handwritten = @($csFiles | Where-Object { $generated -notcontains $_ })
+$records = @($records | Sort-Object Path)
+$repo = @($records | Where-Object Category -EQ "repo")
+$generated = @($records | Where-Object Category -EQ "generated")
+$external = @($records | Where-Object Category -EQ "external")
+
+function Measure-Loc { param($Set) if ($Set.Count -eq 0) { 0 } else { ($Set | Measure-Object -Property Loc -Sum).Sum } }
 
 $lines.Add("### 抽出された C# ソース")
 $lines.Add("")
-$lines.Add("| 区分 | 件数 |")
-$lines.Add("|---|---:|")
-$lines.Add(("| 合計 .cs | {0} |" -f $csFiles.Count))
-$lines.Add(("| 手書き | {0} |" -f $handwritten.Count))
-$lines.Add(("| 生成コード（obj / *.g.cs） | {0} |" -f $generated.Count))
+$lines.Add("| 区分 | ファイル数 | LOC |")
+$lines.Add("|---|---:|---:|")
+$lines.Add(("| リポジトリ内の手書きソース | {0} | {1} |" -f $repo.Count, (Measure-Loc $repo)))
+$lines.Add(("| ビルド生成コード（obj / *.g.cs） | {0} | {1} |" -f $generated.Count, (Measure-Loc $generated)))
+$lines.Add(("| 依存パッケージ / SDK 由来 | {0} | {1} |" -f $external.Count, (Measure-Loc $external)))
+$lines.Add(("| **合計** | **{0}** | **{1}** |" -f $records.Count, (Measure-Loc $records)))
 $lines.Add("")
 
 $listHash = [System.BitConverter]::ToString(
     [System.Security.Cryptography.SHA256]::HashData(
-        [System.Text.Encoding]::UTF8.GetBytes(($handwritten -join "`n")))).Replace("-", "").ToLowerInvariant()
-$lines.Add("手書きソース一覧の SHA256: ``$listHash``")
+        [System.Text.Encoding]::UTF8.GetBytes((($repo | ForEach-Object { $_.Path }) -join "`n")))).Replace("-", "").ToLowerInvariant()
+$lines.Add("リポジトリ内ソース一覧の SHA256: ``$listHash``")
 $lines.Add("")
 
-$lines.Add("<details><summary>手書き C# ソース一覧</summary>")
+$lines.Add("<details><summary>リポジトリ内の手書き C# ソース一覧</summary>")
 $lines.Add("")
 $lines.Add('```')
-$handwritten | ForEach-Object { $lines.Add($_) }
+$repo | ForEach-Object { $lines.Add(("{0}`t{1}" -f $_.Loc, $_.Path)) }
 $lines.Add('```')
 $lines.Add("")
 $lines.Add("</details>")
