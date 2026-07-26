@@ -139,6 +139,12 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
 
+      # TEMP(#220): build-mode 比較のための計測。比較確定後に削除する。
+      - name: Report CodeQL extraction
+        if: always()
+        shell: pwsh
+        run: ./scripts/report-codeql-extraction.ps1 -Language csharp
+
   # #220: 壁時計の変化を継続的に追えるよう、job / step の所要時間を job summary へ残す。
   timing-report:
     needs: [build-and-test, lint, security-scan]
