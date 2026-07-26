@@ -124,17 +124,7 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: csharp
-
-      - name: Restore for CodeQL
-        run: dotnet restore ${{ env.SOLUTION_PATH }}
-
-      - name: Prepare WinRT generator output folders
-        run: |
-          $base = Join-Path "winui3/SquirrelNotifier.WinUI3" "obj/x64/Release/net10.0-windows10.0.26100.0/generated/WinRT.SourceGenerator/Generator.WinRTAotSourceGenerator"
-          New-Item -ItemType Directory -Force -Path $base | Out-Null
-
-      - name: Build for CodeQL
-        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore /p:Platform=x64 /p:IncludeWindowsSdkBuildTools=false
+          build-mode: none
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
