@@ -336,9 +336,9 @@
                     Orientation="Horizontal"
                     Spacing="8"
                     VerticalAlignment="Center">
-            <Button x:Name="StartButton" Content="Start" Click="OnStartClick"/>
-            <Button x:Name="StopButton" Content="Stop" Click="OnStopClick"/>
-            <Button x:Name="RetryButton" Content="Retry" Click="OnRetryClick"/>
+            <Button x:Name="StartButton" Content="購読を開始" Click="OnStartClick"/>
+            <Button x:Name="StopButton" Content="購読を停止" Click="OnStopClick"/>
+            <Button x:Name="RetryButton" Content="再試行" Click="OnRetryClick"/>
             <Button Content="Open log folder" Click="OnOpenLogFolder"/>
             <Button Content="Minimize to tray" Click="OnExit"/>
         </StackPanel>
