@@ -64,17 +64,94 @@ critical path は `security-scan` で、`Install Windows SDK` と `Setup .NET` �
   Roslyn analyzer、StyleCop、Roslynator、SecurityCodeScan、CodeQL、MSI MajorUpgrade 検証をすべて実行している
 - retry や `continue-on-error` を追加していない
 
+## 変更後の実測（2026-07-26）
+
+HEAD `43195c32` に対する `pull_request` run `30199924023` の 5 attempt。
+
+| Attempt | 壁時計 | 備考 |
+|---|---:|---|
+| 1 | 392 秒 | cold cache（当該キーの初回 run） |
+| 2 | 342 秒 | warm cache |
+| 3 | 378 秒 | warm cache |
+| 4 | 368 秒 | warm cache |
+| 5 | 341 秒 | warm cache |
+| **中央値** | **368 秒** | baseline 518 秒に対し **29.0% 短縮** |
+
+warm cache のみ 4 回の中央値は 355 秒（31.5% 短縮）。cache キーは `global.json` /
+`nuget.config` / `Directory.Packages.props` / project file の hash で決まるため、
+cold cache になるのは依存更新 PR と version bump に限られる。
+
+critical path は `security-scan`（warm 331〜372 秒）で、その内訳は Setup .NET 64〜77 秒、
+CodeQL init 62〜78 秒、CodeQL build 96〜109 秒、CodeQL analyze 75〜97 秒。CodeQL 関連が
+約 250 秒を占め、ランナー変動が ±20% あるため、#220 の目標である 30% 短縮
+（363 秒以下）には届いていない。**残り約 1% の短縮は #220 で継続する。**
+
+主要 step の変化（cold → warm）。
+
+| Step | 変更前 | cold | warm |
+|---|---:|---:|---:|
+| `Install Windows SDK` | 110 秒 | 削除 | 削除 |
+| `Restore for CodeQL` | 60 秒 | 71 秒 | 4〜8 秒 |
+| `Install dependencies` | 57 秒 | 58 秒 | 4〜13 秒 |
+| `Run dotnet format` | 108 秒 | 103 秒 | 39〜46 秒 |
+| `Run tests with coverage` | 111 秒 | 41 秒 | 37 秒 |
+
+## 検討したが採用しなかった施策
+
+### CodeQL の `build-mode: none`
+
+`Restore for CodeQL` / `Build for CodeQL` / WinRT generator 回避ステップを不要にし、
+overlay database も有効化できるため候補に挙げたが、**不採用**とした。
+
+同一ソースに対する manual build-mode との実測比較は次のとおり。
+
+| 区分 | manual | none |
+|---|---:|---:|
+| リポジトリ内の手書き C# ソース | 144 files / 21,687 LOC | 144 files / 21,687 LOC |
+| ビルド生成コード（XAML codegen、source generator 出力） | 31 files / 8,204 LOC | 0 |
+| 依存パッケージ / SDK 由来 | 3 files / 77 LOC | 0 |
+| CodeQL `rules_count` | 52 | 52 |
+| CodeQL `results_count` | 0 | 0 |
+| extractor 診断 | 0 件 | 0 件 |
+| `security-scan` 壁時計 | 331〜372 秒 | 325 秒 |
+
+不採用の理由。
+
+1. XAML codegen と source generator が生成する 8,204 LOC、および依存パッケージ由来の
+   ソースが解析対象から確実に欠落し、CodeQL の解析完全性が下がる。
+2. 手書きソースの抽出範囲と LOC は完全に一致したが、dataflow の同等性は実証できない。
+   両モードとも検出 0 件のため差が現れず、canary で単一 rule の発火を確認しても、
+   生成コード境界を含む実コードの dataflow 同等性の証明にはならない。
+3. CodeQL bundle 同梱のオプション説明自体が buildless 抽出について
+   "will generally yield less accurate analysis results, and should only be used in cases
+   where it is not possible to build the code" と明記している。
+4. 削減幅は想定より小さい。`Build for CodeQL`（約 107 秒）が消える一方で
+   `Perform CodeQL Analysis` が 75〜97 秒から 145 秒へ増え、正味の短縮は約 40〜50 秒に留まる。
+
+品質ゲートの完全性を優先し、`build-mode` は manual のまま維持する。
+
+### PR CI から CodeQL を外す
+
+`push` / schedule のみで実行すれば critical path から約 250 秒を除去できるが、
+#220 の制約「CodeQL を省略しない」に反するため検討対象外とした。
+
 ## Phase 1 E2E の時間予算
 
 #184 Phase 1 の headless E2E を required check にする際は、次を超えないこと。
 
-| 項目 | 予算 | 根拠 |
+| 項目 | 予算 | 現状 |
 |---|---:|---|
-| 既存 3 job の critical path | 360 秒 | baseline 中央値 518 秒の 30% 短縮（#220 の目標） |
-| Phase 1 E2E job 単体 | 330 秒 | 既存 critical path と並列に置いても全体を押し上げない上限 |
-| E2E 追加後の PR CI 全体の壁時計 | 420 秒 | baseline 518 秒を下回る |
+| 既存 3 job の critical path | 360 秒 | 368 秒（未達。#220 で継続） |
+| Phase 1 E2E job 単体 | 330 秒 | 未実装 |
+| E2E 追加後の PR CI 全体の壁時計 | 420 秒 | 未実装 |
+
+予算の根拠は baseline 中央値 518 秒の 30% 短縮（#220 の目標）で、E2E job を既存 job と
+並列に置いても全体を押し上げないことを条件としている。
 
 運用規約。
+
+- Phase 1 を required check へ昇格させる前に、既存 3 job の critical path が 360 秒以内へ
+  収まっていること。本書の作成時点では 368 秒で未達のため、#220 の残作業が先行する。
 
 - E2E job は `needs` で既存 job の後段へ直列化しない。publish payload や MSI が必要な場合は
   E2E job 内で生成するか、artifact 経由で受け取ったうえで全体予算を実測で確認する。
