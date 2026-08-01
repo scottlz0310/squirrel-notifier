@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-01
+
 ### Added
 - 購読開始時に subscriber が返す `InitialText` を処理し、アプリ停止中や別経路から queue に登録された既存のレビュー候補を新しい notification が届く前に通知できるようにした（#210、epic #185）。`FinalText` と同じ parse・重複排除・通知・キャッシュ保存経路を使うため、両方に含まれる同一候補やキャッシュ復元済みの候補は再通知しない。`InitialText` が空または不正 JSON の場合は購読を失敗させず、正常な待機満了後も再購読を継続する
 - 購読停止中の手動レビュー登録を「購読開始 → `Running` 確認 → enqueue」の順序へ変更した（#209、epic #185）。`Stopped` / `Error` では enqueue 前に「購読を開始して登録／キャンセル」を確認し、開始失敗・タイムアウト・キャンセル時は queue を変更しない。順序制御は `ReviewRegistrationService` に集約し、確認待ちを含む一連の操作を直列化して多重クリックによる重複 enqueue を防止する。認証要求は既存の `AuthRequiredInfoBar` から mcp-gateway のログイン導線へ接続し、成功ダイアログには画面を閉じても登録済みであることを明示する
@@ -218,7 +220,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.4.0...v0.5.0
