@@ -18,7 +18,7 @@
 
     <!-- Code Analysis -->
     <PackageVersion Include="StyleCop.Analyzers" Version="1.2.0-beta.556" />
-    <PackageVersion Include="Roslynator.Analyzers" Version="4.16.0" />
+    <PackageVersion Include="Roslynator.Analyzers" Version="4.16.1" />
     <PackageVersion Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.400" />
     <PackageVersion Include="SecurityCodeScan.VS2019" Version="5.6.7" />
     <!-- WiX 7 Extensions -->
