@@ -246,6 +246,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
 
     // mcp-resource-subscriber の call モードの exit code は成否・エラー種別を区別する:
     // 0 = 成功, 1 = tool エラー（allowlist 外を含む）, 2 = 認証エラー, 3 = 通信/使用方法エラー。
+    // exit 3 の内訳は ErrorCode でしか区別できないため、BuildCommunicationErrorMessage で切り分ける。
     private static EnqueueReviewResult BuildResult(int exitCode, string stdout, string stderr)
     {
         CallToolResult? result = null;
@@ -289,9 +290,27 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
             {
                 Success = false,
                 ExitCode = exitCode,
-                ErrorMessage = $"通信エラーが発生しました。Gateway URL や mcp-resource-subscriber の設定を確認してください: {detail}",
+                ErrorMessage = BuildCommunicationErrorMessage(result?.ErrorCode, detail),
             },
         };
+    }
+
+    // exit 3 は通信エラーだけの袋ではない。mcp-resource-subscriber v0.6.0 は
+    // tools/call 自体の拒否（不明な tool 名・不正な引数）と protocol negotiation 失敗も
+    // exit 3 で返すため、ErrorCode で切り分けないと原因の分からない案内になる。
+    private static string BuildCommunicationErrorMessage(string? errorCode, string detail)
+    {
+        if (string.Equals(errorCode, "TOOL_REQUEST_REJECTED", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"レビュー登録の要求がサーバーに拒否されました（ツール名または引数が不正です）。thread-owl のバージョンを確認してください: {detail}";
+        }
+
+        if (string.Equals(errorCode, "PROTOCOL_UNSUPPORTED", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"接続先が MCP プロトコル 2026-07-28 に未対応です。mcp-gateway と接続先サーバーを 2026-07-28 対応版へ更新してください: {detail}";
+        }
+
+        return $"通信エラーが発生しました。Gateway URL や mcp-resource-subscriber の設定を確認してください: {detail}";
     }
 
     // AUTH_FAILED（明示指定した MCP_PROBE_AUTH_TOKEN が無効な場合など）は --login のトークン

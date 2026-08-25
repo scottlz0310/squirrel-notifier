@@ -14,8 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server/discover` の probe timeout を無効化し、接続全体の上限を `InitializationTimeout`（既定 60 秒）に一本化した（#238）。SDK 既定の 5 秒は legacy へ素早く降格するための値であり、降格先を持たない本 probe では「接続が遅いだけ」を「サーバーが discovery 非対応」と誤断させるだけになる。Gateway URL のホスト名が IPv6 に解決される環境（`localhost` など）では接続確立に 20 秒以上かかるため、既定値のままではネゴシエーションが必ず失敗していた
 - MCP 接続に失敗したときのメッセージに、プロトコルネゴシエーション失敗の分類を追加した（#238）。ネゴシエーション失敗は「接続先が未対応」「認証が通っていない」「エンドポイントに到達できない」を SDK 側で区別できないため、断定せず確認すべき箇所（Gateway URL・`MCP_PROBE_AUTH_TOKEN`・各サーバーのバージョン）を提示する
 
+### Removed
+- `SubscriptionResult` から `subscribed` / `unsubscribed` を削除した。MCP `2026-07-28` には subscribe / unsubscribe RPC が存在せず、subscriber v0.6.0 は両フィールドを出力しない（購読の成立は `listenAcknowledged`、解除は stream を閉じることで表現される）。いずれもロジックからは参照されていなかった
+
 ### Fixed
 - MCP のテスト境界を再設計した（#238）。`initialize` 前提の手書き HTTP handler が MCP のプロトコルライフサイクルを複製しており、SDK 更新のたびに乖離していた。公式 SDK のサーバー実装をインメモリで動かす fixture へ置き換え、テストを「resource の振る舞い」「認証ヘッダー」「プロトコル互換性」「メッセージ分類」に分割した。未知のメソッドへ `204 No Content` を返す曖昧な fixture の挙動は廃止した
+- mcp-resource-subscriber v0.6.0（MCP `2026-07-28`）で新設された ErrorCode を診断できるようにした。`SUBSCRIPTION_DISCONNECTED` / `SUBSCRIPTION_CLOSED` / `SUBSCRIPTION_NOT_HONORED` / `PROTOCOL_UNSUPPORTED` はホワイトリスト外だったため、原因の分からない「予期しないエラー」として表示されていた。これらの経路は ErrorCode が stdout の JSON にのみ乗り stderr が空になるため、legacy 文字列マッチングでは何も判定できない
+- レビュー登録が exit code 3 で失敗したとき、原因を切り分けて表示するようにした。subscriber v0.6.0 は tools/call 自体の拒否（`TOOL_REQUEST_REJECTED`、不明なツール名・不正な引数）と protocol negotiation 失敗（`PROTOCOL_UNSUPPORTED`）も exit 3 で返すが、いずれも「通信エラーが発生しました。Gateway URL や mcp-resource-subscriber の設定を確認してください」と案内していた
 
 ## [0.6.0] - 2026-08-01
 

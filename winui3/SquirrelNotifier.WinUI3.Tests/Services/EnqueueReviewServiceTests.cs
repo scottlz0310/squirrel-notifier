@@ -248,6 +248,36 @@ public class EnqueueReviewServiceTests : IDisposable
         result.ErrorMessage.Should().Contain("通信エラー");
     }
 
+    // mcp-resource-subscriber v0.6.0 は tools/call 自体の拒否と protocol negotiation 失敗も
+    // exit 3 で返す。ErrorCode で切り分けないと、いずれも「通信エラー」と案内してしまう。
+    [Theory]
+    [InlineData("TOOL_REQUEST_REJECTED", "拒否されました")]
+    [InlineData("PROTOCOL_UNSUPPORTED", "2026-07-28")]
+    public async Task EnqueueAsync_ShouldExplainCause_WhenExitCodeIsThreeWithKnownErrorCode(
+        string errorCode, string expectedFragment)
+    {
+        // Arrange
+        var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
+        string stdout = "{\"serverUrl\":\"http://localhost:8080/mcp\",\"tool\":\"enqueue_review\"," +
+            "\"isError\":false,\"errorCode\":\"" + errorCode + "\",\"content\":[]}";
+        Mock<IProcessInstance> callProcess = CreateMockProcess(3, stdout, string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateVersionOkMockProcess();
+
+        Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
+
+        var service = new EnqueueReviewService(_settingsService, _loggingService, mockRunner.Object);
+
+        // Act
+        EnqueueReviewResult result = await service.EnqueueAsync(reference, "opened", CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ExitCode.Should().Be(3);
+        result.IsAuthenticationRequired.Should().BeFalse();
+        result.ErrorMessage.Should().Contain(expectedFragment);
+        result.ErrorMessage.Should().NotContain("通信エラー");
+    }
+
     [Fact]
     public async Task EnqueueAsync_ShouldFailFast_WhenSubscriberVersionIsTooOld()
     {

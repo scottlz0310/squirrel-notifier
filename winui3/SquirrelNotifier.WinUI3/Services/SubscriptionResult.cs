@@ -6,6 +6,14 @@ using System.Text.Json.Serialization;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
+/// <summary>
+/// mcp-resource-subscriber の購読モード <c>--json</c> 出力のスキーマ.
+/// </summary>
+/// <remarks>
+/// v0.6.0（MCP 2026-07-28）で <c>subscribed</c> / <c>unsubscribed</c> は廃止された。
+/// 新 protocol には subscribe / unsubscribe RPC が存在せず、購読の成立は
+/// <c>listenAcknowledged</c>、解除は stream を閉じることで表現される.
+/// </remarks>
 internal sealed class SubscriptionResult
 {
     [JsonPropertyName("route")]
@@ -17,17 +25,11 @@ internal sealed class SubscriptionResult
     [JsonPropertyName("resourceUri")]
     public string? ResourceUri { get; set; }
 
-    [JsonPropertyName("subscribed")]
-    public bool? Subscribed { get; set; }
-
     [JsonPropertyName("notificationReceived")]
     public bool? NotificationReceived { get; set; }
 
     [JsonPropertyName("notificationCount")]
     public int? NotificationCount { get; set; }
-
-    [JsonPropertyName("unsubscribed")]
-    public bool? Unsubscribed { get; set; }
 
     [JsonPropertyName("errorCode")]
     public string? ErrorCode { get; set; }
