@@ -13,7 +13,7 @@
       正式版が出たら安定版へ戻すこと（#199）。
     -->
     <PackageVersion Include="H.NotifyIcon.WinUI" Version="2.5.0-dev.2" />
-    <PackageVersion Include="ModelContextProtocol.Core" Version="1.4.1" />
+    <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
     <PackageVersion Include="System.Drawing.Common" Version="10.0.11" />
 
     <!-- Code Analysis -->
@@ -33,6 +33,10 @@
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="coverlet.msbuild" Version="10.0.1" />
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+    <!-- テスト境界の primary fixture は公式 SDK のサーバー実装をそのまま動かす（#238）。
+         protocol lifecycle を手書きで複製しないため、ModelContextProtocol.Core と同一バージョンを保つこと。 -->
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.11" />
   </ItemGroup>
 </Project>
 
