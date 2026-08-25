@@ -37,6 +37,17 @@
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
+  <!--
+    MCP のテスト境界（#238）。protocol lifecycle を手書きで複製せず、公式 SDK のサーバー実装を
+    インメモリの TestServer で動かして primary path を検証する。参照はテストプロジェクト限定で、
+    出荷される WinUI3 アプリの依存関係には影響しない。
+  -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
