@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- mcp-resource-subscriber v0.6.0（MCP `2026-07-28`）で新設された ErrorCode を診断できるようにした。`SUBSCRIPTION_DISCONNECTED` / `SUBSCRIPTION_CLOSED` / `SUBSCRIPTION_NOT_HONORED` / `PROTOCOL_UNSUPPORTED` はホワイトリスト外だったため、原因の分からない「予期しないエラー」として表示されていた。これらの経路は ErrorCode が stdout の JSON にのみ乗り stderr が空になるため、legacy 文字列マッチングでは何も判定できない
+- レビュー登録が exit code 3 で失敗したとき、原因を切り分けて表示するようにした。subscriber v0.6.0 は tools/call 自体の拒否（`TOOL_REQUEST_REJECTED`、不明なツール名・不正な引数）と protocol negotiation 失敗（`PROTOCOL_UNSUPPORTED`）も exit 3 で返すが、いずれも「通信エラーが発生しました。Gateway URL や mcp-resource-subscriber の設定を確認してください」と案内していた
+
+### Removed
+- `SubscriptionResult` から `subscribed` / `unsubscribed` を削除した。MCP `2026-07-28` には subscribe / unsubscribe RPC が存在せず、subscriber v0.6.0 は両フィールドを出力しない（購読の成立は `listenAcknowledged`、解除は stream を閉じることで表現される）。いずれもロジックからは参照されていなかった
+
 ## [0.6.0] - 2026-08-01
 
 購読の開始・レビュー登録まわりを中心に、運用で詰まっていた箇所をまとめて解消したリリースです。アプリ内から mcp-gateway へログインできるようになり、購読が止まっている状態でもレビュー登録の導線が破綻しなくなりました。あわせてトレイまわりのクラッシュ・テーマ追従・エージェント起動時の作業ディレクトリなど、実機で見つかった不具合を修正しています。

@@ -32,6 +32,17 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         "AUTH_REFRESH_FAILED",
     };
 
+    // mcp-resource-subscriber v0.6.0（MCP 2026-07-28 移行）で新設された ErrorCode。
+    // いずれも原因が確定しているため、汎用の「予期しないエラー」ではなく次の行動が
+    // 分かるメッセージを返す。ホワイトリストより先に判定する。
+    private static readonly Dictionary<string, string> _subscriptionErrorCodeMessages = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["SUBSCRIPTION_DISCONNECTED"] = "購読ストリームがサーバー側から切断されました。mcp-gateway と thread-owl が稼働しているか確認してください。",
+        ["SUBSCRIPTION_CLOSED"] = "購読ストリームが閉じられました。",
+        ["SUBSCRIPTION_NOT_HONORED"] = "サーバーが Resource URI の購読を受け付けませんでした。Resource URI の設定が正しいか確認してください。",
+        ["PROTOCOL_UNSUPPORTED"] = "接続先が MCP プロトコル 2026-07-28 に未対応です。mcp-gateway と接続先サーバーを 2026-07-28 対応版へ更新してください。",
+    };
+
     private readonly SettingsService _settingsService;
     private readonly INotificationService _notificationService;
     private readonly LoggingService _loggingService;
@@ -1003,6 +1014,11 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 structuredErrorCode.Equals("REAUTH_REQUIRED", StringComparison.OrdinalIgnoreCase))
             {
                 return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
+            }
+
+            if (_subscriptionErrorCodeMessages.TryGetValue(structuredErrorCode, out string? specificMessage))
+            {
+                return (specificMessage, "[GENERAL_ERROR]");
             }
 
             // ホワイトリスト方式: 意味が確定している非認証 ErrorCode のみ legacy

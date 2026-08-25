@@ -130,7 +130,6 @@ public class McpSubscriptionServiceTests : IDisposable
         {
             Route = "timeout",
             ErrorCode = "NOTIFICATION_TIMEOUT",
-            Subscribed = true,
             NotificationReceived = false,
         });
 
@@ -1066,7 +1065,6 @@ public class McpSubscriptionServiceTests : IDisposable
         {
             Route = "timeout",
             ErrorCode = "NOTIFICATION_TIMEOUT",
-            Subscribed = true,
             NotificationReceived = false,
             InitialText = initialPayload,
         });
@@ -1119,7 +1117,6 @@ public class McpSubscriptionServiceTests : IDisposable
         {
             Route = "timeout",
             ErrorCode = "NOTIFICATION_TIMEOUT",
-            Subscribed = true,
             NotificationReceived = false,
             InitialText = initialText,
         });
@@ -1215,7 +1212,6 @@ public class McpSubscriptionServiceTests : IDisposable
         string resultJson = JsonSerializer.Serialize(new SubscriptionResult
         {
             Route = "pre-completion",
-            Subscribed = true,
             NotificationReceived = false,
             InitialText = initialPayload,
             FinalText = finalPayload,
@@ -1276,7 +1272,6 @@ public class McpSubscriptionServiceTests : IDisposable
         {
             Route = "timeout",
             ErrorCode = "NOTIFICATION_TIMEOUT",
-            Subscribed = true,
             NotificationReceived = false,
             InitialText = @"{""eventId"":""evt_cached"",""repository"":""owner/repo"",""prNumber"":1,""prUrl"":""https://github.com/owner/repo/pull/1"",""reason"":""review_requested"",""source"":""thread-owl"",""message"":""Review requested""}",
         });
@@ -1774,6 +1769,30 @@ public class McpSubscriptionServiceTests : IDisposable
         // Assert
         friendlyResult.Should().Be(expectedFriendly);
         tagResult.Should().Be(expectedTag);
+    }
+
+    // mcp-resource-subscriber v0.6.0（MCP 2026-07-28）で新設された ErrorCode。
+    // ホワイトリスト外のまま legacy 文字列マッチングへ落とすと、原因が分からない
+    // 「予期しないエラー」になる（stderr が空のケースが多いため）。
+    [Theory]
+    [InlineData("SUBSCRIPTION_DISCONNECTED", "切断されました")]
+    [InlineData("SUBSCRIPTION_CLOSED", "閉じられました")]
+    [InlineData("SUBSCRIPTION_NOT_HONORED", "受け付けませんでした")]
+    [InlineData("PROTOCOL_UNSUPPORTED", "2026-07-28")]
+    public void ErrorMessageMapping_WithSubscriber060ErrorCode_ShouldExplainCause(
+        string structuredErrorCode, string expectedFragment)
+    {
+        // Arrange: これらの経路は stdout の JSON にのみ ErrorCode が乗り、stderr は空になる。
+        string rawError = $"Subscriber process exited with non-zero code 1. ErrorCode: {structuredErrorCode}. Stderr: ";
+
+        // Act
+        var (friendlyResult, tagResult) = McpSubscriptionService.GetErrorInfo(
+            rawError, structuredErrorCode, diagnosticText: string.Empty);
+
+        // Assert
+        friendlyResult.Should().Contain(expectedFragment);
+        friendlyResult.Should().NotContain("予期しないエラー");
+        tagResult.Should().NotBe("[AUTH_REQUIRED]");
     }
 
     [Theory]
