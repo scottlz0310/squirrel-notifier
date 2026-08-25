@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `ModelContextProtocol.Core` を 1.4.1 から 2.2.0 へ更新し、MCP プロトコル `2026-07-28` へ移行した（#238、横断 tracker: thread-owl#165）。`McpResourceProbe` は `McpClientOptions.ProtocolVersion` を `2026-07-28` に固定する。未指定にすると SDK は `server/discover` に応答しないサーバーへ `initialize` handshake で自動降格し、旧プロトコルでの接続を成功として返すため、降格したこと自体を呼び出し側から観測できない。基盤全体で legacy 経路を残さない方針（thread-owl v0.4.0 は legacy を reject 済み）に合わせ、未移行サーバーへの接続は降格せず失敗させる。この移行により、resource の取得は session を持たない stateless な往復になり、`Mcp-Session-Id` を一切送出しなくなった
+- `server/discover` の probe timeout を無効化し、接続全体の上限を `InitializationTimeout`（既定 60 秒）に一本化した（#238）。SDK 既定の 5 秒は legacy へ素早く降格するための値であり、降格先を持たない本 probe では「接続が遅いだけ」を「サーバーが discovery 非対応」と誤断させるだけになる。Gateway URL のホスト名が IPv6 に解決される環境（`localhost` など）では接続確立に 20 秒以上かかるため、既定値のままではネゴシエーションが必ず失敗していた
+- MCP 接続に失敗したときのメッセージに、プロトコルネゴシエーション失敗の分類を追加した（#238）。ネゴシエーション失敗は「接続先が未対応」「認証が通っていない」「エンドポイントに到達できない」を SDK 側で区別できないため、断定せず確認すべき箇所（Gateway URL・`MCP_PROBE_AUTH_TOKEN`・各サーバーのバージョン）を提示する
+
+### Fixed
+- MCP のテスト境界を再設計した（#238）。`initialize` 前提の手書き HTTP handler が MCP のプロトコルライフサイクルを複製しており、SDK 更新のたびに乖離していた。公式 SDK のサーバー実装をインメモリで動かす fixture へ置き換え、テストを「resource の振る舞い」「認証ヘッダー」「プロトコル互換性」「メッセージ分類」に分割した。未知のメソッドへ `204 No Content` を返す曖昧な fixture の挙動は廃止した
+
 ## [0.6.0] - 2026-08-01
 
 購読の開始・レビュー登録まわりを中心に、運用で詰まっていた箇所をまとめて解消したリリースです。アプリ内から mcp-gateway へログインできるようになり、購読が止まっている状態でもレビュー登録の導線が破綻しなくなりました。あわせてトレイまわりのクラッシュ・テーマ追従・エージェント起動時の作業ディレクトリなど、実機で見つかった不具合を修正しています。
