@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-26
+
+MCP プロトコル `2026-07-28` へ移行したリリースです。基盤側のサーバー（thread-owl・review-raven）は既に旧プロトコルの接続を拒否しているため、**本リリースへの更新が必要です**。v0.6.0 のままでは購読・レビュー登録とも接続できません。
+
+**主な変更**
+
+- MCP プロトコル `2026-07-28` へ移行しました（#238、横断 tracker: thread-owl#165）。購読は session を持たない stateless な往復になり、`Mcp-Session-Id` を送出しなくなりました
+- 未移行のサーバーへ接続したとき、旧プロトコルへ黙って降格せず明示的に失敗するようになりました
+- `server/discover` の probe timeout を廃し、接続全体の上限を `InitializationTimeout`（既定 60 秒）に一本化しました。`localhost` が IPv6 に解決される環境で接続確立に 20 秒以上かかり、ネゴシエーションが必ず失敗していた問題が解消します
+- mcp-resource-subscriber v0.6.0 で新設された ErrorCode を診断できるようになり、「予期しないエラー」としか表示されなかった失敗の原因が分かるようになりました
+
+**必要な構成**
+
+本リリースは以下のバージョン以降と組み合わせて動作します。いずれか一つでも古いと接続に失敗します。
+
+| コンポーネント | 必要バージョン |
+|---|---|
+| mcp-resource-subscriber | v0.6.0 以降 |
+| thread-owl | v0.4.0 以降 |
+| review-raven | v0.2.0 以降 |
+| mcp-gateway | v0.10.0 以降（透過契約がテストで保証された版） |
+
+**既知の問題**
+
+v0.6.0 から引き続き未修正です。次回以降で対応します。
+
+| Issue | 内容 | 回避策 |
+|---|---|---|
+| [#229](https://github.com/scottlz0310/squirrel-notifier/issues/229) | 起動時に稀（27 回中 1 回）に異常終了することがある | トレイアイコンが出ていない場合は再起動してください |
+| [#233](https://github.com/scottlz0310/squirrel-notifier/issues/233) | ランチャー設定を編集して「カスタム」になると Auto-Pause が無効になる（警告表示なし） | レートリミット保護が必要な場合はプリセットのまま使用してください |
+| [#231](https://github.com/scottlz0310/squirrel-notifier/issues/231) | `cmd` / `bat` 形式のランチャーの出力が文字化けする | 終了コードは正しく表示されます。詳細は `winui3.log` を参照してください |
+| [#230](https://github.com/scottlz0310/squirrel-notifier/issues/230) | キューが空のとき、約 60 秒ごとに誤った警告がログへ出力される | 動作への影響はありません |
+| [#232](https://github.com/scottlz0310/squirrel-notifier/issues/232) | メイン画面の「Recent activity」が最新行へ自動スクロールしない | リスト内を手動でスクロールすると最新行を確認できます |
+
 ### Changed
 - `ModelContextProtocol.Core` を 1.4.1 から 2.2.0 へ更新し、MCP プロトコル `2026-07-28` へ移行した（#238、横断 tracker: thread-owl#165）。`McpResourceProbe` は `McpClientOptions.ProtocolVersion` を `2026-07-28` に固定する。未指定にすると SDK は `server/discover` に応答しないサーバーへ `initialize` handshake で自動降格し、旧プロトコルでの接続を成功として返すため、降格したこと自体を呼び出し側から観測できない。基盤全体で legacy 経路を残さない方針（thread-owl v0.4.0 は legacy を reject 済み）に合わせ、未移行サーバーへの接続は降格せず失敗させる。この移行により、resource の取得は session を持たない stateless な往復になり、`Mcp-Session-Id` を一切送出しなくなった
 - `server/discover` の probe timeout を無効化し、接続全体の上限を `InitializationTimeout`（既定 60 秒）に一本化した（#238）。SDK 既定の 5 秒は legacy へ素早く降格するための値であり、降格先を持たない本 probe では「接続が遅いだけ」を「サーバーが discovery 非対応」と誤断させるだけになる。Gateway URL のホスト名が IPv6 に解決される環境（`localhost` など）では接続確立に 20 秒以上かかるため、既定値のままではネゴシエーションが必ず失敗していた
@@ -255,7 +289,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.0...v0.5.1
