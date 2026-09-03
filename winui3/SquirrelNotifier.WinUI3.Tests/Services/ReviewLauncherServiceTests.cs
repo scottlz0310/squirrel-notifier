@@ -779,4 +779,52 @@ public class ReviewLauncherServiceTests : IDisposable
 
         (await firstRun).Success.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldDecodeUtf8BomOutputCorrectly_WithoutLatin1Corruption()
+    {
+        // 子プロセス出力が UTF-8 BOM で始まる場合、StreamReader(detectEncodingFromByteOrderMarks: true) は
+        // 自動的に UTF-8 へ切り替わる。Latin-1 範囲の非 ASCII 文字（café, señor 等）も含めて
+        // 壊れずに復元されることを検証する（#252 レビュー指摘）
+        const string line1 = "café au lait";
+        const string line2 = "grüße";
+        const string line3 = "señor";
+        const string line4 = "日本語テスト";
+
+        var stdoutMs = new MemoryStream();
+        using (var writer = new StreamWriter(stdoutMs, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), bufferSize: 1024, leaveOpen: true))
+        {
+            writer.WriteLine(line1);
+            writer.WriteLine(line2);
+            writer.WriteLine(line3);
+            writer.WriteLine(line4);
+        }
+
+        stdoutMs.Position = 0;
+        var reader = new StreamReader(stdoutMs, Encoding.Latin1, detectEncodingFromByteOrderMarks: true);
+
+        ConfigureSettings(reviewerCmd: "launcher-cmd", reviewerArgs: "--launcher-arg");
+
+        var mockProcess = new Mock<IProcessInstance>();
+        mockProcess.SetupGet(p => p.ExitCode).Returns(0);
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(reader);
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(), Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
+        mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        LauncherResult result = await service.LaunchAsync(
+            CreateReviewEvent("test-bom-encoding"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Stdout.Should().Contain(line1);
+        result.Stdout.Should().Contain(line2);
+        result.Stdout.Should().Contain(line3);
+        result.Stdout.Should().Contain(line4);
+    }
 }

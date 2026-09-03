@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using SquirrelNotifier.WinUI3.Helpers;
@@ -280,8 +281,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         var lines = new List<string>();
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
         {
-            // reader は Latin1 で開かれている。パース前に実際のエンコーディングへ復元する（#231）
-            string line = ProcessOutputDecoder.Decode(rawLine);
+            // reader は Latin1 で開かれている。パース前に実際のエンコーディングへ復元する（#231）。
+            // ただし先頭の UTF-8 BOM により StreamReader が UTF-8 へ切り替わった場合は既にデコード済み（#252）
+            bool isLatin1 = reader.CurrentEncoding.CodePage == Encoding.Latin1.CodePage;
+            string line = isLatin1 ? ProcessOutputDecoder.Decode(rawLine) : rawLine;
             lines.Add(line);
 
             if (ProgressEventParser.TryParse(line, out AgentProgressEvent? progress))
@@ -317,8 +320,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         var lines = new List<string>();
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
         {
-            // reader は Latin1 で開かれている。cmd.exe の失敗メッセージはここで復元される（#231）
-            string line = ProcessOutputDecoder.Decode(rawLine);
+            // reader は Latin1 で開かれている。cmd.exe の失敗メッセージはここで復元される（#231）。
+            // ただし先頭の UTF-8 BOM により StreamReader が UTF-8 へ切り替わった場合は既にデコード済み（#252）
+            bool isLatin1 = reader.CurrentEncoding.CodePage == Encoding.Latin1.CodePage;
+            string line = isLatin1 ? ProcessOutputDecoder.Decode(rawLine) : rawLine;
             lines.Add(line);
             session.PublishStderr(line);
         }
