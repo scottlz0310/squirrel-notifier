@@ -289,19 +289,28 @@ internal sealed class SettingsService
     }
 
     /// <summary>
-    /// 指定した launcher スロットに現在選択されているプリセットの rateLimitAgentId を解決する（#149）。
-    /// 「カスタム」設定、またはレートリミット取得手段が無いプリセット（copilot 等）の場合は
-    /// <see langword="null"/> を返す（Auto-Pause の gate 対象外として扱う #147）.
+    /// 指定した launcher スロットの rateLimitAgentId を解決する（#149）。
+    /// レートリミット取得手段が無いプリセット（copilot 等）、および command がどのプリセットとも
+    /// 一致しない場合は <see langword="null"/> を返す（Auto-Pause の gate 対象外として扱う #147）.
     /// </summary>
+    /// <remarks>
+    /// プリセット ID が <c>custom</c> でも command が一致すればそのプリセットの rateLimitAgentId を
+    /// 引き継ぐ（#233）。arguments のカスタマイズ（モデル指定・権限フラグの追加等）はごく一般的な運用で、
+    /// 実行されるエージェントは変わらないにもかかわらず、以前は編集した瞬間に Auto-Pause が
+    /// 黙って無効化されていた.
+    /// </remarks>
     /// <param name="role">解決対象の launcher スロット.</param>
     /// <returns>対応する rateLimitAgentId。無い場合は <see langword="null"/>.</returns>
     public string? ResolveLauncherRateLimitAgentId(LauncherRole role)
     {
-        string presetId = role == LauncherRole.Reviewer
-            ? _settings.ReviewerLauncherPresetId
-            : _settings.ReviewedLauncherPresetId;
+        (string presetId, string command) = role == LauncherRole.Reviewer
+            ? (_settings.ReviewerLauncherPresetId, _settings.ReviewerLauncherCommandPath)
+            : (_settings.ReviewedLauncherPresetId, _settings.ReviewedLauncherCommandPath);
 
-        return LauncherAgentCatalog.Find(presetId)?.RateLimitAgentId;
+        LauncherAgentDefinition? definition =
+            LauncherAgentCatalog.Find(presetId) ?? LauncherAgentCatalog.FindByCommand(command);
+
+        return definition?.RateLimitAgentId;
     }
 
     /// <summary>

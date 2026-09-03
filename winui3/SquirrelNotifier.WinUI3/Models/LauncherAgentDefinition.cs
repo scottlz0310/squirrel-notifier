@@ -122,6 +122,21 @@ internal static class LauncherAgentCatalog
     public static LauncherAgentDefinition? Find(string id) => All.FirstOrDefault(d => d.Id == id);
 
     /// <summary>
+    /// command のみでプリセットを解決する。見つからない場合は <see langword="null"/>（#233）.
+    /// </summary>
+    /// <remarks>
+    /// arguments を編集しただけで <see cref="ResolvePresetId"/> は <see cref="CustomPresetId"/> を返すが、
+    /// 実行されるエージェントは変わっていない。レートリミット監視対象の解決のように「どのエージェントが
+    /// 動くか」だけが問題になる用途では、arguments の差分で判定を落とさないためにこちらを使う。
+    /// 逆に progress event 対応度は arguments（<c>--output-format stream-json</c> の有無等）に
+    /// 依存するため、この緩い判定を使ってはならない.
+    /// </remarks>
+    /// <param name="command">現在の command 値.</param>
+    /// <returns>command が一致したプリセット。見つからない場合は <see langword="null"/>.</returns>
+    public static LauncherAgentDefinition? FindByCommand(string command)
+        => All.FirstOrDefault(d => d.Command == command);
+
+    /// <summary>
     /// 現在の command / arguments 値がどのプリセットと一致するかを判定する。
     /// どれとも一致しない場合は <see cref="CustomPresetId"/> を返す.
     /// </summary>

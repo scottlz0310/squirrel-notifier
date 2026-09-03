@@ -127,6 +127,64 @@ public class SettingsServiceTests : IDisposable
         _settingsService.UpdateSettings(cmd, args, url, uris ?? _defaultUris, timeout, reviewerCmd, reviewerArgs, reviewedCmd, reviewedArgs, launcherTimeout, reviewerPresetId, reviewedPresetId);
     }
 
+    [Theory]
+    // プリセットが解決できる場合はそのまま
+    [InlineData("claude", "claude", "claude-code")]
+    [InlineData("codex", "codex", "codex")]
+    [InlineData("agy", "agy", "agy")]
+    // レートリミット取得手段の無いプリセットは対象外のまま
+    [InlineData("copilot", "copilot", null)]
+    // arguments 編集で custom になっても command が一致すれば引き継ぐ（#233）
+    [InlineData("custom", "claude", "claude-code")]
+    [InlineData("custom", "agy", "agy")]
+    [InlineData("custom", "copilot", null)]
+    // command 自体がプリセットと異なる場合は対象外
+    [InlineData("custom", @"C:\tools\claude.cmd", null)]
+    [InlineData("custom", "my-own-agent", null)]
+    public void ResolveLauncherRateLimitAgentId_ShouldFallBackToCommandMatch(
+        string presetId, string command, string? expectedAgentId)
+    {
+        UpdateSettingsDefault(
+            reviewerCmd: command,
+            reviewerArgs: "--whatever",
+            reviewedCmd: command,
+            reviewedArgs: "--whatever",
+            reviewerPresetId: presetId,
+            reviewedPresetId: presetId);
+
+        _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewer).Should().Be(expectedAgentId);
+        _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewed).Should().Be(expectedAgentId);
+    }
+
+    [Fact]
+    public void ResolveLauncherRateLimitAgentId_ShouldResolveEachSlotIndependently()
+    {
+        UpdateSettingsDefault(
+            reviewerCmd: "claude",
+            reviewerArgs: "--model opus",
+            reviewedCmd: "my-own-agent",
+            reviewedArgs: "--whatever",
+            reviewerPresetId: "custom",
+            reviewedPresetId: "custom");
+
+        _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewer).Should().Be("claude-code");
+        _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewed).Should().BeNull();
+    }
+
+    [Fact]
+    public void ResolveLauncherProgressEventSupport_ShouldNotFallBackToCommandMatch()
+    {
+        // progress event 対応度は arguments（--output-format stream-json の有無）に依存するため、
+        // command 一致による救済を行ってはならない（#233）
+        UpdateSettingsDefault(
+            reviewerCmd: "claude",
+            reviewerArgs: "-p \"レビューして\"",
+            reviewerPresetId: "custom");
+
+        _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewer)
+            .Should().Be(ProgressEventSupport.None);
+    }
+
     [Fact]
     public void UpdateSettings_ShouldUpdateSettings()
     {
