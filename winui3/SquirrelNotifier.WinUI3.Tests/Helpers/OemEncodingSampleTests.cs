@@ -16,19 +16,46 @@ public class OemEncodingSampleTests
     }
 
     [Theory]
-    [InlineData(932)]  // ja-JP（開発環境）
-    [InlineData(437)]  // en-US（GitHub Actions windows ランナー）
+    [InlineData(932)]  // ja-JP（開発環境・Shift_JIS）
+    [InlineData(437)]  // en-US（GitHub Actions windows ランナー・米国 OEM）
     [InlineData(850)]  // 西欧 OEM
-    [InlineData(1252)] // ANSI 西欧（OEM ではないが単一バイト系の代表として）
+    [InlineData(1252)] // ANSI 西欧（単一バイト系の代表）
+    [InlineData(866)]  // キリル OEM（#252 レビュー指摘）
+    [InlineData(737)]  // ギリシャ OEM（#252 レビュー指摘）
+    [InlineData(874)]  // タイ OEM（#252 レビュー指摘）
+    [InlineData(950)]  // 繁体字中国語 Big5（#252 レビュー指摘）
+    [InlineData(936)]  // 簡体字中国語 GBK
+    [InlineData(949)]  // 韓国語 OEM
+    [InlineData(864)]  // アラビア語 OEM（動的探索フォールバック）
     public void PickNonUtf8Sample_ShouldFindSample_ForKnownCodePages(int codePage)
     {
         // 実行マシンのロケールに関わらず、CI ランナーのコードページでもサンプルが選べること。
-        // これが崩れると OEM 依存のテストが特定ロケールでしか通らなくなる（#231 のレビュー指摘）
+        // これが崩れると OEM 依存のテストが特定ロケールでしか通らなくなる（#231, #252 のレビュー指摘）
         Encoding encoding = Encoding.GetEncoding(codePage);
 
         string? sample = OemEncodingSample.PickNonUtf8Sample(encoding);
 
         sample.Should().NotBeNull($"コードページ {codePage} で使えるサンプルが必要");
+        encoding.GetString(encoding.GetBytes(sample!)).Should().Be(sample, "OEM として往復すること");
+        OemEncodingSample.IsValidUtf8(encoding.GetBytes(sample!)).Should().BeFalse(
+            "UTF-8 として不正であること（フォールバック経路を通すため）");
+    }
+
+    [Theory]
+    [InlineData(932)]
+    [InlineData(437)]
+    [InlineData(866)]
+    [InlineData(737)]
+    [InlineData(874)]
+    [InlineData(950)]
+    public void FindDynamicNonUtf8Sample_ShouldGenerateValidSample_WithoutPredefinedCandidates(int codePage)
+    {
+        // 定義済み候補リストに頼らず、動的探索のみでも往復可能かつ UTF-8 不正なサンプルを生成できること
+        Encoding encoding = Encoding.GetEncoding(codePage);
+
+        string? sample = OemEncodingSample.FindDynamicNonUtf8Sample(encoding);
+
+        sample.Should().NotBeNull($"コードページ {codePage} で動的にサンプルが生成できること");
         encoding.GetString(encoding.GetBytes(sample!)).Should().Be(sample, "OEM として往復すること");
         OemEncodingSample.IsValidUtf8(encoding.GetBytes(sample!)).Should().BeFalse(
             "UTF-8 として不正であること（フォールバック経路を通すため）");

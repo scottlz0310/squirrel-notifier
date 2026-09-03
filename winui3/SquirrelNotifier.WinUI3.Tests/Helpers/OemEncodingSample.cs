@@ -17,7 +17,19 @@ namespace SquirrelNotifier.WinUI3.Tests.Helpers;
 /// </remarks>
 internal static class OemEncodingSample
 {
-    private static readonly string[] _candidates = ["日本語テスト", "café", "grüße", "señor"];
+    private static readonly string[] _candidates =
+    [
+        "日本語テスト",
+        "café",
+        "grüße",
+        "señor",
+        "тест",
+        "δοκιμή",
+        "ทดสอบ",
+        "測試",
+        "测试",
+        "테스트",
+    ];
 
     /// <summary>
     /// 指定エンコーディングで往復し、かつ UTF-8 として不正になるサンプルを返す.
@@ -34,6 +46,60 @@ internal static class OemEncodingSample
             if (oem.GetString(bytes) == candidate && !IsValidUtf8(bytes))
             {
                 return candidate;
+            }
+        }
+
+        return FindDynamicNonUtf8Sample(oem);
+    }
+
+    /// <summary>
+    /// 対象エンコーディングのバイト空間を動的に探索し、往復可能かつ UTF-8 不正となる文字サンプルを生成する.
+    /// </summary>
+    /// <param name="oem">対象のエンコーディング.</param>
+    /// <returns>条件を満たす文字サンプル。見つからない場合は <see langword="null"/>.</returns>
+    internal static string? FindDynamicNonUtf8Sample(Encoding oem)
+    {
+        ArgumentNullException.ThrowIfNull(oem);
+
+        // 1バイト探索 (0x80..0xFF)
+        byte[] singleByte = new byte[1];
+        for (int b = 0x80; b <= 0xFF; b++)
+        {
+            singleByte[0] = (byte)b;
+            string text = oem.GetString(singleByte);
+            if (text.Length == 1 &&
+                char.IsLetter(text[0]) &&
+                text[0] < 0xE000 &&
+                !IsValidUtf8(singleByte))
+            {
+                byte[] roundtrip = oem.GetBytes(text);
+                if (roundtrip.Length == 1 && roundtrip[0] == (byte)b)
+                {
+                    return text;
+                }
+            }
+        }
+
+        // 2バイト探索 (DBCS: lead 0x81..0xFE, trail 0x40..0xFE)
+        byte[] doubleBytes = new byte[2];
+        for (int lead = 0x81; lead <= 0xFE; lead++)
+        {
+            doubleBytes[0] = (byte)lead;
+            for (int trail = 0x40; trail <= 0xFE; trail++)
+            {
+                doubleBytes[1] = (byte)trail;
+                string text = oem.GetString(doubleBytes);
+                if (text.Length == 1 &&
+                    char.IsLetter(text[0]) &&
+                    text[0] < 0xE000 &&
+                    !IsValidUtf8(doubleBytes))
+                {
+                    byte[] roundtrip = oem.GetBytes(text);
+                    if (roundtrip.Length == 2 && roundtrip[0] == (byte)lead && roundtrip[1] == (byte)trail)
+                    {
+                        return text;
+                    }
+                }
             }
         }
 
