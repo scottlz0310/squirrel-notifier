@@ -178,7 +178,11 @@ internal sealed partial class MainWindow : Window
 
         _trayIconService = new TrayIconService(TrayIcon);
         TrayIcon.Visibility = Visibility.Visible;
-        AttachTrayPopup();
+
+        // TaskbarIcon は自身の Loaded ハンドラでトレイアイコンを生成し、そこで初めて
+        // TrayIcon.WindowHandle が確定する。このハンドラは TaskbarIcon のコンストラクタで
+        // 登録済みのため後から登録するこちらが後に走る（#229）
+        TrayIcon.Loaded += OnTrayIconLoaded;
 
         // Update control states
         UpdateControls(service.State);
@@ -258,14 +262,21 @@ internal sealed partial class MainWindow : Window
         HideWindowToTray();
     }
 
+    private void OnTrayIconLoaded(object sender, RoutedEventArgs e)
+    {
+        TrayIcon.Loaded -= OnTrayIconLoaded;
+        AttachTrayPopup();
+    }
+
     /// <summary>
     /// トレイポップアップのコンテンツを <see cref="TrayIcon"/> へ割り当てる（#229）.
     /// </summary>
     /// <remarks>
     /// H.NotifyIcon 2.5.0 の TrayPopup セッターは同期的に専用 Window（HWND + AppWindow）を生成する。
     /// XAML で代入すると MainWindow の InitializeComponent 内で別 Window を作ることになり、
-    /// cold start では E_UNEXPECTED を返して XamlParseException でプロセスが落ちる。ここまで遅らせれば
-    /// 失敗しても捕捉でき、TaskbarIcon 生成後のためポップアップ Window に owner も設定される。
+    /// cold start では E_UNEXPECTED を返して XamlParseException でプロセスが落ちる。XAML ロードの
+    /// 外へ出すことで失敗を捕捉でき、トレイアイコン生成後に呼ぶことでポップアップ Window へ
+    /// owner window も設定される。
     /// 代入するのは Popup で包まないコンテンツそのものであること。Popup を包むと TrayPopupResolved が
     /// それを採用し、XamlRoot 未設定の Popup を開いて E_UNEXPECTED で落ちる（#199）.
     /// </remarks>
