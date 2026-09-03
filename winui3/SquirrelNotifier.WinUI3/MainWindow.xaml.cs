@@ -52,6 +52,10 @@ internal sealed partial class MainWindow : Window
     private bool _isReviewStartPending;
     private bool _isLoginPending;
 
+    // トレイポップアップのコンテンツ。XAML ではなくコードで生成し TaskbarIcon へ後から代入する（#229）
+    private readonly ReviewNotificationPopup _reviewNotificationContent;
+    private bool _isTrayPopupAvailable;
+
     // ライブログウィンドウ（#144）のマネージド参照。保持しないと ExecuteReviewAsync 終了後に
     // Window ラッパーが GC 対象になり、失敗時に診断用として開き続けるべきウィンドウが死ぬ。
     // 同時実行抑止によりウィンドウは常に 1 つのため単一フィールドで足りる
@@ -122,10 +126,11 @@ internal sealed partial class MainWindow : Window
         _notificationService.ReviewEventReceived += OnReviewEventReceived;
         _notificationService.NotificationRequested += OnNotificationRequested;
         _rateLimitReminderService.ReminderFired += OnRateLimitReminderFired;
-        ReviewNotificationContent.OpenPrRequested += OnTrayPopupOpenPrRequested;
-        ReviewNotificationContent.LaunchReviewRequested += OnTrayPopupLaunchReviewRequested;
-        ReviewNotificationContent.OpenAppRequested += OnTrayPopupOpenAppRequested;
-        ReviewNotificationContent.DismissRequested += OnTrayPopupDismissRequested;
+        _reviewNotificationContent = new ReviewNotificationPopup();
+        _reviewNotificationContent.OpenPrRequested += OnTrayPopupOpenPrRequested;
+        _reviewNotificationContent.LaunchReviewRequested += OnTrayPopupLaunchReviewRequested;
+        _reviewNotificationContent.OpenAppRequested += OnTrayPopupOpenAppRequested;
+        _reviewNotificationContent.DismissRequested += OnTrayPopupDismissRequested;
         LogList.ItemsSource = _logEntries;
         ReviewEventList.ItemsSource = _reviewEvents;
         RateLimitList.ItemsSource = _rateLimits;
@@ -173,6 +178,11 @@ internal sealed partial class MainWindow : Window
 
         _trayIconService = new TrayIconService(TrayIcon);
         TrayIcon.Visibility = Visibility.Visible;
+
+        // TaskbarIcon は自身の Loaded ハンドラでトレイアイコンを生成し、そこで初めて
+        // TrayIcon.WindowHandle が確定する。このハンドラは TaskbarIcon のコンストラクタで
+        // 登録済みのため後から登録するこちらが後に走る（#229）
+        TrayIcon.Loaded += OnTrayIconLoaded;
 
         // Update control states
         UpdateControls(service.State);
@@ -252,6 +262,39 @@ internal sealed partial class MainWindow : Window
         HideWindowToTray();
     }
 
+    private void OnTrayIconLoaded(object sender, RoutedEventArgs e)
+    {
+        TrayIcon.Loaded -= OnTrayIconLoaded;
+        AttachTrayPopup();
+    }
+
+    /// <summary>
+    /// トレイポップアップのコンテンツを <see cref="TrayIcon"/> へ割り当てる（#229）.
+    /// </summary>
+    /// <remarks>
+    /// H.NotifyIcon 2.5.0 の TrayPopup セッターは同期的に専用 Window（HWND + AppWindow）を生成する。
+    /// XAML で代入すると MainWindow の InitializeComponent 内で別 Window を作ることになり、
+    /// cold start では E_UNEXPECTED を返して XamlParseException でプロセスが落ちる。XAML ロードの
+    /// 外へ出すことで失敗を捕捉でき、トレイアイコン生成後に呼ぶことでポップアップ Window へ
+    /// owner window も設定される。
+    /// 代入するのは Popup で包まないコンテンツそのものであること。Popup を包むと TrayPopupResolved が
+    /// それを採用し、XamlRoot 未設定の Popup を開いて E_UNEXPECTED で落ちる（#199）.
+    /// </remarks>
+    private void AttachTrayPopup()
+    {
+        try
+        {
+            TrayIcon.TrayPopup = _reviewNotificationContent;
+            _isTrayPopupAvailable = true;
+        }
+        catch (Exception ex)
+        {
+            _isTrayPopupAvailable = false;
+            _ = _loggingService.WriteAsync(
+                $"[UI] Failed to attach tray popup: {ex.Message}. レビュー通知はバルーン通知で表示します。");
+        }
+    }
+
     private void OnTrayOpenCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
     {
         ShowWindowFromTray();
@@ -293,10 +336,10 @@ internal sealed partial class MainWindow : Window
         _loggingService.LogAppended -= OnLogAppended;
         _notificationService.ReviewEventReceived -= OnReviewEventReceived;
         _notificationService.NotificationRequested -= OnNotificationRequested;
-        ReviewNotificationContent.OpenPrRequested -= OnTrayPopupOpenPrRequested;
-        ReviewNotificationContent.LaunchReviewRequested -= OnTrayPopupLaunchReviewRequested;
-        ReviewNotificationContent.OpenAppRequested -= OnTrayPopupOpenAppRequested;
-        ReviewNotificationContent.DismissRequested -= OnTrayPopupDismissRequested;
+        _reviewNotificationContent.OpenPrRequested -= OnTrayPopupOpenPrRequested;
+        _reviewNotificationContent.LaunchReviewRequested -= OnTrayPopupLaunchReviewRequested;
+        _reviewNotificationContent.OpenAppRequested -= OnTrayPopupOpenAppRequested;
+        _reviewNotificationContent.DismissRequested -= OnTrayPopupDismissRequested;
         _trayIconService?.Dispose();
         Close();
     }
@@ -1104,9 +1147,16 @@ internal sealed partial class MainWindow : Window
                 _reviewEvents.RemoveAt(_reviewEvents.Count - 1);
             }
 
+            if (!_isTrayPopupAvailable)
+            {
+                // ポップアップの生成自体に失敗している（#229）。毎回同じ例外を出すより直接フォールバックする
+                ShowReviewBalloon(e);
+                return;
+            }
+
             try
             {
-                ReviewNotificationContent.SetReviewEvent(e);
+                _reviewNotificationContent.SetReviewEvent(e);
                 _trayIconService.ShowReviewPopup();
             }
             catch (Exception ex)
@@ -1114,10 +1164,7 @@ internal sealed partial class MainWindow : Window
                 // ポップアップ表示の失敗でプロセスを落とさない。イベントは一覧に残っているため、
                 // 原因をログへ残したうえでバルーン通知へフォールバックする（#199）。
                 _ = _loggingService.WriteAsync($"[UI] Failed to show review popup: {ex.Message}");
-                _trayIconService.ShowNotification(
-                    "レビュー通知",
-                    $"{e.Reason}: {e.Repository}#{e.PrNumber}",
-                    H.NotifyIcon.Core.NotificationIcon.Info);
+                ShowReviewBalloon(e);
             }
         });
 
@@ -1125,6 +1172,14 @@ internal sealed partial class MainWindow : Window
         {
             throw new InvalidOperationException("レビューイベントを UI スレッドへ配送できませんでした。");
         }
+    }
+
+    private void ShowReviewBalloon(Models.ReviewEvent reviewEvent)
+    {
+        _trayIconService.ShowNotification(
+            "レビュー通知",
+            $"{reviewEvent.Reason}: {reviewEvent.Repository}#{reviewEvent.PrNumber}",
+            H.NotifyIcon.Core.NotificationIcon.Info);
     }
 
     private void OnNotificationRequested(object? sender, Models.NotificationMessage message)

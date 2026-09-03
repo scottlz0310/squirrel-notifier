@@ -9,8 +9,9 @@
     <!--
       2.4.1 の TrayPopup は WinUI3 で XamlRoot 未設定の Popup を開くため、レビュー通知の表示が
       必ず E_UNEXPECTED で落ちる（#199）。2.5.0 系で TrayPopup が専用 Window 方式へ書き直され
-      解消しているが、正式版が未リリースのため beta を明示的に採用する。
-      正式版が出たら安定版へ戻すこと（#199）。
+      解消したが、2.5.0 の正式版は未リリースで、prerelease チャンネルの最新が dev.2 のため
+      これを採用する（beta.1 へ戻すのは単なるダウングレード）。正式版が出たら安定版へ移行すること。
+      dev チャンネル固有の不安定さは MainWindow.AttachTrayPopup() が吸収する（#229）。
     -->
     <PackageVersion Include="H.NotifyIcon.WinUI" Version="2.5.0-dev.2" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
