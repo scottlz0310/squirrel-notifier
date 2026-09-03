@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using SquirrelNotifier.WinUI3.Helpers;
@@ -165,8 +166,14 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             List<string> args = LauncherArgumentBuilder.BuildArguments(argumentsTemplate, reviewEvent);
             ProcessStartInfo psi = AgentProcessStartInfoFactory.Create(resolvedPath, args);
             psi.WorkingDirectory = workingDirectory;
-            psi.StandardOutputEncoding = System.Text.Encoding.UTF8;
-            psi.StandardErrorEncoding = System.Text.Encoding.UTF8;
+
+            // Latin1 はバイト値を 1 文字 1 バイトで保存するため、行に分割したうえで実際の
+            // エンコーディングを行ごとに判定できる。.cmd / .bat 経路では cmd.exe 自身の
+            // メッセージ（OEM コードページ）とエージェント本体の出力（UTF-8）が 1 本の
+            // ハンドルに混在するため、単一のエンコーディング指定では一方が必ず化ける（#231）。
+            // 復元は ProcessOutputDecoder が行う.
+            psi.StandardOutputEncoding = System.Text.Encoding.Latin1;
+            psi.StandardErrorEncoding = System.Text.Encoding.Latin1;
 
             string executableKind = Path.GetExtension(resolvedPath).ToUpperInvariant() switch
             {
@@ -272,8 +279,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private static async Task<string> PumpStdoutAsync(StreamReader reader, AgentExecutionSession session, CancellationToken cancellationToken)
     {
         var lines = new List<string>();
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string line)
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
         {
+            // reader は Latin1 で開かれている。パース前に実際のエンコーディングへ復元する（#231）。
+            // ただし先頭の UTF-8 BOM により StreamReader が UTF-8 へ切り替わった場合は既にデコード済み（#252）
+            bool isLatin1 = reader.CurrentEncoding.CodePage == Encoding.Latin1.CodePage;
+            string line = isLatin1 ? ProcessOutputDecoder.Decode(rawLine) : rawLine;
             lines.Add(line);
 
             if (ProgressEventParser.TryParse(line, out AgentProgressEvent? progress))
@@ -307,8 +318,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private static async Task<string> PumpStderrAsync(StreamReader reader, AgentExecutionSession session, CancellationToken cancellationToken)
     {
         var lines = new List<string>();
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string line)
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
         {
+            // reader は Latin1 で開かれている。cmd.exe の失敗メッセージはここで復元される（#231）。
+            // ただし先頭の UTF-8 BOM により StreamReader が UTF-8 へ切り替わった場合は既にデコード済み（#252）
+            bool isLatin1 = reader.CurrentEncoding.CodePage == Encoding.Latin1.CodePage;
+            string line = isLatin1 ? ProcessOutputDecoder.Decode(rawLine) : rawLine;
             lines.Add(line);
             session.PublishStderr(line);
         }

@@ -15,6 +15,7 @@ using Moq;
 using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
+using SquirrelNotifier.WinUI3.Tests.Helpers;
 using Xunit;
 
 namespace SquirrelNotifier.WinUI3.Tests.Services;
@@ -45,8 +46,10 @@ public class ReviewLauncherServiceTests : IDisposable
     {
         var mockProcess = new Mock<IProcessInstance>();
         mockProcess.SetupGet(p => p.ExitCode).Returns(exitCode);
-        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stdout))));
-        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stderr))));
+        // ReviewLauncherService は本番でも Latin1 で reader を開く（#231）。バイト列を素通しし、
+        // 行ごとに ProcessOutputDecoder が実際のエンコーディングへ復元する経路をテストでも再現する
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stdout)), Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stderr)), Encoding.Latin1));
         mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
 
         if (delayMs > 0)
@@ -126,6 +129,67 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedPsi.WorkingDirectory.Should().Be(Path.Combine(_tempDir, "launcher-workspace", "reviewer"));
         Directory.Exists(capturedPsi.WorkingDirectory).Should().BeTrue();
         mockProcess.Verify(p => p.Dispose(), Times.Once);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldDecodeMixedEncodingOutput()
+    {
+        // .cmd シム経由では cmd.exe 自身のメッセージ（OEM コードページ）と実エージェントの出力
+        // （UTF-8）が 1 本のハンドルに混在する。行ごとに正しく復元されることを検証する（#231）。
+        // OEM コードページはロケール依存のため、特定のコードページを決め打ちしない
+        Encoding oem = ProcessOutputDecoder.OemEncoding;
+        if (oem.CodePage == Encoding.UTF8.CodePage)
+        {
+            // Windows の UTF-8 システムロケール（CP65001）環境では cmd.exe 出力も UTF-8 となるため、
+            // 混在エンコーディングのフォールバック検証はスキップする
+            return;
+        }
+
+        string? oemSample = OemEncodingSample.PickNonUtf8Sample(oem);
+        oemSample.Should().NotBeNull(
+            $"OEM コードページ {oem.CodePage} で往復し、かつ UTF-8 として不正になるサンプルが必要");
+
+        string cmdErrorLine = $"'this-command-does-not-exist-12345' {oemSample}";
+        const string agentOutputLine = "エージェントからの UTF-8 出力";
+
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-event-encoding",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+            Source = "queue://review/queue",
+        };
+
+        ConfigureSettings(reviewerCmd: "launcher-cmd", reviewerArgs: "--launcher-arg");
+
+        var stdoutBytes = new List<byte>();
+        stdoutBytes.AddRange(Encoding.UTF8.GetBytes(agentOutputLine + "\n"));
+        stdoutBytes.AddRange(oem.GetBytes(cmdErrorLine + "\n"));
+
+        var mockProcess = new Mock<IProcessInstance>();
+        mockProcess.SetupGet(p => p.ExitCode).Returns(9009);
+        mockProcess.SetupGet(p => p.StandardOutput)
+            .Returns(new StreamReader(new MemoryStream([.. stdoutBytes]), Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardError)
+            .Returns(new StreamReader(new MemoryStream(oem.GetBytes(cmdErrorLine)), Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
+
+        ProcessStartInfo? capturedPsi = null;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
+            .Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        result.Stdout.Should().Be($"{agentOutputLine}\n{cmdErrorLine}");
+        result.Stderr.Should().Be(cmdErrorLine);
+        capturedPsi.Should().NotBeNull();
+        capturedPsi!.StandardOutputEncoding.Should().Be(Encoding.Latin1);
+        capturedPsi.StandardErrorEncoding.Should().Be(Encoding.Latin1);
     }
 
     [Fact]
@@ -420,8 +484,8 @@ public class ReviewLauncherServiceTests : IDisposable
 
         var mockProcess = new Mock<IProcessInstance>();
         mockProcess.SetupGet(p => p.ExitCode).Returns(0);
-        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(client));
-        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(client, Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(), Encoding.Latin1));
         mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
         mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
             .Returns((CancellationToken t) =>
@@ -714,5 +778,53 @@ public class ReviewLauncherServiceTests : IDisposable
         events.Should().ContainSingle().Which.Outcome.Should().Be(AgentExecutionOutcome.Failed);
 
         (await firstRun).Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldDecodeUtf8BomOutputCorrectly_WithoutLatin1Corruption()
+    {
+        // 子プロセス出力が UTF-8 BOM で始まる場合、StreamReader(detectEncodingFromByteOrderMarks: true) は
+        // 自動的に UTF-8 へ切り替わる。Latin-1 範囲の非 ASCII 文字（café, señor 等）も含めて
+        // 壊れずに復元されることを検証する（#252 レビュー指摘）
+        const string line1 = "café au lait";
+        const string line2 = "grüße";
+        const string line3 = "señor";
+        const string line4 = "日本語テスト";
+
+        var stdoutMs = new MemoryStream();
+        using (var writer = new StreamWriter(stdoutMs, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), bufferSize: 1024, leaveOpen: true))
+        {
+            writer.WriteLine(line1);
+            writer.WriteLine(line2);
+            writer.WriteLine(line3);
+            writer.WriteLine(line4);
+        }
+
+        stdoutMs.Position = 0;
+        var reader = new StreamReader(stdoutMs, Encoding.Latin1, detectEncodingFromByteOrderMarks: true);
+
+        ConfigureSettings(reviewerCmd: "launcher-cmd", reviewerArgs: "--launcher-arg");
+
+        var mockProcess = new Mock<IProcessInstance>();
+        mockProcess.SetupGet(p => p.ExitCode).Returns(0);
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(reader);
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(), Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
+        mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        LauncherResult result = await service.LaunchAsync(
+            CreateReviewEvent("test-bom-encoding"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Stdout.Should().Contain(line1);
+        result.Stdout.Should().Contain(line2);
+        result.Stdout.Should().Contain(line3);
+        result.Stdout.Should().Contain(line4);
     }
 }
