@@ -91,4 +91,16 @@ public class ProcessOutputDecoderTests
 
         ProcessOutputDecoder.Decode(AsLatin1Line(oem.GetBytes(sample!))).Should().Be(sample);
     }
+
+    [Theory]
+    [InlineData("日本語テスト")]
+    [InlineData("test with mixed text 日本語 and english")]
+    [InlineData("エージェント出力: 成功しました")]
+    public void Decode_ShouldPassThroughAlreadyDecodedLines_WhenUtf8BomSwitchesStreamReader(string alreadyDecodedLine)
+    {
+        // StreamReader(detectEncodingFromByteOrderMarks: true) が先頭の UTF-8 BOM を検出した場合、
+        // Latin1 ではなく既に UTF-8 でデコードされた行が渡ってくる。
+        // Latin1.GetBytes で '?' に落とされず、そのまま素通しされることを確認する（#252 レビュー指摘）
+        ProcessOutputDecoder.Decode(alreadyDecodedLine).Should().Be(alreadyDecodedLine);
+    }
 }

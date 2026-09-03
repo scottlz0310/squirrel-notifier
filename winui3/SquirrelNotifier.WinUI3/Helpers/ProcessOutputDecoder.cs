@@ -61,6 +61,16 @@ internal static class ProcessOutputDecoder
             return latin1Line;
         }
 
+        // StreamReader(detectEncodingFromByteOrderMarks: true) が先頭の UTF-8 BOM を検出した場合、
+        // Latin1 ではなく既に UTF-8 でデコードされた行（U+00FF を超える文字を含む）が渡るため素通しする
+        foreach (char c in latin1Line)
+        {
+            if (c > 0xFF)
+            {
+                return latin1Line;
+            }
+        }
+
         byte[] bytes = Encoding.Latin1.GetBytes(latin1Line);
         try
         {
