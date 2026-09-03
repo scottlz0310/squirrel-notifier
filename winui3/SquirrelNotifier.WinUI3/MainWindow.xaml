@@ -201,6 +201,11 @@
                          IsClosable="False"
                          Severity="Warning"
                          Title="Auto-Pause 中（新規エージェント起動を停止）"/>
+                <InfoBar x:Name="AutoPauseNotApplicableInfoBar"
+                         IsOpen="False"
+                         IsClosable="False"
+                         Severity="Warning"
+                         Title="Auto-Pause の対象外のランチャーがあります"/>
                 <InfoBar x:Name="LegacySchemaInfoBar"
                          IsOpen="False"
                          IsClosable="False"

@@ -173,6 +173,8 @@ internal sealed partial class MainWindow : Window
 
         _isInitializing = false;
 
+        UpdateAutoPauseNotApplicableInfoBar();
+
         // Check auto-start registration status
         _ = RefreshAutoStartStatusAsync();
 
@@ -1023,6 +1025,7 @@ internal sealed partial class MainWindow : Window
                 reviewerPresetId,
                 reviewedPresetId);
             _settingsService.UpdateRepositoryCheckoutMappings(repositoryCheckoutMappings);
+            UpdateAutoPauseNotApplicableInfoBar();
         }
         catch
         {
@@ -1452,6 +1455,35 @@ internal sealed partial class MainWindow : Window
             + Environment.NewLine
             + "fresh なレートリミット情報で使用率 95% 未満を確認すると自動解除されます。";
         AutoPauseInfoBar.IsOpen = true;
+    }
+
+    // rateLimitAgentId を解決できないスロットは Auto-Pause gate が NotApplicable を返し、危険水域でも
+    // 新規起動を止めない。以前はこれが UI に一切出ず、保護が外れたことに気づけなかった（#233）.
+    private void UpdateAutoPauseNotApplicableInfoBar()
+    {
+        List<string> slotNames = [];
+        if (_settingsService.ResolveLauncherRateLimitAgentId(Models.LauncherRole.Reviewer) is null)
+        {
+            slotNames.Add("reviewer");
+        }
+
+        if (_settingsService.ResolveLauncherRateLimitAgentId(Models.LauncherRole.Reviewed) is null)
+        {
+            slotNames.Add("reviewed");
+        }
+
+        if (slotNames.Count == 0)
+        {
+            AutoPauseNotApplicableInfoBar.IsOpen = false;
+            return;
+        }
+
+        AutoPauseNotApplicableInfoBar.Message =
+            $"{string.Join("、", slotNames)} ランチャーは Auto-Pause の対象外です。"
+            + "レートリミットが危険水域でも新規起動は停止されません。"
+            + "コマンドがプリセット（claude / codex / agy）のいずれとも一致しないか、"
+            + "レートリミットを取得できないエージェント（copilot）が設定されています。";
+        AutoPauseNotApplicableInfoBar.IsOpen = true;
     }
 
     private async void OnEnqueueReviewClick(object sender, RoutedEventArgs e)

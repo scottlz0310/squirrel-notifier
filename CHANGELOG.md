@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Auto-Pause の対象外になっているランチャースロットをメイン画面に表示するようにした（#233）。command がどのプリセットとも一致しない場合や、レートリミットを取得できないエージェント（copilot）が設定されている場合、危険水域でも新規起動は停止されないが、これまで UI には何の表示も出ずユーザーが気づけなかった
+
 ### Fixed
+- ランチャーの引数を編集して「カスタム」になったスロットでも Auto-Pause が機能するようにした（#233）。`ResolveLauncherRateLimitAgentId` はプリセット ID からのみ `rateLimitAgentId` を解決していたため、コマンドが `claude` のままでも引数を 1 つ足しただけでプリセット判定が `custom` に落ち、そのスロットのレートリミット保護が黙って外れていた。プリセット ID で解決できない場合は command 一致（`LauncherAgentCatalog.FindByCommand`）へフォールバックする。引数のカスタマイズ（モデル指定・権限フラグ・追加スキル指定など）はごく一般的な運用で、実行されるエージェントは変わらない。なお progress event 対応度（#151）は `--output-format stream-json` の有無に依存するため、このフォールバックの対象外とする
 - 起動時に `TaskbarIcon.TrayPopup` の代入が失敗してプロセスが異常終了する経路をなくした（#229）。H.NotifyIcon 2.5.0 の `TrayPopup` セッターは同期的に専用 Window（HWND + AppWindow + presenter 設定）を生成する。これを XAML に書くと `MainWindow.InitializeComponent()` の最中、すなわち MainWindow 自身の構築が終わる前に別 Window を作ることになり、cold start では HRESULT が返って `XamlParseException` としてプロセスが落ちる。代入を `MainWindow.AttachTrayPopup()` へ移し、XAML ロードの外で行うことで失敗を捕捉できるようにした。失敗した場合はログへ記録してレビュー通知をバルーン通知へフォールバックする。#199 で入れた防御は `ShowTrayPopup` 時点のもので、XAML ロード時の失敗はその外側にあった
 - トレイポップアップ用 Window に owner window が設定されるようになった（#229）。`TaskbarIcon` は自身の `Loaded` ハンドラでトレイアイコンを生成し、そこで初めて `TrayIcon.WindowHandle` が確定する。XAML ロード時点ではまだ 0 のため `CreateTrayPopupWindow` の `SetOwnerWindow` が黙ってスキップされていた。代入を `TrayIcon.Loaded` 後へ移して解消した
 

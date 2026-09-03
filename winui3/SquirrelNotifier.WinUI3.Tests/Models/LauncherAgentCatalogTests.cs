@@ -79,6 +79,32 @@ public class LauncherAgentCatalogTests
         LauncherAgentCatalog.ResolvePresetId(command, arguments, role).Should().Be(expectedPresetId);
     }
 
+    [Theory]
+    [InlineData("claude", "claude")]
+    [InlineData("codex", "codex")]
+    [InlineData("agy", "agy")]
+    [InlineData("copilot", "copilot")]
+    [InlineData("unknown-cmd", null)]
+    [InlineData("", null)]
+    [InlineData(@"C:\tools\claude.cmd", null)]
+    public void FindByCommand_ShouldMatchCommandOnly(string command, string? expectedPresetId)
+    {
+        LauncherAgentCatalog.FindByCommand(command)?.Id.Should().Be(expectedPresetId);
+        if (expectedPresetId is null)
+        {
+            LauncherAgentCatalog.FindByCommand(command).Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public void FindByCommand_ShouldIgnoreArgumentCustomization()
+    {
+        // arguments を編集しても ResolvePresetId は custom を返すが、FindByCommand は claude を返す（#233）
+        LauncherAgentCatalog.ResolvePresetId("claude", "--model opus", LauncherRole.Reviewer)
+            .Should().Be(LauncherAgentCatalog.CustomPresetId);
+        LauncherAgentCatalog.FindByCommand("claude")!.Id.Should().Be("claude");
+    }
+
     [Fact]
     public void ResolvePresetId_ShouldNotCrossMatchReviewerTemplateForReviewedRole()
     {
