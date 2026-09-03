@@ -61,11 +61,15 @@ public class OemEncodingSampleTests
             "UTF-8 として不正であること（フォールバック経路を通すため）");
     }
 
-    [Fact]
-    public void PickNonUtf8Sample_ShouldReturnNull_WhenNoCandidateSurvives()
+    [Theory]
+    [InlineData(65001)] // Windows UTF-8 システムロケール（#252 レビュー指摘）
+    [InlineData(20127)] // US-ASCII
+    public void PickNonUtf8Sample_ShouldReturnNull_WhenNoNonUtf8CandidateCanExist(int codePage)
     {
-        // ASCII では候補がすべて '?' へ落ちるため往復せず、選べるサンプルがない
-        OemEncodingSample.PickNonUtf8Sample(Encoding.ASCII).Should().BeNull();
+        // UTF-8 では往復するバイト列がすべて UTF-8 として妥当になるため、非 UTF-8 サンプルは存在しない。
+        // ASCII では非 ASCII 候補がすべて '?' へ落ちるため、往復する非 UTF-8 サンプルは存在しない。
+        Encoding encoding = Encoding.GetEncoding(codePage);
+        OemEncodingSample.PickNonUtf8Sample(encoding).Should().BeNull();
     }
 
     [Theory]

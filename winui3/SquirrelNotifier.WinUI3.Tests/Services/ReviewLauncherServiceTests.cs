@@ -138,6 +138,13 @@ public class ReviewLauncherServiceTests : IDisposable
         // （UTF-8）が 1 本のハンドルに混在する。行ごとに正しく復元されることを検証する（#231）。
         // OEM コードページはロケール依存のため、特定のコードページを決め打ちしない
         Encoding oem = ProcessOutputDecoder.OemEncoding;
+        if (oem.CodePage == Encoding.UTF8.CodePage)
+        {
+            // Windows の UTF-8 システムロケール（CP65001）環境では cmd.exe 出力も UTF-8 となるため、
+            // 混在エンコーディングのフォールバック検証はスキップする
+            return;
+        }
+
         string? oemSample = OemEncodingSample.PickNonUtf8Sample(oem);
         oemSample.Should().NotBeNull(
             $"OEM コードページ {oem.CodePage} で往復し、かつ UTF-8 として不正になるサンプルが必要");

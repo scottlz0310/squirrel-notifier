@@ -77,6 +77,13 @@ public class ProcessOutputDecoderTests
         // OEM コードページで書いた「UTF-8 としては不正」なバイト列が復元できることを確認する。
         // ASCII だと UTF-8 デコードが成功してしまい、フォールバック経路を通らない
         Encoding oem = ProcessOutputDecoder.OemEncoding;
+        if (oem.CodePage == Encoding.UTF8.CodePage)
+        {
+            // Windows の UTF-8 システムロケール（CP65001）環境では、OEM エンコーディング自体が UTF-8 となるため
+            // 非 UTF-8 バイト列による OEM フォールバック経路は存在しない（テスト対象外）
+            return;
+        }
+
         string? sample = OemEncodingSample.PickNonUtf8Sample(oem);
 
         sample.Should().NotBeNull(

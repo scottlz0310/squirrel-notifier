@@ -35,7 +35,7 @@ internal static class OemEncodingSample
     /// 指定エンコーディングで往復し、かつ UTF-8 として不正になるサンプルを返す.
     /// </summary>
     /// <param name="oem">対象の OEM コードページのエンコーディング.</param>
-    /// <returns>条件を満たすサンプル。見つからない場合は <see langword="null"/>.</returns>
+    /// <returns>条件を満たすサンプル。UTF-8 や ASCII など条件を満たす文字が存在しない場合は <see langword="null"/>.</returns>
     public static string? PickNonUtf8Sample(Encoding oem)
     {
         ArgumentNullException.ThrowIfNull(oem);

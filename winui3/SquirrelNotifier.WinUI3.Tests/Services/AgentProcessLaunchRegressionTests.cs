@@ -137,6 +137,13 @@ public class AgentProcessLaunchRegressionTests : IDisposable
         // 読み取り側が UTF-8 固定だと、失敗時の唯一の手掛かりである cmd.exe のメッセージが
         // 化けて読めなくなる（#231）。OEM バイト列が往復することを実プロセスで検証する.
         Encoding oem = ProcessOutputDecoder.OemEncoding;
+        if (oem.CodePage == Encoding.UTF8.CodePage)
+        {
+            // Windows の UTF-8 システムロケール（CP65001）環境では cmd.exe の出力も UTF-8 となるため、
+            // 非 UTF-8 バイト列による OEM フォールバック検証はスキップする
+            return;
+        }
+
         string? sample = OemEncodingSample.PickNonUtf8Sample(oem);
 
         sample.Should().NotBeNull(
