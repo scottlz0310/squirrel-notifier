@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- 起動時に `TaskbarIcon.TrayPopup` の代入が失敗してプロセスが異常終了する経路をなくした（#229）。H.NotifyIcon 2.5.0 の `TrayPopup` セッターは同期的に専用 Window（HWND + AppWindow + presenter 設定）を生成する。これを XAML に書くと `MainWindow.InitializeComponent()` の最中、すなわち MainWindow 自身の構築が終わる前に別 Window を作ることになり、cold start では HRESULT が返って `XamlParseException` としてプロセスが落ちる。代入を `MainWindow.AttachTrayPopup()` へ移し、XAML ロードの外で行うことで失敗を捕捉できるようにした。失敗した場合はログへ記録してレビュー通知をバルーン通知へフォールバックする。#199 で入れた防御は `ShowTrayPopup` 時点のもので、XAML ロード時の失敗はその外側にあった
+- トレイポップアップ用 Window に owner window が設定されるようになった（#229）。`TaskbarIcon.WindowHandle` は XAML ロード時点ではまだ 0 で、`CreateTrayPopupWindow` の `SetOwnerWindow` が黙ってスキップされていた。代入をトレイアイコン生成後へ移したことで解消する
+
+### Changed
+- `H.NotifyIcon.WinUI` の prerelease 採用理由を `Directory.Packages.props` の実態へ合わせた（#229）。コメントは「beta を明示的に採用する」と書かれたまま、実際の指定は Renovate が更新した `2.5.0-dev.2` になっていた。2.5.0 の正式版は未リリースで prerelease チャンネルの最新が dev.2 のため、beta.1 へ戻さず dev.2 を採用する方針を明記した
+
 ## [0.7.0] - 2026-08-26
 
 MCP プロトコル `2026-07-28` へ移行したリリースです。基盤側のサーバー（thread-owl・review-raven）は既に旧プロトコルの接続を拒否しているため、**本リリースへの更新が必要です**。v0.6.0 のままでは購読・レビュー登録とも接続できません。
