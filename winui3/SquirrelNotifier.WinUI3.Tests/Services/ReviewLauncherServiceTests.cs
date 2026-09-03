@@ -45,8 +45,10 @@ public class ReviewLauncherServiceTests : IDisposable
     {
         var mockProcess = new Mock<IProcessInstance>();
         mockProcess.SetupGet(p => p.ExitCode).Returns(exitCode);
-        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stdout))));
-        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stderr))));
+        // ReviewLauncherService は本番でも Latin1 で reader を開く（#231）。バイト列を素通しし、
+        // 行ごとに ProcessOutputDecoder が実際のエンコーディングへ復元する経路をテストでも再現する
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stdout)), Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(stderr)), Encoding.Latin1));
         mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
 
         if (delayMs > 0)
@@ -126,6 +128,57 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedPsi.WorkingDirectory.Should().Be(Path.Combine(_tempDir, "launcher-workspace", "reviewer"));
         Directory.Exists(capturedPsi.WorkingDirectory).Should().BeTrue();
         mockProcess.Verify(p => p.Dispose(), Times.Once);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldDecodeMixedEncodingOutput()
+    {
+        // .cmd シム経由では cmd.exe 自身のメッセージ（OEM コードページ）と実エージェントの出力
+        // （UTF-8）が 1 本のハンドルに混在する。行ごとに正しく復元されることを検証する（#231）
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Encoding cp932 = Encoding.GetEncoding(932);
+
+        const string cmdErrorLine = "'this-command-does-not-exist-12345' は、内部コマンドまたは外部コマンド、";
+        const string agentOutputLine = "エージェントからの UTF-8 出力";
+
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "test-event-encoding",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+            Source = "queue://review/queue",
+        };
+
+        ConfigureSettings(reviewerCmd: "launcher-cmd", reviewerArgs: "--launcher-arg");
+
+        var stdoutBytes = new List<byte>();
+        stdoutBytes.AddRange(Encoding.UTF8.GetBytes(agentOutputLine + "\n"));
+        stdoutBytes.AddRange(cp932.GetBytes(cmdErrorLine + "\n"));
+
+        var mockProcess = new Mock<IProcessInstance>();
+        mockProcess.SetupGet(p => p.ExitCode).Returns(9009);
+        mockProcess.SetupGet(p => p.StandardOutput)
+            .Returns(new StreamReader(new MemoryStream([.. stdoutBytes]), Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardError)
+            .Returns(new StreamReader(new MemoryStream(cp932.GetBytes(cmdErrorLine)), Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
+
+        ProcessStartInfo? capturedPsi = null;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
+            .Returns(mockProcess.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        result.Stdout.Should().Be($"{agentOutputLine}\n{cmdErrorLine}");
+        result.Stderr.Should().Be(cmdErrorLine);
+        capturedPsi.Should().NotBeNull();
+        capturedPsi!.StandardOutputEncoding.Should().Be(Encoding.Latin1);
+        capturedPsi.StandardErrorEncoding.Should().Be(Encoding.Latin1);
     }
 
     [Fact]
@@ -420,8 +473,8 @@ public class ReviewLauncherServiceTests : IDisposable
 
         var mockProcess = new Mock<IProcessInstance>();
         mockProcess.SetupGet(p => p.ExitCode).Returns(0);
-        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(client));
-        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+        mockProcess.SetupGet(p => p.StandardOutput).Returns(new StreamReader(client, Encoding.Latin1));
+        mockProcess.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(), Encoding.Latin1));
         mockProcess.SetupGet(p => p.StandardInput).Returns(new StreamWriter(new MemoryStream()));
         mockProcess.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
             .Returns((CancellationToken t) =>

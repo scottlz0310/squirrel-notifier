@@ -130,6 +130,83 @@ public class AgentProcessLaunchRegressionTests : IDisposable
     }
 
     [Fact]
+    public async Task ReviewLauncher_ShouldDecodeOemOutputFromCmdShim()
+    {
+        // chcp を呼ばない .cmd（= 実運用のシムと同じ）は OEM コードページで出力する。
+        // 読み取り側が UTF-8 固定だと、失敗時の唯一の手掛かりである cmd.exe のメッセージが
+        // 化けて読めなくなる（#231）。OEM バイト列が往復することを実プロセスで検証する.
+        Encoding oem = ProcessOutputDecoder.OemEncoding;
+        string? sample = PickOemSample(oem);
+
+        sample.Should().NotBeNull(
+            $"OEM コードページ {oem.CodePage} で往復し、かつ UTF-8 として不正になるサンプルが必要");
+
+        string script = Path.Combine(_tempDir, "oem-agent.cmd");
+        File.WriteAllBytes(
+            script,
+            oem.GetBytes($"@echo off\r\necho {sample}\r\nthis-command-does-not-exist-12345\r\nexit /b 0\r\n"));
+
+        var settingsService = new SettingsService(_tempDir, pnpmBinDir: string.Empty);
+        settingsService.UpdateSettings(
+            "my-review-cmd", string.Empty,
+            "http://localhost:3000", ["queue://review/queue"], 30000,
+            script, string.Empty,
+            script, string.Empty,
+            30000,
+            "custom", "custom");
+        var loggingService = new LoggingService(_tempDir);
+        var service = new ReviewLauncherService(settingsService, loggingService, new ProcessRunner());
+
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "oem-encoding-regression",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+            Source = "queue://review/queue",
+            Reason = "opened",
+        };
+
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        result.Stdout.Should().Contain(sample, "OEM コードページの stdout が復元されること");
+        result.Stderr.Should().NotBeEmpty("存在しないコマンドの失敗メッセージが cmd.exe から出ること");
+        result.Stderr.Should().Contain("this-command-does-not-exist-12345");
+        result.Stderr.Should().NotContain("�", "デコード不能を示す置換文字が残っていないこと");
+        result.Stdout.Should().NotContain("�");
+    }
+
+    // OEM コードページはロケール依存（ja-JP: 932、en-US: 437）で、どの非 ASCII 文字を
+    // 表現できるかが異なる。実行環境で「OEM として往復し、かつ UTF-8 としては不正」になる
+    // サンプルを選ぶ。後者が成り立たないと、UTF-8 デコードが成功してしまい判別の検証にならない.
+    private static string? PickOemSample(Encoding oem)
+    {
+        foreach (string candidate in new[] { "日本語テスト", "café", "grüße", "señor" })
+        {
+            byte[] bytes = oem.GetBytes(candidate);
+            if (oem.GetString(bytes) == candidate && !IsValidUtf8(bytes))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsValidUtf8(byte[] bytes)
+    {
+        try
+        {
+            _ = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+    }
+
+    [Fact]
     public async Task ReviewLauncher_ShouldRunDummyAgentInExplicitWorkspace_WhenStartedFromSystem32()
     {
         // タスクスケジューラ起動相当: 親プロセスの cwd が C:\Windows\System32 でも、
