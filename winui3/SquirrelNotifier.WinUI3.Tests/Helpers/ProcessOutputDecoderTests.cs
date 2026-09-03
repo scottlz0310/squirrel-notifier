@@ -73,12 +73,15 @@ public class ProcessOutputDecoderTests
     [Fact]
     public void Decode_ShouldUseAmbientOemEncoding_WhenNotSpecified()
     {
-        // 引数なしオーバーロードは GetOEMCP() 由来のエンコーディングを使う。
-        // 実行環境の OEM コードページで書いたバイト列が復元できることを確認する
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        Encoding oem = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
-        const string original = "abc";
+        // 引数なしオーバーロードは GetOEMCP() 由来のエンコーディングを使う。実行環境の
+        // OEM コードページで書いた「UTF-8 としては不正」なバイト列が復元できることを確認する。
+        // ASCII だと UTF-8 デコードが成功してしまい、フォールバック経路を通らない
+        Encoding oem = ProcessOutputDecoder.OemEncoding;
+        string? sample = OemEncodingSample.PickNonUtf8Sample(oem);
 
-        ProcessOutputDecoder.Decode(AsLatin1Line(oem.GetBytes(original))).Should().Be(original);
+        sample.Should().NotBeNull(
+            $"OEM コードページ {oem.CodePage} で往復し、かつ UTF-8 として不正になるサンプルが必要");
+
+        ProcessOutputDecoder.Decode(AsLatin1Line(oem.GetBytes(sample!))).Should().Be(sample);
     }
 }

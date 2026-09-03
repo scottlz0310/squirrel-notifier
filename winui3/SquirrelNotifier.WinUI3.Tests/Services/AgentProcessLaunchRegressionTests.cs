@@ -8,6 +8,7 @@ using FluentAssertions;
 using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
+using SquirrelNotifier.WinUI3.Tests.Helpers;
 using Xunit;
 
 namespace SquirrelNotifier.WinUI3.Tests.Services;
@@ -136,7 +137,7 @@ public class AgentProcessLaunchRegressionTests : IDisposable
         // 読み取り側が UTF-8 固定だと、失敗時の唯一の手掛かりである cmd.exe のメッセージが
         // 化けて読めなくなる（#231）。OEM バイト列が往復することを実プロセスで検証する.
         Encoding oem = ProcessOutputDecoder.OemEncoding;
-        string? sample = PickOemSample(oem);
+        string? sample = OemEncodingSample.PickNonUtf8Sample(oem);
 
         sample.Should().NotBeNull(
             $"OEM コードページ {oem.CodePage} で往復し、かつ UTF-8 として不正になるサンプルが必要");
@@ -174,36 +175,6 @@ public class AgentProcessLaunchRegressionTests : IDisposable
         result.Stderr.Should().Contain("this-command-does-not-exist-12345");
         result.Stderr.Should().NotContain("�", "デコード不能を示す置換文字が残っていないこと");
         result.Stdout.Should().NotContain("�");
-    }
-
-    // OEM コードページはロケール依存（ja-JP: 932、en-US: 437）で、どの非 ASCII 文字を
-    // 表現できるかが異なる。実行環境で「OEM として往復し、かつ UTF-8 としては不正」になる
-    // サンプルを選ぶ。後者が成り立たないと、UTF-8 デコードが成功してしまい判別の検証にならない.
-    private static string? PickOemSample(Encoding oem)
-    {
-        foreach (string candidate in new[] { "日本語テスト", "café", "grüße", "señor" })
-        {
-            byte[] bytes = oem.GetBytes(candidate);
-            if (oem.GetString(bytes) == candidate && !IsValidUtf8(bytes))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsValidUtf8(byte[] bytes)
-    {
-        try
-        {
-            _ = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
-            return true;
-        }
-        catch (DecoderFallbackException)
-        {
-            return false;
-        }
     }
 
     [Fact]
