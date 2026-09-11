@@ -13,7 +13,6 @@ using Microsoft.UI.Xaml.Media;
 using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.Graphics;
 using WinRT;
@@ -37,6 +36,7 @@ internal sealed partial class MainWindow : Window
     private readonly IReviewLauncherService _launcherService;
     private readonly IUrlOpener _urlOpener;
     private readonly IFileOpener _fileOpener;
+    private readonly IClipboardService _clipboardService;
     private readonly IWindowIconService _windowIconService;
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly ReviewRegistrationService _reviewRegistrationService;
@@ -80,6 +80,7 @@ internal sealed partial class MainWindow : Window
         IReviewLauncherService launcherService,
         IUrlOpener urlOpener,
         IFileOpener fileOpener,
+        IClipboardService clipboardService,
         IWindowIconService windowIconService,
         ITaskSchedulerService taskSchedulerService,
         ReviewRegistrationService reviewRegistrationService,
@@ -110,6 +111,7 @@ internal sealed partial class MainWindow : Window
         _settingsService = settingsService;
         _urlOpener = urlOpener;
         _fileOpener = fileOpener;
+        _clipboardService = clipboardService;
         _updateCheckCoordinator = new UpdateCheckCoordinator(
             autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, _urlOpener);
         _notificationService = notificationService;
@@ -1038,9 +1040,7 @@ internal sealed partial class MainWindow : Window
         {
             string commandLine = _launcherService.BuildCommandLine(reviewEvent, role);
 
-            var dataPackage = new DataPackage();
-            dataPackage.SetText(commandLine);
-            Clipboard.SetContent(dataPackage);
+            _clipboardService.SetText(commandLine);
 
             ShowCopyFeedback("起動コマンドをクリップボードにコピーしました。", isError: false);
         }
@@ -1466,9 +1466,7 @@ internal sealed partial class MainWindow : Window
     {
         try
         {
-            var dataPackage = new DataPackage();
-            dataPackage.SetText(text);
-            Clipboard.SetContent(dataPackage);
+            _clipboardService.SetText(text);
             ShowCopyFeedback("クリップボードにコピーしました。", isError: false);
         }
         catch (Exception ex)
