@@ -37,6 +37,7 @@ internal sealed partial class MainWindow : Window
     private readonly IReviewLauncherService _launcherService;
     private readonly IUrlOpener _urlOpener;
     private readonly IFileOpener _fileOpener;
+    private readonly IWindowIconService _windowIconService;
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly ReviewRegistrationService _reviewRegistrationService;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
@@ -67,19 +68,8 @@ internal sealed partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern nint LoadImage(nint hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
-
-    [DllImport("user32.dll")]
-    private static extern nint SendMessage(nint hWnd, uint msg, nint wParam, nint lParam);
-
     private const int _swHide = 0;
     private const int _swShow = 5;
-    private const uint _wmSetIcon = 0x0080;
-    private const uint _iconSmall = 0;
-    private const uint _iconBig = 1;
-    private const uint _imageIcon = 1;
-    private const uint _lrLoadFromFile = 0x00000010;
 
     internal MainWindow(
         McpSubscriptionService service,
@@ -90,6 +80,7 @@ internal sealed partial class MainWindow : Window
         IReviewLauncherService launcherService,
         IUrlOpener urlOpener,
         IFileOpener fileOpener,
+        IWindowIconService windowIconService,
         ITaskSchedulerService taskSchedulerService,
         ReviewRegistrationService reviewRegistrationService,
         IRateLimitReminderService rateLimitReminderService,
@@ -110,8 +101,9 @@ internal sealed partial class MainWindow : Window
         appWindow.Resize(new SizeInt32(520, 580));
         appWindow.Closing += OnAppWindowClosing;
 
-        // Set window icon
-        SetWindowIcon();
+        // ウィンドウアイコンを設定
+        _windowIconService = windowIconService;
+        _ = _windowIconService.TrySetIcon(_hwnd);
 
         _service = service;
         _loggingService = loggingService;
@@ -248,33 +240,6 @@ internal sealed partial class MainWindow : Window
     public void HideWindowToTray()
     {
         ShowWindow(_hwnd, _swHide);
-    }
-
-    private void SetWindowIcon()
-    {
-        try
-        {
-            string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "squirrel-notifier.ico");
-            if (File.Exists(iconPath))
-            {
-                nint hIconSmall = LoadImage(nint.Zero, iconPath, _imageIcon, 16, 16, _lrLoadFromFile);
-                nint hIconBig = LoadImage(nint.Zero, iconPath, _imageIcon, 32, 32, _lrLoadFromFile);
-
-                if (hIconSmall != nint.Zero)
-                {
-                    SendMessage(_hwnd, _wmSetIcon, new nint(_iconSmall), hIconSmall);
-                }
-
-                if (hIconBig != nint.Zero)
-                {
-                    SendMessage(_hwnd, _wmSetIcon, new nint(_iconBig), hIconBig);
-                }
-            }
-        }
-        catch
-        {
-            // Ignore errors when loading icon
-        }
     }
 
     private void OnStartClick(object sender, RoutedEventArgs e)
