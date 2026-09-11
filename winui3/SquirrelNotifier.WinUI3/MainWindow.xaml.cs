@@ -36,6 +36,7 @@ internal sealed partial class MainWindow : Window
     private readonly bool _isInitializing = true;
     private readonly INotificationService _notificationService;
     private readonly IReviewLauncherService _launcherService;
+    private readonly IUrlOpener _urlOpener;
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly ReviewRegistrationService _reviewRegistrationService;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
@@ -87,6 +88,7 @@ internal sealed partial class MainWindow : Window
         AutoUpdateService autoUpdateService,
         INotificationService notificationService,
         IReviewLauncherService launcherService,
+        IUrlOpener urlOpener,
         ITaskSchedulerService taskSchedulerService,
         ReviewRegistrationService reviewRegistrationService,
         IRateLimitReminderService rateLimitReminderService,
@@ -113,8 +115,9 @@ internal sealed partial class MainWindow : Window
         _service = service;
         _loggingService = loggingService;
         _settingsService = settingsService;
+        _urlOpener = urlOpener;
         _updateCheckCoordinator = new UpdateCheckCoordinator(
-            autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, new UrlOpener());
+            autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, _urlOpener);
         _notificationService = notificationService;
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
@@ -884,30 +887,9 @@ internal sealed partial class MainWindow : Window
         };
     }
 
-    private void TryOpenUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = url,
-                UseShellExecute = true,
-            });
-        }
-        catch
-        {
-            // ignore
-        }
-    }
-
     private void OnOpenStatuslineDocsClick(object sender, RoutedEventArgs e)
     {
-        TryOpenUrl("https://github.com/scottlz0310/squirrel-notifier/blob/main/docs/statusline-integration.md");
+        _ = _urlOpener.TryOpen("https://github.com/scottlz0310/squirrel-notifier/blob/main/docs/statusline-integration.md");
     }
 
     private void OnReviewEventReceived(object? sender, Models.ReviewEvent e)
@@ -1027,18 +1009,7 @@ internal sealed partial class MainWindow : Window
         {
             if (Helpers.UrlValidator.IsSafeGitHubUrl(url))
             {
-                try
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = url,
-                        UseShellExecute = true,
-                    });
-                }
-                catch
-                {
-                    // ignore
-                }
+                _ = _urlOpener.TryOpen(url);
             }
         }
     }
@@ -1051,7 +1022,7 @@ internal sealed partial class MainWindow : Window
             reviewEvent.Repository,
             reviewEvent.PrNumber))
         {
-            TryOpenUrl(reviewEvent.PrUrl);
+            _ = _urlOpener.TryOpen(reviewEvent.PrUrl);
         }
     }
 

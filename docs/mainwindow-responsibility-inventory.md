@@ -132,8 +132,8 @@
 | ---: | --- | --- | --- |
 | 864-866 | `CheckForUpdatesAsync` | 維持候補 | `UpdateCheckCoordinator` への委譲 |
 | 867-886 | `ShowUpdateDialogAsync` | 維持候補 | UpdatePresentationをDialogとActionへ変換するUI境界 |
-| 887-907 | `TryOpenUrl` | 抽出候補 | URL検証後の`Process.Start` と例外処理。既存`IUrlOpener`へ統一する |
-| 908-912 | `OnOpenStatuslineDocsClick` | 維持候補 | 固定URLを開くUIイベント。URL起動Serviceへ委譲後は薄い配線 |
+| 887-907 | `TryOpenUrl` | 抽出済み | #286の初回実装で削除し、URL起動を既存`IUrlOpener`へ委譲した |
+| 908-912 | `OnOpenStatuslineDocsClick` | 維持候補 | 固定URLを既存`IUrlOpener`へ渡すUIイベント |
 | 913-924 | `OnReviewEventReceived` | 維持候補 | UIスレッドへ配送するDispatcherQueue境界 |
 | 925-956 | `HandleReviewEvent` | 抽出候補 | 一覧上限、削除追跡、Action可否、自動起動、通知の順序を判断している |
 | 957-979 | `ShowReviewNotification` | 境界確認 | ポップアップとバルーンのフォールバック境界。UI所有の理由を明文化する |
@@ -141,8 +141,8 @@
 | 991-996 | `OnNotificationRequested` | 維持候補 | 通知モデルをトレイ通知へ反映する配線 |
 | 997-1005 | `OnDismissEventClick` | 境界確認 | UI一覧の削除とCleanup Coordinatorの追跡解除を接続する |
 | 1006-1023 | `OnReviewEventsRemoved` | 維持候補 | Coordinatorの削除結果をUI一覧へ反映する |
-| 1024-1045 | `OnOpenPrClick` | 抽出候補 | URL検証と`Process.Start` を直接行う。`IUrlOpener`へ委譲する |
-| 1046-1057 | `OnTrayPopupOpenPrRequested` | 境界確認 | ポップアップを閉じ、URL検証後に起動するUI境界 |
+| 1024-1045 | `OnOpenPrClick` | 境界確認 | 安全なGitHub URL判定後の起動を`IUrlOpener`へ委譲。URLの直接I/Oは#286の初回実装で除去した |
+| 1046-1057 | `OnTrayPopupOpenPrRequested` | 境界確認 | ポップアップを閉じ、安全なGitHub URL判定後の起動を`IUrlOpener`へ委譲 |
 | 1058-1064 | `OnTrayPopupLaunchReviewRequested` | 維持候補 | ポップアップ終了、Window表示、既存レビュー起動の配線 |
 | 1065-1070 | `OnTrayPopupOpenAppRequested` | 維持候補 | ポップアップ終了とWindow表示の配線 |
 | 1071-1075 | `OnTrayPopupDismissRequested` | 維持候補 | ポップアップを閉じるだけの配線 |
@@ -198,7 +198,7 @@
 
 | 優先 | 抽出単位 | 主な対象 | 受け皿候補 | 必要な検証 |
 | ---: | --- | --- | --- | --- |
-| 1 | 外部起動・OS境界 | `SetWindowIcon`、`OnOpenLogFolder`、`TryOpenUrl`、`OnOpenPrClick`、`CopyToClipboard` | `IUrlOpener`、`IFileOpener`、`IClipboardService`、アイコンService | fakeを使う失敗・引数テスト、#166の該当GUI確認 |
+| 1 | 外部起動・OS境界 | `SetWindowIcon`、`OnOpenLogFolder`、`CopyToClipboard`（URL起動は#286初回実装で移行済み） | `IFileOpener`、`IClipboardService`、アイコンService | fakeを使う失敗・引数テスト、URLを含む#166の該当GUI確認 |
 | 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`HideCopyFeedbackAfterDelayAsync`、`ShowReviewBalloon` | Clipboard/通知Policy、UIフィードバックController | 文言・キャンセル・失敗分類のパラメータ化テスト、コピーGUI確認 |
 | 3 | 購読状態・トレイ実行 | `OnStateChanged`、`UpdateTrayIcon`、`OnTrayRightClickCommandExecuteRequested`、`ExitApplication` | 状態Presentation、TrayCommand/Lifecycle Coordinator | 状態表・一回通知・終了順序のテスト、トレイGUI確認 |
 | 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification` | ReviewNotification Coordinator/Presentation | 上限・終了済み・自動起動結果のテスト、通知GUI確認 |
