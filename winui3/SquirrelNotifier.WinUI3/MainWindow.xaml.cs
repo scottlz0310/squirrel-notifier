@@ -3,7 +3,6 @@
 // </copyright>
 
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -37,6 +36,7 @@ internal sealed partial class MainWindow : Window
     private readonly INotificationService _notificationService;
     private readonly IReviewLauncherService _launcherService;
     private readonly IUrlOpener _urlOpener;
+    private readonly IFileOpener _fileOpener;
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly ReviewRegistrationService _reviewRegistrationService;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
@@ -89,6 +89,7 @@ internal sealed partial class MainWindow : Window
         INotificationService notificationService,
         IReviewLauncherService launcherService,
         IUrlOpener urlOpener,
+        IFileOpener fileOpener,
         ITaskSchedulerService taskSchedulerService,
         ReviewRegistrationService reviewRegistrationService,
         IRateLimitReminderService rateLimitReminderService,
@@ -116,6 +117,7 @@ internal sealed partial class MainWindow : Window
         _loggingService = loggingService;
         _settingsService = settingsService;
         _urlOpener = urlOpener;
+        _fileOpener = fileOpener;
         _updateCheckCoordinator = new UpdateCheckCoordinator(
             autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, _urlOpener);
         _notificationService = notificationService;
@@ -517,18 +519,7 @@ internal sealed partial class MainWindow : Window
 
     private void OnOpenLogFolder(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = _loggingService.LogDirectory,
-                UseShellExecute = true,
-            });
-        }
-        catch
-        {
-            // ignore
-        }
+        _ = _fileOpener.TryOpen(_loggingService.LogDirectory);
     }
 
     private void OnSettingChanged(object sender, TextChangedEventArgs e)
