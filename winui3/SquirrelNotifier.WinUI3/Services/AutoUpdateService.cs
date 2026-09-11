@@ -130,10 +130,4 @@ internal sealed class AutoUpdateService : IDisposable
     }
 }
 
-internal sealed record AutoUpdateResult(
-    Version CurrentVersion,
-    Version LatestVersion,
-    bool HasUpdate,
-    string? Tag,
-    string ReleaseUrl,
-    string? ErrorMessage = null);
+internal sealed record AutoUpdateResult(Version CurrentVersion, Version LatestVersion, bool HasUpdate, string? Tag, string ReleaseUrl, string? ErrorMessage = null);
