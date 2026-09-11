@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Settings・レートリミット・レビューイベント・ログの高さを仕切りで調整できるようにした（#274）。Settings は折りたたみ時に空白を残さず、他の3領域はウィンドウの高さに応じて伸縮する。狭い画面では全体をスクロールできる。調整位置はアプリ起動中のみ保持する
+- マージ・クローズ済み PR のレビューイベントを定期的に確認し、Recent review events から自動的に片付けるようにした（#276）。状態取得に失敗した場合はイベントを保持してログに記録し、レビュー起動直前にも終了済み PR を起動しない安全弁を設けた
 
 ### Changed
 - 自動起動タスクの状態解釈と登録・解除・修復の進行状態を `Services/AutoStartCoordinator.cs` へ抽出した（#268）。登録内容が現在のアプリと一致しない場合は「要修復」として表示し、`MainWindow.xaml.cs` には確認ダイアログと UI 反映だけを残す。`MainWindow.xaml.cs` は 1,679 行から 1,634 行になり、行数チェックの上限も同じ値へ下げた
