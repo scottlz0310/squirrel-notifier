@@ -106,7 +106,7 @@
 | 470-482 | `ShouldFollowLogTail` | 境界確認 | 判定は`LogFollowPolicy`へ抽出済み。ScrollViewer取得との境界だけを残す |
 | 483-493 | `ResolveLogListScrollViewer` | 境界確認 | Visual Treeとキャッシュを扱うUIアダプター候補 |
 | 494-514 | `FindDescendantScrollViewer` | 維持候補 | Visual Treeを探索するUI補助。テスト可能性が必要ならUIアダプターへ移す |
-| 515-530 | `OnOpenLogFolder` | 抽出候補 | `Process.Start` によるフォルダー起動と例外処理。`IFileOpener` 候補 |
+| 520-523 | `OnOpenLogFolder` | 抽出済み | #286の次段で`IFileOpener`へ委譲し、フォルダー起動の直接I/Oと例外処理をcode-behindから除去 |
 | 531-540 | `OnSettingChanged` | 境界確認 | 初期化・プリセット適用の抑止と設定保存を判断している |
 | 541-550 | `OnLiveLogAutoCloseToggled` | 境界確認 | UI値から設定Serviceを直接更新。入力反映境界を`SettingsCoordinator`と整理 |
 | 551-560 | `OnAutoReviewStartToggled` | 境界確認 | UI値から設定Serviceを直接更新。上記と同じ境界 |
