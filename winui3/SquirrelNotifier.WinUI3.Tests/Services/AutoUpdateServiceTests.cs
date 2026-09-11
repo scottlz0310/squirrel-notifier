@@ -76,7 +76,7 @@ public class AutoUpdateServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CheckForUpdatesAsync_ShouldReturnNoUpdateWhenTagMissing()
+    public async Task CheckForUpdatesAsync_ShouldFailWhenTagMissing()
     {
         // Arrange
         string json = """{"name":"release without tag"}""";
@@ -93,7 +93,7 @@ public class AutoUpdateServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CheckForUpdatesAsync_ShouldReturnNoUpdateWhenTagIsWhitespace()
+    public async Task CheckForUpdatesAsync_ShouldFailWhenTagIsWhitespace()
     {
         // Arrange
         string json = """{"tag_name":"   ","html_url":"https://example/releases/v3.1.0"}""";
@@ -193,6 +193,31 @@ public class AutoUpdateServiceTests : IDisposable
 
         // Assert
         result.ReleaseUrl.Should().BeEmpty();
+        result.ErrorMessage.Should().Contain("URL");
+        result.HasUpdate.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("{}", HttpStatusCode.OK)]
+    [InlineData("[]", HttpStatusCode.OK)]
+    [InlineData("{\"tag_name\":123}", HttpStatusCode.OK)]
+    [InlineData("{\"tag_name\":\" \"}", HttpStatusCode.OK)]
+    [InlineData("{\"tag_name\":\"invalid\"}", HttpStatusCode.OK)]
+    [InlineData("{\"tag_name\":\"v4.0.0\",\"html_url\":123}", HttpStatusCode.OK)]
+    [InlineData("{\"tag_name\":\"v4.0.0\",\"html_url\":\"file:///C:/test.exe\"}", HttpStatusCode.OK)]
+    [InlineData("not-json", HttpStatusCode.OK)]
+    [InlineData("", HttpStatusCode.ServiceUnavailable)]
+    public async Task CheckForUpdatesAsync_ShouldReturnFailureWithDiagnosticLog(string json, HttpStatusCode status)
+    {
+        using var httpClient = new HttpClient(new FakeHandler(json, status));
+        var logging = new LoggingService(_logDir);
+        using var service = new AutoUpdateService(logging, httpClient, new Version(3, 0, 0));
+
+        AutoUpdateResult result = await service.CheckForUpdatesAsync(CancellationToken.None);
+
+        result.HasUpdate.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrWhiteSpace();
+        (await File.ReadAllTextAsync(Path.Combine(_logDir, "winui3.log"))).Should().Contain(result.ErrorMessage!);
     }
 
     [Fact]
@@ -268,6 +293,7 @@ public class AutoUpdateServiceTests : IDisposable
         // Assert
         result.HasUpdate.Should().BeFalse();
         handler.CallCount.Should().Be(3);
+        result.ErrorMessage.Should().Be("transient network error");
     }
 
     [Fact]

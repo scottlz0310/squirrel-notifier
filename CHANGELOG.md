@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+
+- 更新チェックの通信失敗・不正なリリース情報を「最新版」と誤表示しないようにした（#268）。手動実行時は原因を表示し、起動時はログに記録する。結果解釈、スキップ設定、ダイアログ表示中の再入抑止を `UpdateCheckCoordinator` へ抽出し、MainWindow はダイアログの表示と選択結果の変換だけを担当する。MainWindow は 1,634 行から 1,588 行となり、行数チェックの上限も同じ値へ下げた。
 - Settings の Gateway URL 入力と操作ボタンを2段に分け、「ログイン」が右端に切れる問題を修正した（#274）。ボタン段はラベル列も含めた幅を使う
 
 ### Added

@@ -23,7 +23,7 @@ $ErrorActionPreference = "Stop"
 # ファイルごとの行数上限（リポジトリルートからの相対パス）。
 # 値の更新は「抽出して減った」「意図して増やす」のいずれかを PR で説明できるときだけ行う。
 $limits = [ordered]@{
-    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1634
+    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1588
     "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 317
     "winui3/SquirrelNotifier.WinUI3/App.xaml.cs"                     = 101
     "winui3/SquirrelNotifier.WinUI3/ReviewNotificationPopup.xaml.cs" = 84
