@@ -33,12 +33,15 @@ public class GitHubPullRequestStatusClientTests
     {
         using GitHubPullRequestStatusClient closedClient = CreateClient("{\"state\":\"closed\",\"merged_at\":null}");
         using GitHubPullRequestStatusClient mergedClient = CreateClient("{\"state\":\"closed\",\"merged_at\":\"2026-09-11T00:00:00Z\"}");
+        using GitHubPullRequestStatusClient closedWithoutMergeDateClient = CreateClient("{\"state\":\"closed\"}");
 
         PullRequestLifecycleState closed = await closedClient.GetStateAsync("owner/repo", 1, CancellationToken.None);
         PullRequestLifecycleState merged = await mergedClient.GetStateAsync("owner/repo", 2, CancellationToken.None);
+        PullRequestLifecycleState closedWithoutMergeDate = await closedWithoutMergeDateClient.GetStateAsync("owner/repo", 3, CancellationToken.None);
 
         closed.Should().Be(PullRequestLifecycleState.Closed);
         merged.Should().Be(PullRequestLifecycleState.Merged);
+        closedWithoutMergeDate.Should().Be(PullRequestLifecycleState.Closed);
     }
 
     [Fact]
@@ -55,6 +58,8 @@ public class GitHubPullRequestStatusClientTests
     [Theory]
     [InlineData("{\"state\":\"unknown\"}")]
     [InlineData("{\"merged_at\":null}")]
+    [InlineData("{\"state\":null}")]
+    [InlineData("[]")]
     [InlineData("not-json")]
     public async Task GetStateAsync_ShouldThrow_WhenResponseIsInvalid(string content)
     {
@@ -85,6 +90,30 @@ public class GitHubPullRequestStatusClientTests
         Action act = () => _ = new GitHubPullRequestStatusClient(requestTimeout: TimeSpan.Zero);
 
         act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Constructor_ShouldPreserveExistingRequestHeaders()
+    {
+        using var httpClient = new HttpClient(new RecordingHandler(_ => JsonResponse("{\"state\":\"open\"}")));
+        httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("existing-client", "1.0"));
+        httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/custom"));
+
+        using var client = new GitHubPullRequestStatusClient(httpClient);
+
+        httpClient.DefaultRequestHeaders.UserAgent.Should().ContainSingle(value => value.Product != null && value.Product.Name == "existing-client");
+        httpClient.DefaultRequestHeaders.Accept.Should().ContainSingle(value => value.MediaType == "application/custom");
+    }
+
+    [Fact]
+    public async Task Dispose_ShouldDisposeOwnedHttpClient()
+    {
+        var client = new GitHubPullRequestStatusClient();
+        client.Dispose();
+
+        Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ObjectDisposedException>();
     }
 
     private static GitHubPullRequestStatusClient CreateClient(string content)

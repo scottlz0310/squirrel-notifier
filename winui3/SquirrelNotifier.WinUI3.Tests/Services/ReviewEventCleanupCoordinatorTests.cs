@@ -46,6 +46,18 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task IsActionAllowedAsync_ShouldKeepOpenEvent()
+    {
+        var statusClient = new StubStatusClient(PullRequestLifecycleState.Open);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient);
+
+        bool allowed = await coordinator.IsActionAllowedAsync(CreateReviewEvent(), CancellationToken.None);
+
+        allowed.Should().BeTrue();
+        coordinator.TrackedEventCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task RefreshAsync_ShouldRemoveClosedEventAndKeepOpenEvent()
     {
         var statusClient = new SequenceStatusClient(
@@ -107,6 +119,88 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
 
         coordinator.TrackedEventCount.Should().Be(0);
         statusClient.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Untrack_ShouldIgnoreBlankEventId()
+    {
+        var statusClient = new StubStatusClient(PullRequestLifecycleState.Open);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient);
+
+        coordinator.Untrack(" ");
+
+        coordinator.TrackedEventCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void Constructor_ShouldRejectNullDependenciesAndInvalidInterval()
+    {
+        Action nullStatusClient = () => new ReviewEventCleanupCoordinator(null!, _loggingService);
+        Action nullLoggingService = () => new ReviewEventCleanupCoordinator(new StubStatusClient(PullRequestLifecycleState.Open), null!);
+        Action invalidInterval = () => new ReviewEventCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open),
+            _loggingService,
+            TimeSpan.Zero);
+
+        nullStatusClient.Should().Throw<ArgumentNullException>();
+        nullLoggingService.Should().Throw<ArgumentNullException>();
+        invalidInterval.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public async Task IsActionAllowedAsync_ShouldRethrowCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var statusClient = new CancellationStatusClient(cancellation);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient);
+
+        Func<Task> act = () => coordinator.IsActionAllowedAsync(CreateReviewEvent(), cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ShouldStopWhenStatusLookupIsCanceled()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var statusClient = new CancellationStatusClient(cancellation);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient);
+        coordinator.Track(CreateReviewEvent());
+
+        await coordinator.RefreshAsync(cancellation.Token);
+
+        coordinator.TrackedEventCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ShouldIgnoreConcurrentRefresh()
+    {
+        var statusClient = new BlockingStatusClient();
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient);
+        coordinator.Track(CreateReviewEvent());
+
+        Task firstRefresh = coordinator.RefreshAsync();
+        await statusClient.Entered.Task;
+        await coordinator.RefreshAsync();
+        statusClient.Calls.Should().Be(1);
+
+        statusClient.Release.TrySetResult(true);
+        await firstRefresh;
+    }
+
+    [Fact]
+    public async Task IsActionAllowedAsync_ShouldLogWhenRemovalNotificationFails()
+    {
+        var statusClient = new StubStatusClient(PullRequestLifecycleState.Merged);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient);
+        coordinator.EventsRemoved += (_, _) => throw new InvalidOperationException("handler failed");
+
+        bool allowed = await coordinator.IsActionAllowedAsync(CreateReviewEvent(), CancellationToken.None);
+        await Task.Delay(50);
+
+        allowed.Should().BeFalse();
+        string log = await File.ReadAllTextAsync(Path.Combine(_logDirectory, "winui3.log"));
+        log.Should().Contain("自動削除通知に失敗しました").And.Contain("handler failed");
     }
 
     [Fact]
@@ -176,5 +270,38 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
 
         public Task<PullRequestLifecycleState> GetStateAsync(string repository, int prNumber, CancellationToken cancellationToken)
             => Task.FromResult(_states.Dequeue());
+    }
+
+    private sealed class CancellationStatusClient : IPullRequestStatusClient
+    {
+        private readonly CancellationTokenSource _cancellation;
+
+        public CancellationStatusClient(CancellationTokenSource cancellation)
+        {
+            _cancellation = cancellation;
+        }
+
+        public Task<PullRequestLifecycleState> GetStateAsync(string repository, int prNumber, CancellationToken cancellationToken)
+        {
+            _cancellation.Cancel();
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
+    private sealed class BlockingStatusClient : IPullRequestStatusClient
+    {
+        public TaskCompletionSource<bool> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Calls { get; private set; }
+
+        public async Task<PullRequestLifecycleState> GetStateAsync(string repository, int prNumber, CancellationToken cancellationToken)
+        {
+            Calls++;
+            Entered.TrySetResult(true);
+            await Release.Task.WaitAsync(cancellationToken);
+            return PullRequestLifecycleState.Open;
+        }
     }
 }
