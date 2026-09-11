@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `MainWindow.xaml.cs` の残存責務を棚卸しし、責務境界・検証資産・後続の抽出計画を文書化した（#285）。行数とカバレッジは抽出結果を観測する指標として扱い、数値の達成自体は目的としない
+
 ## [0.9.0] - 2026-09-11
 
 v0.8.0 から MainWindow の責務分離を進め、更新チェックの失敗表示とレビューイベントの整理を改善したリリースです。
