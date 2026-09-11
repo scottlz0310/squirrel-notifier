@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -14,6 +15,7 @@ internal sealed class ClipboardService : IClipboardService
 {
     private readonly Action<string> _setText;
 
+    [ExcludeFromCodeCoverage]
     public ClipboardService()
         : this(SetTextOnWindowsClipboard)
     {
@@ -30,6 +32,7 @@ internal sealed class ClipboardService : IClipboardService
         _setText(text);
     }
 
+    [ExcludeFromCodeCoverage]
     private static void SetTextOnWindowsClipboard(string text)
     {
         DataPackage dataPackage = new();
