@@ -31,7 +31,7 @@ internal sealed class AutoUpdateService : IDisposable
         int delayMs = 1000;
         int attempt = 0;
 
-        while (attempt < maxAttempts)
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             attempt++;
@@ -48,8 +48,7 @@ internal sealed class AutoUpdateService : IDisposable
                 {
                     if (isLastAttempt)
                     {
-                        await _loggingService.WriteAsync($"自動更新チェックに失敗しました: {response.StatusCode}").ConfigureAwait(false);
-                        return AutoUpdateResult.NoUpdate(_currentVersion);
+                        return await FailAsync($"HTTP {(int)response.StatusCode} ({response.StatusCode})").ConfigureAwait(false);
                     }
 
                     await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
@@ -59,28 +58,36 @@ internal sealed class AutoUpdateService : IDisposable
 
                 string content = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
                 using JsonDocument doc = JsonDocument.Parse(content);
-                if (!doc.RootElement.TryGetProperty("tag_name", out JsonElement tagElement))
+                if (doc.RootElement.ValueKind != JsonValueKind.Object
+                    || !doc.RootElement.TryGetProperty("tag_name", out JsonElement tagElement)
+                    || tagElement.ValueKind != JsonValueKind.String)
                 {
-                    return AutoUpdateResult.NoUpdate(_currentVersion);
+                    return await FailAsync("リリース情報にバージョンタグがありません。").ConfigureAwait(false);
                 }
 
                 string? tag = tagElement.GetString();
                 if (string.IsNullOrWhiteSpace(tag))
                 {
-                    return AutoUpdateResult.NoUpdate(_currentVersion);
+                    return await FailAsync("リリース情報のバージョンタグが空です。").ConfigureAwait(false);
                 }
 
                 string rawVersion = tag.TrimStart('v', 'V');
                 if (!Version.TryParse(rawVersion, out Version? latestVersion))
                 {
-                    return AutoUpdateResult.NoUpdate(_currentVersion);
+                    return await FailAsync("リリース情報のバージョンタグを解析できません。").ConfigureAwait(false);
                 }
 
                 string releaseUrl = doc.RootElement.TryGetProperty("html_url", out JsonElement htmlUrl)
+                    && htmlUrl.ValueKind == JsonValueKind.String
                     ? htmlUrl.GetString() ?? string.Empty
                     : string.Empty;
 
                 bool hasUpdate = latestVersion > _currentVersion;
+                if (hasUpdate && !Helpers.UrlValidator.IsHttpOrHttpsAbsoluteUrl(releaseUrl))
+                {
+                    return await FailAsync("リリース情報のダウンロードページ URL が不正です。").ConfigureAwait(false);
+                }
+
                 return new AutoUpdateResult(_currentVersion, latestVersion, hasUpdate, tag, releaseUrl);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -91,8 +98,7 @@ internal sealed class AutoUpdateService : IDisposable
             {
                 if (isLastAttempt)
                 {
-                    await _loggingService.WriteAsync($"自動更新チェックに失敗しました: {ex.Message}").ConfigureAwait(false);
-                    return AutoUpdateResult.NoUpdate(_currentVersion);
+                    return await FailAsync(ex.Message).ConfigureAwait(false);
                 }
 
                 try
@@ -107,8 +113,12 @@ internal sealed class AutoUpdateService : IDisposable
                 delayMs *= 2;
             }
         }
+    }
 
-        return AutoUpdateResult.NoUpdate(_currentVersion);
+    private async Task<AutoUpdateResult> FailAsync(string message)
+    {
+        await _loggingService.WriteAsync($"自動更新チェックに失敗しました: {message}").ConfigureAwait(false);
+        return new AutoUpdateResult(_currentVersion, _currentVersion, false, null, string.Empty, message);
     }
 
     public void Dispose()
@@ -120,10 +130,10 @@ internal sealed class AutoUpdateService : IDisposable
     }
 }
 
-internal sealed record AutoUpdateResult(Version CurrentVersion, Version LatestVersion, bool HasUpdate, string? Tag, string ReleaseUrl)
-{
-    public static AutoUpdateResult NoUpdate(Version current)
-    {
-        return new AutoUpdateResult(current, current, false, null, string.Empty);
-    }
-}
+internal sealed record AutoUpdateResult(
+    Version CurrentVersion,
+    Version LatestVersion,
+    bool HasUpdate,
+    string? Tag,
+    string ReleaseUrl,
+    string? ErrorMessage = null);

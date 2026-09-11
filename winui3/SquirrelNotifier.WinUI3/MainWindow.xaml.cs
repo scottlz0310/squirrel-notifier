@@ -28,7 +28,7 @@ internal sealed partial class MainWindow : Window
     private readonly McpSubscriptionService _service;
     private readonly LoggingService _loggingService;
     private readonly SettingsService _settingsService;
-    private readonly AutoUpdateService _autoUpdateService;
+    private readonly UpdateCheckCoordinator _updateCheckCoordinator;
     private readonly ObservableCollection<string> _logEntries = new();
     private readonly ObservableCollection<Models.ReviewEvent> _reviewEvents = new();
     private readonly TrayIconService _trayIconService;
@@ -50,7 +50,6 @@ internal sealed partial class MainWindow : Window
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
     private ScrollViewer? _logListScrollViewer;
-    private bool _isCheckingForUpdates;
     private bool _hasShownErrorBalloon;
 
     // トレイポップアップのコンテンツ。XAML ではなくコードで生成し TaskbarIcon へ後から代入する（#229）
@@ -112,7 +111,8 @@ internal sealed partial class MainWindow : Window
         _service = service;
         _loggingService = loggingService;
         _settingsService = settingsService;
-        _autoUpdateService = autoUpdateService;
+        _updateCheckCoordinator = new UpdateCheckCoordinator(
+            autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, new UrlOpener());
         _notificationService = notificationService;
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
@@ -855,73 +855,27 @@ internal sealed partial class MainWindow : Window
         HideWindowToTray();
     }
 
-    private async Task CheckForUpdatesAsync(bool showNoUpdateDialog)
+    private Task CheckForUpdatesAsync(bool showNoUpdateDialog)
+        => _updateCheckCoordinator.CheckAsync(showNoUpdateDialog, ShowUpdateDialogAsync);
+
+    private async Task<UpdateDialogAction> ShowUpdateDialogAsync(UpdateDialogPresentation presentation)
     {
-        if (_isCheckingForUpdates)
+        var dialog = new ContentDialog
         {
-            return;
-        }
-
-        _isCheckingForUpdates = true;
-        try
+            Title = presentation.Title,
+            Content = presentation.Message,
+            PrimaryButtonText = presentation.PrimaryButtonText,
+            SecondaryButtonText = presentation.SecondaryButtonText,
+            CloseButtonText = presentation.CloseButtonText,
+            DefaultButton = presentation.IsUpdateAvailable ? ContentDialogButton.Primary : ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot,
+        };
+        return await dialog.ShowAsync(ContentDialogPlacement.Popup) switch
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            AutoUpdateResult result = await _autoUpdateService.CheckForUpdatesAsync(cts.Token);
-            if (!result.HasUpdate || string.IsNullOrWhiteSpace(result.ReleaseUrl))
-            {
-                if (showNoUpdateDialog)
-                {
-                    var noUpdateDialog = new ContentDialog
-                    {
-                        Title = "最新バージョンを利用中です",
-                        Content = "新しいバージョンは見つかりませんでした。",
-                        CloseButtonText = "閉じる",
-                        DefaultButton = ContentDialogButton.Close,
-                        XamlRoot = Content.XamlRoot,
-                    };
-
-                    await noUpdateDialog.ShowAsync(ContentDialogPlacement.Popup);
-                }
-
-                return;
-            }
-
-            // スキップされたバージョンの判定（自動チェック時のみスキップを考慮）
-            bool isSkipped = !string.IsNullOrEmpty(result.Tag) && result.Tag == _settingsService.Settings.LastSkippedVersion;
-            if (isSkipped && !showNoUpdateDialog)
-            {
-                return;
-            }
-
-            var updateDialog = new ContentDialog
-            {
-                Title = "新しいバージョンがあります",
-                Content = $"最新バージョン {result.LatestVersion} がリリースされています。ダウンロードページを開きますか？",
-                PrimaryButtonText = "ダウンロード",
-                SecondaryButtonText = "このバージョンをスキップ",
-                CloseButtonText = "後で",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot,
-            };
-
-            ContentDialogResult dialogResult = await updateDialog.ShowAsync(ContentDialogPlacement.Popup);
-            if (dialogResult == ContentDialogResult.Primary)
-            {
-                TryOpenUrl(result.ReleaseUrl);
-            }
-            else if (dialogResult == ContentDialogResult.Secondary)
-            {
-                _settingsService.UpdateLastSkippedVersion(result.Tag ?? result.LatestVersion.ToString());
-            }
-        }
-        catch (Exception ex)
-        {
-            await _loggingService.WriteAsync($"自動更新チェック中にエラーが発生しました: {ex.Message}").ConfigureAwait(false);
-        }
-        finally
-        {
-            _isCheckingForUpdates = false;
-        }
+            ContentDialogResult.Primary => UpdateDialogAction.Download,
+            ContentDialogResult.Secondary => UpdateDialogAction.Skip,
+            _ => UpdateDialogAction.Close,
+        };
     }
 
     private void TryOpenUrl(string url)
