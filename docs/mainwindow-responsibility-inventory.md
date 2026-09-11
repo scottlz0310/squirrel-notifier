@@ -3,12 +3,12 @@
 ## 1. 調査範囲と判定基準
 
 調査時点は 2026-09-11、`main` の HEAD は
-`6ef8de539fba797707729eeb790a2d880d6815d7`（v0.9.0）である。
+`ee73e36a0e4f46824ad23a3afe6d410f01e98220` である。
 対象は `winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs` と、同ファイルが直接参照する
 既存の `Services/`・`Helpers/`・`Models/`・テストである。
 
-同ファイルの物理行数は 1,626 行で、`scripts/check-code-behind-size.ps1` の上限も
-1,626 行である。これは抽出結果と無意識の肥大化を観測するための指標であり、
+同ファイルの物理行数は 1,553 行で、`scripts/check-code-behind-size.ps1` の上限も
+1,553 行である。これは抽出結果と無意識の肥大化を観測するための指標であり、
 本棚卸しの完了条件や、後続作業の削減目標ではない。
 
 判定は次の基準で行う。
@@ -83,7 +83,7 @@
 | 230-235 | `OnGoToSettingsClick` | 維持候補 | Expanderの展開とフォーカス移動というUI操作 |
 | 236-242 | `ShowWindowFromTray` | 境界確認 | Window表示とイベント更新をまとめている。Windowライフサイクル境界を後続で確認 |
 | 243-247 | `HideWindowToTray` | 維持候補 | Windowの非表示だけを行う |
-| 248-274 | `SetWindowIcon` | 抽出候補 | パス組み立て、ファイル存在確認、Win32呼び出し、例外処理を含む |
+| 248-274（旧） | `SetWindowIcon` | 抽出済み | `WindowIconService` へ移し、アイコンパス、存在確認、Win32 呼び出し、失敗結果を code-behind から除去 |
 | 275-279 | `OnStartClick` | 維持候補 | 購読Serviceの開始を呼ぶだけ |
 | 280-284 | `OnStopClick` | 維持候補 | 購読Serviceの停止を呼ぶだけ |
 | 285-289 | `OnRetryClick` | 維持候補 | 購読Serviceの再開始を呼ぶだけ |
@@ -106,7 +106,7 @@
 | 470-482 | `ShouldFollowLogTail` | 境界確認 | 判定は`LogFollowPolicy`へ抽出済み。ScrollViewer取得との境界だけを残す |
 | 483-493 | `ResolveLogListScrollViewer` | 境界確認 | Visual Treeとキャッシュを扱うUIアダプター候補 |
 | 494-514 | `FindDescendantScrollViewer` | 維持候補 | Visual Treeを探索するUI補助。テスト可能性が必要ならUIアダプターへ移す |
-| 520-523 | `OnOpenLogFolder` | 抽出済み | #286の次段で`IFileOpener`へ委譲し、フォルダー起動の直接I/Oと例外処理をcode-behindから除去 |
+| 520-523 | `OnOpenLogFolder` | 抽出済み | #289 で `IFileOpener` へ委譲し、フォルダー起動の直接 I/O と例外処理を code-behind から除去 |
 | 531-540 | `OnSettingChanged` | 境界確認 | 初期化・プリセット適用の抑止と設定保存を判断している |
 | 541-550 | `OnLiveLogAutoCloseToggled` | 境界確認 | UI値から設定Serviceを直接更新。入力反映境界を`SettingsCoordinator`と整理 |
 | 551-560 | `OnAutoReviewStartToggled` | 境界確認 | UI値から設定Serviceを直接更新。上記と同じ境界 |
@@ -198,7 +198,7 @@
 
 | 優先 | 抽出単位 | 主な対象 | 受け皿候補 | 必要な検証 |
 | ---: | --- | --- | --- | --- |
-| 1 | 外部起動・OS境界 | `SetWindowIcon`、`OnOpenLogFolder`、`CopyToClipboard`（URL起動は#286初回実装で移行済み） | `IFileOpener`、`IClipboardService`、アイコンService | fakeを使う失敗・引数テスト、URLを含む#166の該当GUI確認 |
+| 1 | 外部起動・OS境界 | `CopyToClipboard`（URL 起動は #286 初回実装、フォルダー起動は #289、ウィンドウアイコンは今回の実装で移行済み） | `IClipboardService`、アイコン Service | fake を使う失敗・引数テスト、URL・フォルダー・アイコンを含む #166 の該当 GUI 確認 |
 | 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`HideCopyFeedbackAfterDelayAsync`、`ShowReviewBalloon` | Clipboard/通知Policy、UIフィードバックController | 文言・キャンセル・失敗分類のパラメータ化テスト、コピーGUI確認 |
 | 3 | 購読状態・トレイ実行 | `OnStateChanged`、`UpdateTrayIcon`、`OnTrayRightClickCommandExecuteRequested`、`ExitApplication` | 状態Presentation、TrayCommand/Lifecycle Coordinator | 状態表・一回通知・終了順序のテスト、トレイGUI確認 |
 | 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification` | ReviewNotification Coordinator/Presentation | 上限・終了済み・自動起動結果のテスト、通知GUI確認 |

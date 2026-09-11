@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MainWindow.xaml.cs` の残存責務を棚卸しし、責務境界・検証資産・後続の抽出計画を文書化した（#285）。行数とカバレッジは抽出結果を観測する指標として扱い、数値の達成自体は目的としない
 - `MainWindow.xaml.cs` のURL起動を既存の `IUrlOpener` に委譲し、URL経路のプロセス起動をUIコードから分離した（#286）
 - `MainWindow.xaml.cs` のログフォルダー起動を `IFileOpener` に委譲し、フォルダー経路のプロセス起動をUIコードから分離した（#286）
+- `MainWindow.xaml.cs` のウィンドウアイコン設定を `WindowIconService` に委譲し、アイコンファイルの I/O と Win32 境界を UI コードから分離した（#286）
 
 ## [0.9.0] - 2026-09-11
 
