@@ -66,7 +66,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, _taskSchedulerService, _reviewRegistrationService, _rateLimitReminderService, _rateLimitFileService, _reviewEventCleanupCoordinator, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, new UrlOpener(), _taskSchedulerService, _reviewRegistrationService, _rateLimitReminderService, _rateLimitFileService, _reviewEventCleanupCoordinator, showWindow);
         _window.Closed += OnWindowClosed;
 
         _window.Activate();
