@@ -38,6 +38,7 @@ internal sealed partial class MainWindow : Window
     private readonly IReviewLauncherService _launcherService;
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly ReviewRegistrationService _reviewRegistrationService;
+    private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate = new();
@@ -90,6 +91,7 @@ internal sealed partial class MainWindow : Window
         ReviewRegistrationService reviewRegistrationService,
         IRateLimitReminderService rateLimitReminderService,
         RateLimitFileService rateLimitFileService,
+        ReviewEventCleanupCoordinator reviewEventCleanupCoordinator,
         bool showWindow = true)
     {
         InitializeComponent();
@@ -117,6 +119,7 @@ internal sealed partial class MainWindow : Window
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
         _reviewRegistrationService = reviewRegistrationService;
+        _reviewEventCleanupCoordinator = reviewEventCleanupCoordinator;
         _rateLimitReminderService = rateLimitReminderService;
         _rateLimitSnapshotService = new RateLimitSnapshotService(rateLimitFileService);
         _rateLimitRefreshCoordinator = new RateLimitRefreshCoordinator(
@@ -139,6 +142,7 @@ internal sealed partial class MainWindow : Window
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
         _notificationService.ReviewEventReceived += OnReviewEventReceived;
+        _reviewEventCleanupCoordinator.EventsRemoved += OnReviewEventsRemoved;
         _notificationService.NotificationRequested += OnNotificationRequested;
         _rateLimitReminderService.ReminderFired += OnRateLimitReminderFired;
         _reviewNotificationContent = new ReviewNotificationPopup();
@@ -150,6 +154,7 @@ internal sealed partial class MainWindow : Window
         ReviewEventList.ItemsSource = _reviewEvents;
         RateLimitList.ItemsSource = _rateLimits;
         RateLimitAgentList.ItemsSource = _rateLimitAgentOptions;
+        _reviewEventCleanupCoordinator.Start();
 
         // Load settings
         AppSettings settings = _settingsService.Settings;
@@ -232,6 +237,7 @@ internal sealed partial class MainWindow : Window
     {
         ShowWindow(_hwnd, _swShow);
         Activate();
+        _ = _reviewEventCleanupCoordinator.RefreshAsync();
     }
 
     public void HideWindowToTray()
@@ -921,10 +927,18 @@ internal sealed partial class MainWindow : Window
         try
         {
             _reviewEvents.Insert(0, reviewEvent);
+            _reviewEventCleanupCoordinator.Track(reviewEvent);
             const int maxEvents = 20;
             if (_reviewEvents.Count > maxEvents)
             {
+                Models.ReviewEvent evictedEvent = _reviewEvents[_reviewEvents.Count - 1];
                 _reviewEvents.RemoveAt(_reviewEvents.Count - 1);
+                _reviewEventCleanupCoordinator.Untrack(evictedEvent.EventId);
+            }
+
+            if (!await _reviewEventCleanupCoordinator.IsActionAllowedAsync(reviewEvent, CancellationToken.None))
+            {
+                return;
             }
 
             ReviewStartResult result = await _reviewStartCoordinator.TryStartAutomaticallyAsync(reviewEvent);
@@ -984,7 +998,26 @@ internal sealed partial class MainWindow : Window
     {
         if (sender is Button button && button.CommandParameter is Models.ReviewEvent reviewEvent)
         {
+            _reviewEventCleanupCoordinator.Untrack(reviewEvent.EventId);
             _reviewEvents.Remove(reviewEvent);
+        }
+    }
+
+    private void OnReviewEventsRemoved(object? sender, ReviewEventsRemovedEventArgs e)
+    {
+        if (!DispatcherQueue.TryEnqueue(() =>
+            {
+                foreach (string eventId in e.EventIds)
+                {
+                    Models.ReviewEvent? reviewEvent = _reviewEvents.FirstOrDefault(candidate => candidate.EventId == eventId);
+                    if (reviewEvent != null)
+                    {
+                        _reviewEvents.Remove(reviewEvent);
+                    }
+                }
+            }))
+        {
+            _ = _loggingService.WriteAsync("レビューイベントの自動削除結果を UI へ反映できませんでした。");
         }
     }
 
@@ -1131,6 +1164,11 @@ internal sealed partial class MainWindow : Window
     /// <returns>実際に起動した場合は <see langword="true"/>.</returns>
     private async Task<bool> ExecuteReviewAsync(Models.ReviewEvent reviewEvent, Models.LauncherRole role)
     {
+        if (!await _reviewEventCleanupCoordinator.IsActionAllowedAsync(reviewEvent, CancellationToken.None))
+        {
+            return false;
+        }
+
         ReviewStartResult result = await _reviewStartCoordinator.StartAsync(
             reviewEvent,
             role,
