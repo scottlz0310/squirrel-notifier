@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-11
+
+v0.8.0 から MainWindow の責務分離を進め、更新チェックの失敗表示とレビューイベントの整理を改善したリリースです。
+
+**主な変更**
+
+- 更新チェックの結果解釈を `UpdateCheckCoordinator` へ抽出し、通信失敗や不正なリリース情報を「最新版」と区別するようになりました（#268）。手動実行時は原因を表示し、起動時はログへ記録します
+- 自動起動、設定、レートリミット、レビュー起動、Gateway ログインなどの判断を Coordinator へ分離し、MainWindow の UI 配線を薄くしました（#263〜#268）
+- マージ・クローズ済み PR のレビューイベントを定期的に確認し、Recent review events から自動的に片付けるようになりました（#276）。状態取得に失敗した場合はイベントを保持してログに記録します
+- Settings の入力レイアウトと、XML ドキュメントコメントの `cref` 検証を改善しました（#271、#274）
+
+**必要な構成**
+
+v0.8.0 から変更ありません。mcp-resource-subscriber v0.6.0 以降 / thread-owl v0.4.0 以降 / review-raven v0.2.0 以降 / mcp-gateway v0.10.0 以降と組み合わせて動作します。
+
+**既知の問題**
+
+更新チェックとレビューイベント自動片付けは常時動作しますが、Windows GUI E2E は未実施です。実機で利用する際は、まず在席時に動作を確認してください。GitHub API は未認証の公開 API のため、非公開リポジトリの PR 状態は取得できず、該当イベントは一覧に残ります。また、イベント数が多い場合は未認証 API の上限（IP あたり 60 req/h）に達し、状態取得と更新チェックが一時的に失敗することがあります。その場合はイベントを保持してログに記録し、手動の更新チェックでは失敗を表示します。Issue #268 は更新ダイアログの実機確認が完了するまで継続します。
+
 ### Fixed
 
 - 更新チェックの通信失敗・不正なリリース情報を「最新版」と誤表示しないようにした（#268）。手動実行時は原因を表示し、起動時はログに記録する。結果解釈、スキップ設定、ダイアログ表示中の再入抑止を `UpdateCheckCoordinator` へ抽出し、MainWindow はダイアログの表示と選択結果の変換だけを担当する。MainWindow は 1,634 行から 1,588 行となり、行数チェックの上限も同じ値へ下げた。
@@ -353,7 +372,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.5.2...v0.6.0
