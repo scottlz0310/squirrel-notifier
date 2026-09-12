@@ -27,7 +27,7 @@ internal sealed partial class MainWindow : Window
     private readonly SettingsService _settingsService;
     private readonly UpdateCheckCoordinator _updateCheckCoordinator;
     private readonly LogEntryCollectionCoordinator _logEntryCoordinator = new();
-    private readonly ObservableCollection<Models.ReviewEvent> _reviewEvents = new();
+    private readonly ReviewEventCollectionCoordinator _reviewEventCollectionCoordinator = new();
     private readonly TrayIconService _trayIconService;
     private readonly nint _hwnd;
     private readonly bool _isInitializing = true;
@@ -158,7 +158,7 @@ internal sealed partial class MainWindow : Window
         _reviewNotificationContent.OpenAppRequested += OnTrayPopupOpenAppRequested;
         _reviewNotificationContent.DismissRequested += OnTrayPopupDismissRequested;
         LogList.ItemsSource = _logEntryCoordinator.Entries;
-        ReviewEventList.ItemsSource = _reviewEvents;
+        ReviewEventList.ItemsSource = _reviewEventCollectionCoordinator.Events;
         RateLimitList.ItemsSource = _rateLimits;
         RateLimitAgentList.ItemsSource = _rateLimitAgentOptions;
         _reviewEventCleanupCoordinator.Start();
@@ -841,13 +841,10 @@ internal sealed partial class MainWindow : Window
     {
         try
         {
-            _reviewEvents.Insert(0, reviewEvent);
+            Models.ReviewEvent? evictedEvent = _reviewEventCollectionCoordinator.Add(reviewEvent);
             _reviewEventCleanupCoordinator.Track(reviewEvent);
-            const int maxEvents = 20;
-            if (_reviewEvents.Count > maxEvents)
+            if (evictedEvent != null)
             {
-                Models.ReviewEvent evictedEvent = _reviewEvents[_reviewEvents.Count - 1];
-                _reviewEvents.RemoveAt(_reviewEvents.Count - 1);
                 _reviewEventCleanupCoordinator.Untrack(evictedEvent.EventId);
             }
 
@@ -911,8 +908,10 @@ internal sealed partial class MainWindow : Window
     {
         if (sender is Button button && button.CommandParameter is Models.ReviewEvent reviewEvent)
         {
-            _reviewEventCleanupCoordinator.Untrack(reviewEvent.EventId);
-            _reviewEvents.Remove(reviewEvent);
+            if (_reviewEventCollectionCoordinator.Remove(reviewEvent))
+            {
+                _reviewEventCleanupCoordinator.Untrack(reviewEvent.EventId);
+            }
         }
     }
 
@@ -922,11 +921,7 @@ internal sealed partial class MainWindow : Window
             {
                 foreach (string eventId in e.EventIds)
                 {
-                    Models.ReviewEvent? reviewEvent = _reviewEvents.FirstOrDefault(candidate => candidate.EventId == eventId);
-                    if (reviewEvent != null)
-                    {
-                        _reviewEvents.Remove(reviewEvent);
-                    }
+                    _reviewEventCollectionCoordinator.RemoveByEventId(eventId);
                 }
             }))
         {
