@@ -3,12 +3,12 @@
 ## 1. 調査範囲と判定基準
 
 調査時点は 2026-09-12、`main` の HEAD は
-`cb2810811d1f3868a3f80e1f2cc914eeec5f143e` である。
+`0d37b41bab3225d0b0da791557c729dd70b37d31` である。
 対象は `winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs` と、同ファイルが直接参照する
 既存の `Services/`・`Helpers/`・`Models/`・テストである。
 
-同ファイルの物理行数は 1,531 行で、`scripts/check-code-behind-size.ps1` の上限も
-1,531 行である。終了時のイベント解除を明示する UI 配線を追加したため、前回の 1,521 行から増えている。
+同ファイルの物理行数は 1,524 行で、`scripts/check-code-behind-size.ps1` の上限も
+1,524 行である。通知予約切替の分岐と状態同期を抽出したことで、前回の 1,531 行から減っている。
 これは抽出結果と無意識の肥大化を観測するための指標であり、
 本棚卸しの完了条件や、後続作業の削減目標ではない。
 
@@ -126,7 +126,7 @@
 | 743-773 | `OnRefreshRateLimitClick` | 維持候補 | 更新判断はCoordinatorへ委譲し、一覧・InfoBarへ結果を反映する |
 | 774-784 | `OnRateLimitAgentOptionChanged` | 抽出候補 | 監視対象の収集と設定永続化をイベント内で判断している |
 | 785-799 | `OnRateLimitReminderFired` | 維持候補 | ReminderイベントをUI一覧へ反映する |
-| 800-818 | `OnToggleRateLimitReminderClick` | 抽出候補 | Cancel/Scheduleの分岐とUI状態更新を直接所有している |
+| 800-818 | `OnToggleRateLimitReminderClick` | 抽出済み | `RateLimitReminderCoordinator` が Cancel/Schedule の分岐と `IsReminderScheduled` の状態同期を所有する |
 | 819-828 | `OnTimeoutChanged` | 維持候補 | UI入力変更から設定保存を呼ぶ配線 |
 | 829-852 | `SaveCurrentSettings` | 境界確認 | 複数のUI入力を`SettingsInput`へ変換する境界。変換規則はCoordinator/Helper側で維持する |
 | 853-863 | `OnAppWindowClosing` | 維持候補 | `WindowLifecycleCoordinator` の終了要求状態を参照し、通常の閉じる要求をトレイ非表示へ変換するWindowイベント |
@@ -191,7 +191,7 @@
 | --- | --- | --- |
 | レイアウト、購読状態、トレイメニュー、ログ追従 | `MainWindowLayoutTests`、`SubscriptionControlAvailabilityTests`、`TrayMenuLayoutTests`、`LogFollowPolicyTests` | UIイベントの分岐・トレイ選択実行はcode-behindに残るため、抽出時に結果型またはCoordinatorのテストを追加 |
 | 設定入力、保存、プリセット、Resource URI | `SettingsInputParserTests`、`SettingsCoordinatorTests`、`SettingsServiceTests`、`LauncherPresetCoordinatorTests` | 直接設定更新、既知URI/理由一覧、Dialog入力の境界を整理し、入力変換をテスト対象にする |
-| レートリミットとリマインダー | `RateLimitRefreshCoordinatorTests`、`RateLimitSnapshot*Tests`、`RateLimitReminderServiceTests` | 監視対象の変更とSchedule/Cancel分岐をCoordinatorまたはServiceへ寄せる |
+| レートリミットとリマインダー | `RateLimitRefreshCoordinatorTests`、`RateLimitSnapshot*Tests`、`RateLimitReminderServiceTests`、`RateLimitReminderCoordinatorTests` | 通知予約の Schedule/Cancel 分岐と表示状態同期は抽出済み。監視対象の変更を後続で整理する |
 | 自動起動と更新 | `AutoStartCoordinatorTests`、`AutoUpdateServiceTests`、`UpdateCheckCoordinatorTests`、更新GUIの実機E2E | 判定は抽出済み。UIはPresentation反映に限定し、以後の変更でも起動時・手動時のE2Eを維持 |
 | Gatewayログイン | `GatewayLoginCoordinatorTests`、`McpLoginServiceTests`、`DeviceLoginOutputParserTests` | Device flowのUI進行、キャンセル、Dialog lifecycleは未分離。UI依存を注入可能な境界へ整理 |
 | 購読状態・レビュー登録・起動・通知 | `SubscriptionStateCoordinatorTests`、`ReviewStartCoordinatorTests`、`ReviewEventCleanupCoordinatorTests`、`ReviewNotificationPolicyTests`、`ClipboardServiceTests`、`CopyFeedbackCoordinatorTests` | 購読状態表示の判断・一回通知は抽出済み。イベント一覧上限、通知文言、コピーの表示期限・キャンセル、トレイフォールバックを個別の結果・Policyへ分離 |
@@ -209,7 +209,7 @@
 | 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`OnCopyFeedbackExpired` | `CopyFeedbackCoordinator`（コピー通知の文言・表示期限・キャンセルを抽出済み） | `CopyFeedbackCoordinatorTests`で文言・キャンセル・失敗通知を検証し、コピーGUI確認 |
 | 3 | 購読状態・トレイ実行 | `OnTrayRightClickCommandExecuteRequested`、`ExitApplication`（購読状態表示は `SubscriptionStateCoordinator` へ、コマンド振り分けは `TrayCommandCoordinator` へ、終了処理は `WindowLifecycleCoordinator` へ抽出済み） | TrayCommand/Lifecycle Coordinator | コマンド振り分けは `TrayCommandCoordinatorTests`、終了要求は `WindowLifecycleCoordinatorTests` で検証。トレイGUI確認は #295 で完了 |
 | 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification`、`ReviewNotificationFormatter` | ReviewNotification Coordinator/Presentation | 上限・終了済み・自動起動結果・通知文言のテスト、通知GUI確認 |
-| 5 | 設定・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnRateLimitAgentOptionChanged`、`OnToggleRateLimitReminderClick` | Settings/RateLimit Coordinator | 初期化中・変更時・Schedule/Cancelのテスト、設定GUI確認 |
+| 5 | 設定・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnRateLimitAgentOptionChanged`（通知予約の切替は `RateLimitReminderCoordinator` へ抽出済み） | Settings/RateLimit Coordinator | 初期化中・変更時・監視対象更新のテスト、設定GUI確認 |
 | 6 | GatewayログインUI lifecycle | `StartGatewayLoginAsync`、`HandleLoginResultAsync` | Login Dialog ControllerまたはUI向けCoordinator | 成功・失敗・キャンセル・再入のテスト、実機GUI確認 |
 | 7 | 構成ルート整理 | コンストラクター内のCoordinator/Service生成 | `App`またはcomposition root | 依存グラフと起動・終了の回帰確認 |
 

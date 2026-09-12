@@ -42,6 +42,7 @@ internal sealed partial class MainWindow : Window
     private readonly ReviewRegistrationService _reviewRegistrationService;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
     private readonly IRateLimitReminderService _rateLimitReminderService;
+    private readonly RateLimitReminderCoordinator _rateLimitReminderCoordinator;
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate = new();
     private readonly SubscriptionStateCoordinator _subscriptionStateCoordinator = new();
@@ -124,6 +125,7 @@ internal sealed partial class MainWindow : Window
         _reviewRegistrationService = reviewRegistrationService;
         _reviewEventCleanupCoordinator = reviewEventCleanupCoordinator;
         _rateLimitReminderService = rateLimitReminderService;
+        _rateLimitReminderCoordinator = new(_rateLimitReminderService);
         _rateLimitSnapshotService = new RateLimitSnapshotService(rateLimitFileService);
         _rateLimitRefreshCoordinator = new RateLimitRefreshCoordinator(
             rateLimitFileService,
@@ -757,16 +759,7 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        if (info.IsReminderScheduled)
-        {
-            _rateLimitReminderService.Cancel(info.ReminderKey);
-            info.IsReminderScheduled = false;
-        }
-        else
-        {
-            _rateLimitReminderService.Schedule(info.ReminderKey, info.Label, info.ResetAt);
-            info.IsReminderScheduled = true;
-        }
+        _rateLimitReminderCoordinator.Toggle(info);
     }
 
     private void OnTimeoutChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
