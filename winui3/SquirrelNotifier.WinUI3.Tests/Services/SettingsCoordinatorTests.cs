@@ -133,6 +133,176 @@ public sealed class SettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void KnownResourceUris_ShouldExposeSupportedReviewQueues()
+    {
+        SettingsCoordinator.KnownResourceUris.Should().Equal(
+            "queue://review/queue",
+            "queue://review/re-review-requests");
+    }
+
+    [Fact]
+    public async Task AutoDetectGatewayUrlAsync_ShouldReturnSelectedGatewayUrl()
+    {
+        Mock<IProcessInstance> process = CreateProcess("0.0.0.0:8080->8080/tcp", string.Empty, 0);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(value => value.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        SettingsCoordinator coordinator = new(_settingsService, runner.Object);
+        GatewayUrlSelectionRequest? actualRequest = null;
+
+        SettingsInputPresentation presentation = await coordinator.AutoDetectGatewayUrlAsync(
+            request =>
+            {
+                actualRequest = request;
+                return Task.FromResult(new GatewayUrlSelectionResult(
+                    IsConfirmed: true,
+                    SelectedBaseUrl: "http://localhost:8080",
+                    Route: "mcp/custom"));
+            },
+            CancellationToken.None);
+
+        actualRequest!.BaseUrls.Should().Equal("http://localhost:8080");
+        actualRequest.DefaultRoute.Should().Be(DockerPortParser.DefaultMcpRoute);
+        presentation.GatewayUrl.Should().Be("http://localhost:8080/mcp/custom");
+        presentation.ResourceUrisText.Should().BeNull();
+        presentation.HasError.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(false, "http://localhost:8080")]
+    [InlineData(true, "")]
+    public async Task AutoDetectGatewayUrlAsync_ShouldLeaveInputUnchanged_WhenSelectionCannotApply(
+        bool isConfirmed,
+        string selectedBaseUrl)
+    {
+        Mock<IProcessInstance> process = CreateProcess("0.0.0.0:8080->8080/tcp", string.Empty, 0);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(value => value.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        SettingsCoordinator coordinator = new(_settingsService, runner.Object);
+
+        SettingsInputPresentation presentation = await coordinator.AutoDetectGatewayUrlAsync(
+            _ => Task.FromResult(new GatewayUrlSelectionResult(isConfirmed, selectedBaseUrl, "/mcp/thread-owl")),
+            CancellationToken.None);
+
+        presentation.GatewayUrl.Should().BeNull();
+        presentation.ResourceUrisText.Should().BeNull();
+        presentation.HasError.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AutoDetectGatewayUrlAsync_ShouldReturnDetectionErrorWithoutOpeningSelector()
+    {
+        Mock<IProcessInstance> process = CreateProcess(string.Empty, "daemon unavailable", 1);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(value => value.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        SettingsCoordinator coordinator = new(_settingsService, runner.Object);
+        int selectorCalls = 0;
+
+        SettingsInputPresentation presentation = await coordinator.AutoDetectGatewayUrlAsync(
+            _ =>
+            {
+                selectorCalls++;
+                return Task.FromResult(new GatewayUrlSelectionResult(false, null, string.Empty));
+            },
+            CancellationToken.None);
+
+        presentation.HasError.Should().BeTrue();
+        presentation.ErrorTitle.Should().Be("Docker エラー");
+        selectorCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AddKnownResourceUrisAsync_ShouldMergeConfirmedSelection()
+    {
+        SettingsCoordinator coordinator = new(_settingsService);
+        ResourceUriSelectionRequest? actualRequest = null;
+
+        SettingsInputPresentation presentation = await coordinator.AddKnownResourceUrisAsync(
+            "queue://review/queue",
+            request =>
+            {
+                actualRequest = request;
+                return Task.FromResult(new ResourceUriSelectionResult(
+                    IsConfirmed: true,
+                    SelectedResourceUris: ["queue://review/queue", "queue://review/re-review-requests"]));
+            });
+
+        actualRequest!.Title.Should().Be("Resource URI を追加");
+        actualRequest.ResourceUris.Should().Equal(SettingsCoordinator.KnownResourceUris);
+        presentation.ResourceUrisText.Should().Be(
+            "queue://review/queue\nqueue://review/re-review-requests");
+        presentation.GatewayUrl.Should().BeNull();
+        presentation.HasError.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddKnownResourceUrisAsync_ShouldLeaveInputUnchanged_WhenSelectionHasNoResult(bool isConfirmed)
+    {
+        SettingsCoordinator coordinator = new(_settingsService);
+        IReadOnlyList<string> selectedResourceUris = isConfirmed
+            ? []
+            : ["queue://review/queue"];
+
+        SettingsInputPresentation presentation = await coordinator.AddKnownResourceUrisAsync(
+            "queue://review/queue",
+            _ => Task.FromResult(new ResourceUriSelectionResult(isConfirmed, selectedResourceUris)));
+
+        presentation.ResourceUrisText.Should().BeNull();
+        presentation.HasError.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task FetchAndAddResourceUrisAsync_ShouldReturnFetchErrorWithoutOpeningSelector()
+    {
+        SettingsCoordinator coordinator = new(
+            _settingsService,
+            mcpResourceUriReader: (_, _, _) => Task.FromResult<IReadOnlyList<string>>([]));
+        int selectorCalls = 0;
+
+        SettingsInputPresentation presentation = await coordinator.FetchAndAddResourceUrisAsync(
+            "queue://review/queue",
+            "not a url",
+            _ =>
+            {
+                selectorCalls++;
+                return Task.FromResult(new ResourceUriSelectionResult(false, []));
+            },
+            CancellationToken.None);
+
+        presentation.HasError.Should().BeTrue();
+        presentation.ErrorTitle.Should().Be("設定エラー");
+        selectorCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task FetchAndAddResourceUrisAsync_ShouldMergeSelectedResourceUris()
+    {
+        SettingsCoordinator coordinator = new(
+            _settingsService,
+            mcpResourceUriReader: (_, _, _) => Task.FromResult<IReadOnlyList<string>>(
+                ["queue://review/queue", "queue://review/re-review-requests"]));
+        ResourceUriSelectionRequest? actualRequest = null;
+
+        SettingsInputPresentation presentation = await coordinator.FetchAndAddResourceUrisAsync(
+            "queue://review/queue",
+            "http://localhost:3000/mcp",
+            request =>
+            {
+                actualRequest = request;
+                return Task.FromResult(new ResourceUriSelectionResult(
+                    IsConfirmed: true,
+                    SelectedResourceUris: request.ResourceUris));
+            },
+            CancellationToken.None);
+
+        actualRequest!.Title.Should().Be("追加する Resource URI を選択");
+        presentation.ResourceUrisText.Should().Be(
+            "queue://review/queue\nqueue://review/re-review-requests");
+        presentation.HasError.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task FetchResourceUrisAsync_ShouldReturnUrisAndPassEndpoint()
     {
         Uri? actualEndpoint = null;

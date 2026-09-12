@@ -55,7 +55,7 @@
 | 48 | `_subscriptionStateCoordinator` | 維持候補 | 購読状態の表示判断とエラー通知の一回制御を管理するCoordinator |
 | 49 | `_reviewStartCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。生成責務とUI依存の分離を検討 |
 | 50 | `_rateLimitRefreshCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。構成ルートへの移動を検討 |
-| 51 | `_settingsCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。設定UIとの境界を維持しつつ構成を検討 |
+| 54 | `_settingsCoordinator` | 維持候補 | 設定保存、Gateway URL 検出、Resource URI の候補取得・選択結果解釈を管理するCoordinator |
 | 52 | `_launcherPresetCoordinator` | 維持候補 | プリセット適用・選択同期の状態を保持するCoordinator |
 | 53 | `_autoStartCoordinator` | 維持候補 | 自動起動の判定・I/Oは抽出済み。UIは結果反映を担当 |
 | 54 | `_gatewayLoginCoordinator` | 維持候補 | ログイン開始可否と結果解釈は抽出済み。UI進行状態は後続で確認 |
@@ -66,7 +66,7 @@
 | 62 | `_isTrayPopupAvailable` | 境界確認 | UI能力状態。`TrayIconService` が所有できるか確認 |
 | 65 | `_agentExecutionWindow` | 境界確認 | Windowラッパーを保持するライフサイクル状態。保持理由は妥当だが所有者を後続で確認 |
 | 40 | `_copyFeedbackCoordinator` | 維持候補 | コピー通知の文言・表示期限・キャンセルを管理するCoordinator。MainWindowはInfoBar反映だけを担当 |
-| 634 | `_knownResourceUris` | 抽出候補 | ドメイン上の既知URI一覧。`Models/`または設定用Helperへ移しテスト可能にする |
+| — | `SettingsCoordinator.KnownResourceUris` | 抽出済み | ドメイン上の既知 URI 一覧を設定入力Coordinatorが所有し、テスト可能にする |
 | — | `ReviewRegistrationCoordinator.Reasons` | 抽出済み | 登録理由の許容値をCoordinatorが所有し、画面の選択肢へ渡す |
 
 ### 2.2 Win32境界・コンストラクター
@@ -120,10 +120,12 @@
 | 576-585 | `OnReviewedPresetSelectionChanged` | 維持候補 | Coordinatorへ適用を委譲し、UIイベントを接続する |
 | 586-609 | `ApplyLauncherPreset` | 維持候補 | Coordinatorの結果をTextBoxへ反映し、保存を呼ぶ |
 | 610-617 | `UpdateLauncherPresetComboBoxSelection` | 維持候補 | Coordinatorの選択同期をUIへ接続する |
-| 618-661 | `OnAutoDetectGatewayUrlClick` | 境界確認 | 検出結果の表示とroute選択Dialogを構築する。検出はCoordinatorへ委譲済み |
-| 662-672 | `ShowAlertDialogAsync` | 維持候補 | ContentDialog生成・表示のみ |
-| 687-707 | `OnSelectResourceUriClick` | 境界確認 | 既知URI選択Dialogと入力マージ。既知URI一覧の所有者は移動候補 |
-| 708-742 | `OnFetchResourceUriFromMcpClick` | 境界確認 | 取得はCoordinatorへ委譲済み。選択Dialogと入力マージを担当 |
+| 576-617 | `OnAutoDetectGatewayUrlClick` / `SelectGatewayUrlAsync` | 抽出済み | Docker 検出、選択結果の解釈、route 結合を `SettingsCoordinator` へ委譲し、Dialog 生成・選択値の返却だけを残す |
+| 619-629 | `ShowAlertDialogAsync` | 維持候補 | ContentDialog生成・表示のみ |
+| 631-637 | `OnSelectResourceUriClick` | 抽出済み | 既知 URI 一覧と選択結果の解釈は `SettingsCoordinator`、入力マージは `SettingsInputParser` へ委譲し、Dialog 表示だけを残す |
+| 639-647 | `OnFetchResourceUriFromMcpClick` | 抽出済み | MCP 取得・エラー分類・選択結果の解釈は `SettingsCoordinator`、入力マージは `SettingsInputParser` へ委譲し、Dialog 表示だけを残す |
+| 649-670 | `SelectResourceUrisAsync` | 維持候補 | Resource URI 選択 Dialog の生成と、選択値をCoordinatorへ返す UI 境界 |
+| 672-689 | `ApplySettingsInputPresentationAsync` | 維持候補 | Coordinator のエラー／入力更新 Presentation を Dialog と TextBox へ反映する境界 |
 | 743-773 | `OnRefreshRateLimitClick` | 維持候補 | 更新判断はCoordinatorへ委譲し、一覧・InfoBarへ結果を反映する |
 | 732-733 | `OnRateLimitAgentOptionChanged` | 抽出済み | `RateLimitAgentMonitoringCoordinator` が初期化中・無関係な変更を抑止し、監視対象 ID の収集と設定永続化を所有する |
 | 785-799 | `OnRateLimitReminderFired` | 維持候補 | ReminderイベントをUI一覧へ反映する |
@@ -191,7 +193,7 @@
 | 経路 | 既存の検証資産 | 棚卸し上の不足・後続方針 |
 | --- | --- | --- |
 | レイアウト、購読状態、トレイメニュー、ログ追従 | `MainWindowLayoutTests`、`SubscriptionControlAvailabilityTests`、`TrayMenuLayoutTests`、`LogFollowPolicyTests`、`LogEntryCollectionCoordinatorTests`、`ReviewEventCollectionCoordinatorTests`、`ReviewEventProcessingCoordinatorTests` | ログ行の追加順と上限200行の削除、レビューイベントの最新順・上限20件・ID削除、終了済みPRの除外と自動起動順序を各Coordinatorで検証済み。UIイベントの分岐・トレイ選択実行はcode-behindに残るため、必要な境界だけをGUI確認する |
-| 設定入力、保存、プリセット、Resource URI | `SettingsInputParserTests`、`SettingsCoordinatorTests`、`SettingsServiceTests`、`LauncherPresetCoordinatorTests`、`ReviewRegistrationCoordinatorTests` | 直接設定更新、既知URI/理由一覧、レビュー登録入力の境界を整理し、入力変換と結果分類をテスト対象にする |
+| 設定入力、保存、プリセット、Resource URI | `SettingsInputParserTests`、`SettingsCoordinatorTests`、`SettingsServiceTests`、`LauncherPresetCoordinatorTests`、`ReviewRegistrationCoordinatorTests` | Gateway URL と既知／MCP 取得 Resource URI の候補・選択結果を `SettingsCoordinatorTests`、重複除去を `SettingsInputParserTests` で検証し、UI には Dialog 境界だけを残す |
 | レートリミットとリマインダー | `RateLimitRefreshCoordinatorTests`、`RateLimitSnapshot*Tests`、`RateLimitReminderServiceTests`、`RateLimitReminderCoordinatorTests`、`RateLimitAgentMonitoringCoordinatorTests` | 通知予約と監視対象変更の判断・永続化は抽出済み。更新結果の UI 反映は維持する |
 | 自動起動と更新 | `AutoStartCoordinatorTests`、`AutoUpdateServiceTests`、`UpdateCheckCoordinatorTests`、更新GUIの実機E2E | 判定は抽出済み。UIはPresentation反映に限定し、以後の変更でも起動時・手動時のE2Eを維持 |
 | Gatewayログイン | `GatewayLoginCoordinatorTests`、`McpLoginServiceTests`、`DeviceLoginOutputParserTests` | Device flowのUI進行、キャンセル、Dialog lifecycleは未分離。UI依存を注入可能な境界へ整理 |
@@ -210,7 +212,7 @@
 | 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`OnCopyFeedbackExpired` | `CopyFeedbackCoordinator`（コピー通知の文言・表示期限・キャンセルを抽出済み） | `CopyFeedbackCoordinatorTests`で文言・キャンセル・失敗通知を検証し、コピーGUI確認 |
 | 3 | 購読状態・トレイ実行 | `OnTrayRightClickCommandExecuteRequested`、`ExitApplication`（購読状態表示は `SubscriptionStateCoordinator` へ、コマンド振り分けは `TrayCommandCoordinator` へ、終了処理は `WindowLifecycleCoordinator` へ抽出済み） | TrayCommand/Lifecycle Coordinator | コマンド振り分けは `TrayCommandCoordinatorTests`、終了要求は `WindowLifecycleCoordinatorTests` で検証。トレイGUI確認は #295 で完了 |
 | 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification`、`ReviewNotificationFormatter`（処理順序は `ReviewEventProcessingCoordinator` へ抽出済み） | `ReviewEventCollectionCoordinator` / `ReviewEventProcessingCoordinator` / ReviewNotification Coordinator/Presentation | イベント一覧の最新順・上限・削除、終了済みPRの除外、自動起動順序を各Coordinatorのテストで検証。通知文言はFormatter、ポップアップとバルーンのフォールバックはUI境界で確認 |
-| 5 | 設定・レビュー登録・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnEnqueueReviewClick`（レビュー登録の入力検証・結果分類は `ReviewRegistrationCoordinator` へ抽出済み。レートリミット監視対象の変更は `RateLimitAgentMonitoringCoordinator`、通知予約の切替は `RateLimitReminderCoordinator` へ抽出済み） | Settings/ReviewRegistration/RateLimit Coordinator | 初期化中・変更時の設定入力、レビュー登録結果分類、設定GUI確認 |
+| 5 | 設定・レビュー登録・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnEnqueueReviewClick`（Gateway URL 自動検出と既知／MCP Resource URI の選択結果は `SettingsCoordinator` へ、レビュー登録の入力検証・結果分類は `ReviewRegistrationCoordinator` へ、レートリミット監視対象の変更は `RateLimitAgentMonitoringCoordinator`、通知予約の切替は `RateLimitReminderCoordinator` へ抽出済み） | Settings/ReviewRegistration/RateLimit Coordinator | 初期化中・変更時の設定入力、レビュー登録結果分類、設定GUI確認 |
 | 6 | GatewayログインUI lifecycle | `StartGatewayLoginAsync`、`HandleLoginResultAsync` | Login Dialog ControllerまたはUI向けCoordinator | 成功・失敗・キャンセル・再入のテスト、実機GUI確認 |
 | 7 | 構成ルート整理 | コンストラクター内のCoordinator/Service生成 | `App`またはcomposition root | 依存グラフと起動・終了の回帰確認 |
 
