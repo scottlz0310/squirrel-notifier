@@ -39,7 +39,7 @@ internal sealed partial class MainWindow : Window
     private readonly CopyFeedbackCoordinator _copyFeedbackCoordinator;
     private readonly IWindowIconService _windowIconService;
     private readonly ITaskSchedulerService _taskSchedulerService;
-    private readonly ReviewRegistrationService _reviewRegistrationService;
+    private readonly ReviewRegistrationCoordinator _reviewRegistrationCoordinator;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitReminderCoordinator _rateLimitReminderCoordinator;
@@ -125,7 +125,7 @@ internal sealed partial class MainWindow : Window
         _notificationService = notificationService;
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
-        _reviewRegistrationService = reviewRegistrationService;
+        _reviewRegistrationCoordinator = new(reviewRegistrationService);
         _reviewEventCleanupCoordinator = reviewEventCleanupCoordinator;
         _rateLimitReminderService = rateLimitReminderService;
         _rateLimitReminderCoordinator = new(_rateLimitReminderService);
@@ -191,7 +191,7 @@ internal sealed partial class MainWindow : Window
         UpdateLauncherPresetComboBoxSelection(ReviewerPresetComboBox, settings.ReviewerLauncherPresetId);
         UpdateLauncherPresetComboBoxSelection(ReviewedPresetComboBox, settings.ReviewedLauncherPresetId);
 
-        ReasonComboBox.ItemsSource = _enqueueReviewReasons;
+        ReasonComboBox.ItemsSource = ReviewRegistrationCoordinator.Reasons;
         ReasonComboBox.SelectedIndex = 0;
 
         foreach (Models.RateLimitAgentDefinition definition in Models.RateLimitAgentCatalog.All)
@@ -633,13 +633,6 @@ internal sealed partial class MainWindow : Window
     [
         "queue://review/queue",
         "queue://review/re-review-requests",
-    ];
-
-    private static readonly string[] _enqueueReviewReasons =
-    [
-        "opened",
-        "synchronized",
-        "re-review-requested",
     ];
 
     private async void OnSelectResourceUriClick(object sender, RoutedEventArgs e)
@@ -1169,51 +1162,30 @@ internal sealed partial class MainWindow : Window
 
     private async void OnEnqueueReviewClick(object sender, RoutedEventArgs e)
     {
-        string input = PrReferenceBox.Text;
-        if (!Helpers.PrReferenceParser.TryParse(input, out Models.PrReference? reference) || reference == null)
-        {
-            await ShowAlertDialogAsync(
-                "入力エラー",
-                "PR URL（https://github.com/owner/repo/pull/123）または owner/repo#123 の形式で入力してください。");
-            return;
-        }
-
-        string reason = ReasonComboBox.SelectedItem as string ?? "opened";
-
         EnqueueReviewButton.IsEnabled = false;
         try
         {
-            Models.ReviewRegistrationResult result = await _reviewRegistrationService.RegisterAsync(
-                reference,
-                reason,
+            ReviewRegistrationPresentation presentation = await _reviewRegistrationCoordinator.RegisterAsync(
+                PrReferenceBox.Text,
+                ReasonComboBox.SelectedItem as string,
                 ConfirmSubscriptionStartAsync,
                 CancellationToken.None).ConfigureAwait(true);
 
-            switch (result.Outcome)
+            if (presentation.IsAuthenticationRequired is bool authenticationRequired)
             {
-                case Models.ReviewRegistrationOutcome.Registered:
-                    await ShowAlertDialogAsync(
-                        "レビュー登録完了",
-                        $"{reference.Owner}/{reference.Repo}#{reference.PrNumber} を reason={reason} で登録しました。\nこの画面を閉じても登録は取り消されません。")
-                        .ConfigureAwait(true);
-                    PrReferenceBox.Text = string.Empty;
-                    break;
+                // 認証エラーはログイン導線（#183）へ誘導する。ダイアログを閉じた後、
+                // 認証 InfoBar の「mcp-gateway にログイン」から復旧できる。
+                AuthRequiredInfoBar.IsOpen = authenticationRequired;
+            }
 
-                case Models.ReviewRegistrationOutcome.Cancelled:
-                case Models.ReviewRegistrationOutcome.AlreadyInProgress:
-                    break;
+            if (presentation.DialogTitle is string title)
+            {
+                await ShowAlertDialogAsync(title, presentation.DialogMessage!).ConfigureAwait(true);
+            }
 
-                case Models.ReviewRegistrationOutcome.SubscriptionStartFailed:
-                case Models.ReviewRegistrationOutcome.EnqueueFailed:
-                default:
-                    // 認証エラーはログイン導線（#183）へ誘導する。ダイアログを閉じた後、
-                    // 認証 InfoBar の「mcp-gateway にログイン」から復旧できる。
-                    AuthRequiredInfoBar.IsOpen = result.IsAuthenticationRequired;
-                    string title = result.Outcome == Models.ReviewRegistrationOutcome.SubscriptionStartFailed
-                        ? "購読開始エラー"
-                        : "レビュー登録エラー";
-                    await ShowAlertDialogAsync(title, result.ErrorMessage).ConfigureAwait(true);
-                    break;
+            if (presentation.ClearInput)
+            {
+                PrReferenceBox.Text = string.Empty;
             }
         }
         finally

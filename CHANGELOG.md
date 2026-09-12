@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Recent activity のログ保持上限と最古行の削除を `LogEntryCollectionCoordinator` へ抽出した（#262、#286）
 - Recent review events の表示順、保持上限、最古イベントの追放と削除を `ReviewEventCollectionCoordinator` へ抽出した（#262、#286）
 - レビューイベントの一覧追跡、終了済み PR の除外、自動起動呼び出しの順序を `ReviewEventProcessingCoordinator` へ抽出し、`MainWindow.xaml.cs` には実行ウィンドウと通知表示の UI 境界を残した（#262、#286）
+- レビュー登録の PR 入力検証、登録結果の分類、理由一覧と表示メッセージを `ReviewRegistrationCoordinator` へ抽出し、`MainWindow.xaml.cs` には UI 反映だけを残した（#262、#286）
 
 ## [0.9.0] - 2026-09-11
 
