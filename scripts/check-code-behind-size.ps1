@@ -24,11 +24,11 @@ $ErrorActionPreference = "Stop"
 # 値の更新は「抽出して減った」「意図して増やす」のいずれかを PR で説明できるときだけ行う。
 $limits = [ordered]@{
     # #286 の URL・ログフォルダー起動・ウィンドウアイコン・Clipboard を Service へ委譲する UI 配線分を反映。
-    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1547
+    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1545
     "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 317
     # #276 の status client / Coordinator の生成と終了時破棄を反映。
     "winui3/SquirrelNotifier.WinUI3/App.xaml.cs"                     = 109
-    "winui3/SquirrelNotifier.WinUI3/ReviewNotificationPopup.xaml.cs" = 84
+    "winui3/SquirrelNotifier.WinUI3/ReviewNotificationPopup.xaml.cs" = 82
 }
 
 $violations = New-Object System.Collections.Generic.List[string]

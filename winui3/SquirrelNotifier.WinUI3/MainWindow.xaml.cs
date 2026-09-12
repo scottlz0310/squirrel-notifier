@@ -925,9 +925,7 @@ internal sealed partial class MainWindow : Window
 
     private void ShowReviewBalloon(Models.ReviewEvent reviewEvent, bool isAutoStarted)
     {
-        string message = isAutoStarted
-            ? $"自動でレビューを開始しました: {reviewEvent.Repository}#{reviewEvent.PrNumber}"
-            : $"{reviewEvent.Reason}: {reviewEvent.Repository}#{reviewEvent.PrNumber}";
+        string message = ReviewNotificationFormatter.BuildSummary(reviewEvent, isAutoStarted);
         _trayIconService.ShowNotification(
             "レビュー通知",
             message,
