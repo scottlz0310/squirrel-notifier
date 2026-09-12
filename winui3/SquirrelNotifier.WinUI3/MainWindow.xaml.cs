@@ -63,7 +63,7 @@ internal sealed partial class MainWindow : Window
 
     // トレイポップアップのコンテンツ。XAML ではなくコードで生成し TaskbarIcon へ後から代入する（#229）
     private readonly ReviewNotificationPopup _reviewNotificationContent;
-    private bool _isTrayPopupAvailable;
+    private readonly ReviewNotificationCoordinator _reviewNotificationCoordinator;
 
     private readonly AgentExecutionWindowCoordinator _agentExecutionWindowCoordinator;
 
@@ -164,7 +164,6 @@ internal sealed partial class MainWindow : Window
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
-        _notificationService.ReviewEventReceived += OnReviewEventReceived;
         _reviewEventCleanupCoordinator.EventsRemoved += OnReviewEventsRemoved;
         _notificationService.NotificationRequested += OnNotificationRequested;
         _rateLimitReminderService.ReminderFired += OnRateLimitReminderFired;
@@ -224,6 +223,11 @@ internal sealed partial class MainWindow : Window
         _ = RefreshAutoStartStatusAsync();
 
         _trayIconService = new TrayIconService(TrayIcon);
+        _reviewNotificationCoordinator = new ReviewNotificationCoordinator(
+            ShowReviewPopup,
+            ShowReviewBalloon,
+            _loggingService.WriteAsync);
+        _notificationService.ReviewEventReceived += OnReviewEventReceived;
         TrayIcon.Visibility = Visibility.Visible;
 
         // TaskbarIcon は自身の Loaded ハンドラでトレイアイコンを生成し、そこで初めて
@@ -317,17 +321,7 @@ internal sealed partial class MainWindow : Window
     /// </remarks>
     private void AttachTrayPopup()
     {
-        try
-        {
-            TrayIcon.TrayPopup = _reviewNotificationContent;
-            _isTrayPopupAvailable = true;
-        }
-        catch (Exception ex)
-        {
-            _isTrayPopupAvailable = false;
-            _ = _loggingService.WriteAsync(
-                $"[UI] Failed to attach tray popup: {ex.Message}. レビュー通知はバルーン通知で表示します。");
-        }
+        _reviewNotificationCoordinator.AttachPopup(() => TrayIcon.TrayPopup = _reviewNotificationContent);
     }
 
     private void OnTrayOpenCommandExecuteRequested(object sender, ExecuteRequestedEventArgs args)
@@ -856,38 +850,21 @@ internal sealed partial class MainWindow : Window
 
             ReviewStartResult result = processingResult.StartResult!;
             _agentExecutionWindowCoordinator.Show(result);
-            ShowReviewNotification(reviewEvent, result.IsStarted);
+            _reviewNotificationCoordinator.Show(reviewEvent, result.IsStarted);
         }
         catch (Exception ex)
         {
             // async void のため例外はここで確実に捕捉する。イベントは一覧に残っているため、
             // 原因を記録したうえでバルーン通知へフォールバックする
             await _loggingService.WriteAsync($"[UI] Failed to handle review event: {ex.Message}");
-            ShowReviewBalloon(reviewEvent, isAutoStarted: false);
+            _reviewNotificationCoordinator.ShowFallback(reviewEvent, isAutoStarted: false);
         }
     }
 
-    private void ShowReviewNotification(Models.ReviewEvent reviewEvent, bool isAutoStarted)
+    private void ShowReviewPopup(Models.ReviewEvent reviewEvent, bool isAutoStarted)
     {
-        if (!_isTrayPopupAvailable)
-        {
-            // ポップアップの生成自体に失敗している（#229）。毎回同じ例外を出すより直接フォールバックする
-            ShowReviewBalloon(reviewEvent, isAutoStarted);
-            return;
-        }
-
-        try
-        {
-            _reviewNotificationContent.SetReviewEvent(reviewEvent, isAutoStarted);
-            _trayIconService.ShowReviewPopup();
-        }
-        catch (Exception ex)
-        {
-            // ポップアップ表示の失敗でプロセスを落とさない。イベントは一覧に残っているため、
-            // 原因をログへ残したうえでバルーン通知へフォールバックする（#199）。
-            _ = _loggingService.WriteAsync($"[UI] Failed to show review popup: {ex.Message}");
-            ShowReviewBalloon(reviewEvent, isAutoStarted);
-        }
+        _reviewNotificationContent.SetReviewEvent(reviewEvent, isAutoStarted);
+        _trayIconService.ShowReviewPopup();
     }
 
     private void ShowReviewBalloon(Models.ReviewEvent reviewEvent, bool isAutoStarted)
