@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - レビューイベントの一覧追跡、終了済み PR の除外、自動起動呼び出しの順序を `ReviewEventProcessingCoordinator` へ抽出し、`MainWindow.xaml.cs` には実行ウィンドウと通知表示の UI 境界を残した（#262、#286）
 - レビュー登録の PR 入力検証、登録結果の分類、理由一覧と表示メッセージを `ReviewRegistrationCoordinator` へ抽出し、`MainWindow.xaml.cs` には UI 反映だけを残した（#262、#286）
 - Settings の Gateway URL 自動検出と既知／MCP 取得 Resource URI の選択を `SettingsCoordinator` へ集約し、`SettingsInputParser` の重複除去を通じて `MainWindow.xaml.cs` には Dialog の生成と結果反映だけを残した（#262、#286）
+- mcp-gateway の device flow ログインについて、イベント購読、キャンセル、Opened 前のクローズ保留、結果適用を `GatewayLoginWorkflowCoordinator` へ移し、`MainWindow.xaml.cs` には Dialog の生成、DispatcherQueue 配送、UI 反映だけを残した（#262、#286）
 
 ## [0.9.0] - 2026-09-11
 
