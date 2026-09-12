@@ -55,6 +55,7 @@ internal sealed partial class MainWindow : Window
     private readonly LauncherPresetCoordinator _launcherPresetCoordinator;
     private readonly AutoStartCoordinator _autoStartCoordinator;
     private readonly GatewayLoginCoordinator _gatewayLoginCoordinator = new();
+    private readonly GatewayLoginWorkflowCoordinator _gatewayLoginWorkflowCoordinator;
     private readonly ReviewEventProcessingCoordinator _reviewEventProcessingCoordinator;
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
@@ -140,6 +141,10 @@ internal sealed partial class MainWindow : Window
         _settingsCoordinator = new SettingsCoordinator(_settingsService);
         _launcherPresetCoordinator = new LauncherPresetCoordinator();
         _autoStartCoordinator = new AutoStartCoordinator(_taskSchedulerService);
+        _gatewayLoginWorkflowCoordinator = new GatewayLoginWorkflowCoordinator(
+            _gatewayLoginCoordinator,
+            () => new McpLoginService(_settingsService, _loggingService),
+            _loggingService);
         _reviewStartCoordinator = new ReviewStartCoordinator(
             _launcherService,
             _settingsService,
@@ -1217,26 +1222,21 @@ internal sealed partial class MainWindow : Window
         await StartGatewayLoginAsync();
     }
 
-    // mcp-gateway の device flow login をアプリ内から開始する（#183）。認証処理自体は
-    // mcp-resource-subscriber が担当し、ここでは起動・進行表示・ブラウザ導線・再購読のみ行う。
     private async Task StartGatewayLoginAsync()
     {
-        GatewayLoginStartDecision decision = _gatewayLoginCoordinator.TryBeginLogin(GatewayUrlBox.Text);
-        if (!decision.CanStart)
-        {
-            if (decision.ErrorTitle is string errorTitle)
-            {
-                await ShowAlertDialogAsync(errorTitle, decision.ErrorMessage!);
-            }
+        await _gatewayLoginWorkflowCoordinator.StartAsync(
+            GatewayUrlBox.Text,
+            _service.State,
+            CreateGatewayLoginDialog,
+            new GatewayLoginUiActions(
+                isEnabled => GatewayLoginButton.IsEnabled = isEnabled,
+                () => AuthRequiredInfoBar.IsOpen = false,
+                _service.Start,
+                ShowAlertDialogAsync));
+    }
 
-            return;
-        }
-
-        GatewayLoginButton.IsEnabled = false;
-
-        var loginService = new McpLoginService(_settingsService, _loggingService);
-        using var cts = new CancellationTokenSource();
-
+    private GatewayLoginDialogPort CreateGatewayLoginDialog(GatewayLoginDialogSession session)
+    {
         var statusText = new TextBlock { Text = "認証を開始しています...", TextWrapping = TextWrapping.Wrap };
         var urlValue = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var urlCopyButton = new Button { Content = "URL をコピー", Visibility = Visibility.Collapsed };
@@ -1256,50 +1256,8 @@ internal sealed partial class MainWindow : Window
         panel.Children.Add(codeValue);
         panel.Children.Add(codeCopyButton);
 
-        DeviceVerificationView? latestView = null;
-
-        urlCopyButton.Click += (_, _) =>
-        {
-            if (latestView != null)
-            {
-                CopyToClipboard(latestView.Url);
-            }
-        };
-        codeCopyButton.Click += (_, _) =>
-        {
-            if (latestView?.UserCode is string userCode)
-            {
-                CopyToClipboard(userCode);
-            }
-        };
-
-        void OnStatus(object? sender, string message)
-        {
-            _ = DispatcherQueue.TryEnqueue(() => statusText.Text = message);
-        }
-
-        void OnVerification(object? sender, DeviceVerificationInfo info)
-        {
-            DeviceVerificationView view = GatewayLoginCoordinator.DescribeVerification(info);
-            _ = DispatcherQueue.TryEnqueue(() =>
-            {
-                latestView = view;
-                urlValue.Text = view.Url;
-                urlLabel.Visibility = Visibility.Visible;
-                urlValue.Visibility = Visibility.Visible;
-                urlCopyButton.Visibility = Visibility.Visible;
-                if (view.UserCode is string userCode)
-                {
-                    codeValue.Text = userCode;
-                    codeLabel.Visibility = Visibility.Visible;
-                    codeValue.Visibility = Visibility.Visible;
-                    codeCopyButton.Visibility = Visibility.Visible;
-                }
-            });
-        }
-
-        loginService.StatusChanged += OnStatus;
-        loginService.VerificationReceived += OnVerification;
+        urlCopyButton.Click += (_, _) => session.CopyVerificationUrl(CopyToClipboard);
+        codeCopyButton.Click += (_, _) => session.CopyUserCode(CopyToClipboard);
 
         var dialog = new ContentDialog
         {
@@ -1309,84 +1267,34 @@ internal sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
         };
 
-        // ShowAsync を呼んでもダイアログは即座に開き終わらない。開く途中で Hide() が到達すると
-        // 無視され「認証を開始しています...」のまま残るため、Opened を待ってから閉じる（#200）。
-        var closeGate = new Helpers.DeferredDialogCloseGate();
-        dialog.Opened += (_, _) =>
-        {
-            if (closeGate.MarkOpened())
-            {
-                _ = _loggingService.WriteAsync(
-                    "[UI] ログインダイアログの Opened 後に保留中のクローズ要求を実行します。");
-                dialog.Hide();
-            }
-        };
-
-        IAsyncOperation<ContentDialogResult> showOperation = dialog.ShowAsync(ContentDialogPlacement.Popup);
-
-        Task<Models.McpLoginResult> loginTask = loginService.LoginAsync(cts.Token);
-
-        // 認証完了時にダイアログを自動で閉じ、ShowAsync を終了させる
-        _ = loginTask.ContinueWith(
-            _ =>
-            {
-                bool enqueued = DispatcherQueue.TryEnqueue(() =>
-                {
-                    if (closeGate.RequestClose())
-                    {
-                        dialog.Hide();
-                    }
-                });
-
-                if (!enqueued)
-                {
-                    _ = _loggingService.WriteAsync(
-                        "[UI] ログインダイアログのクローズ要求を UI スレッドへ配送できませんでした。");
-                }
-            },
-            TaskScheduler.Default);
-
-        try
-        {
-            await showOperation;
-
-            // ShowAsync がユーザー操作（キャンセル）で戻った場合は login を中断する。
-            // 認証完了で dialog.Hide() から戻った場合は既に完了しているため cancel は無害。
-            if (!loginTask.IsCompleted)
-            {
-                cts.Cancel();
-            }
-
-            Models.McpLoginResult result = await loginTask.ConfigureAwait(true);
-            await HandleLoginResultAsync(result).ConfigureAwait(true);
-        }
-        finally
-        {
-            loginService.StatusChanged -= OnStatus;
-            loginService.VerificationReceived -= OnVerification;
-            _gatewayLoginCoordinator.EndLogin();
-            GatewayLoginButton.IsEnabled = true;
-        }
+        dialog.Opened += (_, _) => session.OnDialogOpened();
+        return new GatewayLoginDialogPort(
+            async () => { await dialog.ShowAsync(ContentDialogPlacement.Popup); },
+            dialog.Hide,
+            action => DispatcherQueue.TryEnqueue(() => action()),
+            status => statusText.Text = status,
+            view => ApplyDeviceVerification(view, urlLabel, urlValue, urlCopyButton, codeLabel, codeValue, codeCopyButton));
     }
 
-    private async Task HandleLoginResultAsync(Models.McpLoginResult result)
+    private static void ApplyDeviceVerification(
+        DeviceVerificationView view,
+        TextBlock urlLabel,
+        TextBox urlValue,
+        Button urlCopyButton,
+        TextBlock codeLabel,
+        TextBox codeValue,
+        Button codeCopyButton)
     {
-        GatewayLoginPresentation presentation = GatewayLoginCoordinator.DescribeResult(result, _service.State);
+        urlValue.Text = view.Url;
+        urlLabel.Visibility = Visibility.Visible;
+        urlValue.Visibility = Visibility.Visible;
+        urlCopyButton.Visibility = Visibility.Visible;
 
-        if (presentation.CloseAuthRequiredInfoBar)
-        {
-            AuthRequiredInfoBar.IsOpen = false;
-        }
-
-        if (presentation.RestartSubscription)
-        {
-            _service.Start();
-        }
-
-        if (presentation.DialogTitle is string title)
-        {
-            await ShowAlertDialogAsync(title, presentation.DialogMessage!);
-        }
+        Visibility codeVisibility = view.HasUserCode ? Visibility.Visible : Visibility.Collapsed;
+        codeValue.Text = view.UserCode ?? string.Empty;
+        codeLabel.Visibility = codeVisibility;
+        codeValue.Visibility = codeVisibility;
+        codeCopyButton.Visibility = codeVisibility;
     }
 
     private void CopyToClipboard(string text)

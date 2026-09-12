@@ -22,7 +22,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 /// アクセストークン・リフレッシュトークン・Authorization ヘッダーを設定・ログ・
 /// コマンドライン引数へ出力しない.
 /// </summary>
-internal sealed class McpLoginService
+internal sealed class McpLoginService : IGatewayLoginService
 {
     // 承認待ちはユーザーがブラウザ操作を終えるまで数分かかりうるため、通知 timeout とは
     // 別に既定 5 分を確保する。テストは短い値を注入する.
