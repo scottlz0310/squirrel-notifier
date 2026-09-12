@@ -55,6 +55,7 @@ internal sealed partial class MainWindow : Window
     private readonly LauncherPresetCoordinator _launcherPresetCoordinator;
     private readonly AutoStartCoordinator _autoStartCoordinator;
     private readonly GatewayLoginCoordinator _gatewayLoginCoordinator = new();
+    private readonly ReviewEventProcessingCoordinator _reviewEventProcessingCoordinator;
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
     private ScrollViewer? _logListScrollViewer;
@@ -145,6 +146,10 @@ internal sealed partial class MainWindow : Window
             _rateLimitSnapshotService,
             _autoPauseGate,
             _loggingService);
+        _reviewEventProcessingCoordinator = new ReviewEventProcessingCoordinator(
+            _reviewEventCollectionCoordinator,
+            _reviewEventCleanupCoordinator,
+            _reviewStartCoordinator.TryStartAutomaticallyAsync);
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -835,25 +840,20 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    // UI スレッド上で受信イベントを処理する。自動起動（#254）の結果によって通知の文言が
-    // 変わるため、起動を待ってから通知する
+    // UI スレッド上で処理結果を表示へ反映する。保持・終了確認・自動起動の順序は
+    // ReviewEventProcessingCoordinator が管理する
     private async void HandleReviewEvent(Models.ReviewEvent reviewEvent)
     {
         try
         {
-            Models.ReviewEvent? evictedEvent = _reviewEventCollectionCoordinator.Add(reviewEvent);
-            _reviewEventCleanupCoordinator.Track(reviewEvent);
-            if (evictedEvent != null)
-            {
-                _reviewEventCleanupCoordinator.Untrack(evictedEvent.EventId);
-            }
-
-            if (!await _reviewEventCleanupCoordinator.IsActionAllowedAsync(reviewEvent, CancellationToken.None))
+            ReviewEventProcessingResult processingResult =
+                await _reviewEventProcessingCoordinator.ProcessAsync(reviewEvent);
+            if (!processingResult.ShouldNotify)
             {
                 return;
             }
 
-            ReviewStartResult result = await _reviewStartCoordinator.TryStartAutomaticallyAsync(reviewEvent);
+            ReviewStartResult result = processingResult.StartResult!;
             ShowAgentExecutionWindow(result);
             ShowReviewNotification(reviewEvent, result.IsStarted);
         }
