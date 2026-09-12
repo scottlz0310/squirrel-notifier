@@ -2,7 +2,6 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
-using Microsoft.UI.Xaml;
 using SquirrelNotifier.WinUI3;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -59,26 +58,4 @@ internal interface IAgentExecutionWindow
     event EventHandler? Closed;
 
     void Activate();
-}
-
-/// <summary>
-/// <see cref="AgentExecutionWindow"/> の UI イベントを Coordinator 向けに変換する.
-/// </summary>
-internal sealed class AgentExecutionWindowAdapter : IAgentExecutionWindow
-{
-    private readonly AgentExecutionWindow _window;
-
-    public AgentExecutionWindowAdapter(AgentExecutionWindow window)
-    {
-        ArgumentNullException.ThrowIfNull(window);
-        _window = window;
-        _window.Closed += OnWindowClosed;
-    }
-
-    public event EventHandler? Closed;
-
-    public void Activate() => _window.Activate();
-
-    private void OnWindowClosed(object sender, WindowEventArgs args)
-        => Closed?.Invoke(this, EventArgs.Empty);
 }
