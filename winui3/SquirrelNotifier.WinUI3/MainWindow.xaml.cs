@@ -65,10 +65,7 @@ internal sealed partial class MainWindow : Window
     private readonly ReviewNotificationPopup _reviewNotificationContent;
     private bool _isTrayPopupAvailable;
 
-    // ライブログウィンドウ（#144）のマネージド参照。保持しないと ExecuteReviewAsync 終了後に
-    // Window ラッパーが GC 対象になり、失敗時に診断用として開き続けるべきウィンドウが死ぬ。
-    // 同時実行抑止によりウィンドウは常に 1 つのため単一フィールドで足りる
-    private AgentExecutionWindow? _agentExecutionWindow;
+    private readonly AgentExecutionWindowCoordinator _agentExecutionWindowCoordinator;
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
@@ -151,6 +148,15 @@ internal sealed partial class MainWindow : Window
             _rateLimitSnapshotService,
             _autoPauseGate,
             _loggingService);
+        _agentExecutionWindowCoordinator = new AgentExecutionWindowCoordinator(
+            launch => new AgentExecutionWindowAdapter(
+                new AgentExecutionWindow(
+                    launch.Session,
+                    launch.ViewModel,
+                    launch.RateLimitGaugeViewModel,
+                    launch.RateLimitSessionMonitor,
+                    _autoPauseGate,
+                    _launcherService.Cancel)));
         _reviewEventProcessingCoordinator = new ReviewEventProcessingCoordinator(
             _reviewEventCollectionCoordinator,
             _reviewEventCleanupCoordinator,
@@ -1096,29 +1102,7 @@ internal sealed partial class MainWindow : Window
     /// </summary>
     /// <param name="result">レビュー起動の結果。起動していない場合は何もしない.</param>
     private void ShowAgentExecutionWindow(ReviewStartResult result)
-    {
-        if (result.Launch is not ReviewStartLaunch launch)
-        {
-            return;
-        }
-
-        var window = new AgentExecutionWindow(
-            launch.Session,
-            launch.ViewModel,
-            launch.RateLimitGaugeViewModel,
-            launch.RateLimitSessionMonitor,
-            _autoPauseGate,
-            _launcherService.Cancel);
-        _agentExecutionWindow = window;
-        window.Closed += (_, _) =>
-        {
-            if (ReferenceEquals(_agentExecutionWindow, window))
-            {
-                _agentExecutionWindow = null;
-            }
-        };
-        window.Activate();
-    }
+        => _agentExecutionWindowCoordinator.Show(result);
 
     // 誤操作で常用されないよう既定ボタンはキャンセル側にする（#147 手動 override の設計論点）
     private async Task<bool> ConfirmAutoPauseOverrideAsync(AutoPausedLimit pausedLimit)
