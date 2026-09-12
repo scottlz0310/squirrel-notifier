@@ -43,6 +43,7 @@ internal sealed partial class MainWindow : Window
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitReminderCoordinator _rateLimitReminderCoordinator;
+    private readonly RateLimitAgentMonitoringCoordinator _rateLimitAgentMonitoringCoordinator;
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate = new();
     private readonly SubscriptionStateCoordinator _subscriptionStateCoordinator = new();
@@ -111,6 +112,7 @@ internal sealed partial class MainWindow : Window
         _service = service;
         _loggingService = loggingService;
         _settingsService = settingsService;
+        _rateLimitAgentMonitoringCoordinator = new(_settingsService);
         _urlOpener = urlOpener;
         _fileOpener = fileOpener;
         _clipboardService = clipboardService;
@@ -197,6 +199,7 @@ internal sealed partial class MainWindow : Window
             _rateLimitAgentOptions.Add(option);
         }
 
+        _rateLimitAgentMonitoringCoordinator.CompleteInitialization();
         _isInitializing = false;
 
         UpdateAutoPauseNotApplicableInfoBar();
@@ -727,15 +730,7 @@ internal sealed partial class MainWindow : Window
     }
 
     private void OnRateLimitAgentOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (_isInitializing || e.PropertyName != nameof(Models.RateLimitAgentOption.IsMonitored))
-        {
-            return;
-        }
-
-        List<string> monitoredIds = _rateLimitAgentOptions.Where(o => o.IsMonitored).Select(o => o.Id).ToList();
-        _settingsService.UpdateRateLimitMonitoredAgentIds(monitoredIds);
-    }
+        => _rateLimitAgentMonitoringCoordinator.Handle(_rateLimitAgentOptions, e);
 
     private void OnRateLimitReminderFired(object? sender, string reminderKey)
     {
