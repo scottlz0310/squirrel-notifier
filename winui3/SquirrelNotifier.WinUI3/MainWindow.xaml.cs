@@ -47,6 +47,7 @@ internal sealed partial class MainWindow : Window
     private readonly AutoPauseGate _autoPauseGate = new();
     private readonly SubscriptionStateCoordinator _subscriptionStateCoordinator = new();
     private readonly ReviewStartCoordinator _reviewStartCoordinator;
+    private readonly TrayCommandCoordinator _trayCommandCoordinator;
     private readonly RateLimitRefreshCoordinator _rateLimitRefreshCoordinator;
     private readonly SettingsCoordinator _settingsCoordinator;
     private readonly LauncherPresetCoordinator _launcherPresetCoordinator;
@@ -117,6 +118,12 @@ internal sealed partial class MainWindow : Window
         _copyFeedbackCoordinator.ExpirationFailed += OnCopyFeedbackExpirationFailed;
         _updateCheckCoordinator = new UpdateCheckCoordinator(
             autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, _urlOpener);
+        _trayCommandCoordinator = new TrayCommandCoordinator(
+            ShowWindowFromTray,
+            _service.Start,
+            _service.StopAsync,
+            () => CheckForUpdatesAsync(showNoUpdateDialog: true),
+            ExitApplication);
         _notificationService = notificationService;
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
@@ -310,27 +317,7 @@ internal sealed partial class MainWindow : Window
         // 表示のたびに現在の購読状態でメニューを組み直す（#202）
         TrayMenuCommand? selected = TrayContextMenu.Show(_hwnd, TrayMenuLayout.Build(_service.State));
 
-        switch (selected)
-        {
-            case TrayMenuCommand.Open:
-                ShowWindowFromTray();
-                break;
-            case TrayMenuCommand.Start:
-                _service.Start();
-                break;
-            case TrayMenuCommand.Stop:
-                await _service.StopAsync();
-                break;
-            case TrayMenuCommand.CheckForUpdates:
-                await CheckForUpdatesAsync(showNoUpdateDialog: true);
-                break;
-            case TrayMenuCommand.Exit:
-                ExitApplication();
-                break;
-            case null:
-            default:
-                break;
-        }
+        await _trayCommandCoordinator.ExecuteAsync(selected);
     }
 
     private void ExitApplication()
