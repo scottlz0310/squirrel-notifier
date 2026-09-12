@@ -575,25 +575,24 @@ internal sealed partial class MainWindow : Window
 
     private async void OnAutoDetectGatewayUrlClick(object sender, RoutedEventArgs e)
     {
-        GatewayDetectionResult detection = await _settingsCoordinator.DetectGatewayUrlsAsync(CancellationToken.None);
-        if (!detection.Succeeded)
-        {
-            await ShowAlertDialogAsync(detection.ErrorTitle!, detection.ErrorMessage!);
-            return;
-        }
+        SettingsInputPresentation presentation = await _settingsCoordinator.AutoDetectGatewayUrlAsync(
+            SelectGatewayUrlAsync,
+            CancellationToken.None);
+        await ApplySettingsInputPresentationAsync(presentation);
+    }
 
-        // mcp-gateway は route（例: /mcp/thread-owl）配下に MCP endpoint を割り当てるため、
-        // 検出した base URL（host:port）に加えて route パスを選択・入力できるようにする。
+    private async Task<GatewayUrlSelectionResult> SelectGatewayUrlAsync(GatewayUrlSelectionRequest request)
+    {
         var portCombo = new ComboBox
         {
-            ItemsSource = detection.BaseUrls,
+            ItemsSource = request.BaseUrls,
             SelectedIndex = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         var routeBox = new TextBox
         {
-            Text = DockerPortParser.DefaultMcpRoute,
-            PlaceholderText = DockerPortParser.DefaultMcpRoute,
+            Text = request.DefaultRoute,
+            PlaceholderText = request.DefaultRoute,
         };
         var panel = new StackPanel { Spacing = 8 };
         panel.Children.Add(new TextBlock { Text = "ポート（コンテナ）:" });
@@ -611,10 +610,10 @@ internal sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
         };
         ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
-        if (result == ContentDialogResult.Primary && portCombo.SelectedItem is string selectedBase)
-        {
-            GatewayUrlBox.Text = DockerPortParser.CombineRoute(selectedBase, routeBox.Text);
-        }
+        return new GatewayUrlSelectionResult(
+            result == ContentDialogResult.Primary,
+            portCombo.SelectedItem as string,
+            routeBox.Text);
     }
 
     private async Task ShowAlertDialogAsync(string title, string message)
@@ -629,53 +628,35 @@ internal sealed partial class MainWindow : Window
         await dialog.ShowAsync(ContentDialogPlacement.Popup);
     }
 
-    private static readonly string[] _knownResourceUris =
-    [
-        "queue://review/queue",
-        "queue://review/re-review-requests",
-    ];
-
     private async void OnSelectResourceUriClick(object sender, RoutedEventArgs e)
     {
-        var listView = new ListView { ItemsSource = _knownResourceUris, SelectionMode = ListViewSelectionMode.Multiple, MaxHeight = 160 };
-        var selectDialog = new ContentDialog
-        {
-            Title = "Resource URI を追加",
-            Content = listView,
-            PrimaryButtonText = "追加",
-            CloseButtonText = "キャンセル",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = Content.XamlRoot,
-        };
-        ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
-        if (result == ContentDialogResult.Primary && listView.SelectedItems.Count > 0)
-        {
-            ResourceUrisBox.Text = Helpers.SettingsInputParser.MergeResourceUris(
-                ResourceUrisBox.Text,
-                listView.SelectedItems.OfType<string>());
-        }
+        SettingsInputPresentation presentation = await _settingsCoordinator.AddKnownResourceUrisAsync(
+            ResourceUrisBox.Text,
+            SelectResourceUrisAsync);
+        await ApplySettingsInputPresentationAsync(presentation);
     }
 
     private async void OnFetchResourceUriFromMcpClick(object sender, RoutedEventArgs e)
     {
-        ResourceUriFetchResult fetch = await _settingsCoordinator.FetchResourceUrisAsync(
+        SettingsInputPresentation presentation = await _settingsCoordinator.FetchAndAddResourceUrisAsync(
+            ResourceUrisBox.Text,
             GatewayUrlBox.Text,
+            SelectResourceUrisAsync,
             CancellationToken.None);
-        if (!fetch.Succeeded)
-        {
-            await ShowAlertDialogAsync(fetch.ErrorTitle!, fetch.ErrorMessage!);
-            return;
-        }
+        await ApplySettingsInputPresentationAsync(presentation);
+    }
 
+    private async Task<ResourceUriSelectionResult> SelectResourceUrisAsync(ResourceUriSelectionRequest request)
+    {
         var listView = new ListView
         {
-            ItemsSource = fetch.ResourceUris,
+            ItemsSource = request.ResourceUris,
             SelectionMode = ListViewSelectionMode.Multiple,
             MaxHeight = 160,
         };
         var selectDialog = new ContentDialog
         {
-            Title = "追加する Resource URI を選択",
+            Title = request.Title,
             Content = listView,
             PrimaryButtonText = "追加",
             CloseButtonText = "キャンセル",
@@ -683,11 +664,27 @@ internal sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
         };
         ContentDialogResult result = await selectDialog.ShowAsync(ContentDialogPlacement.Popup);
-        if (result == ContentDialogResult.Primary && listView.SelectedItems.Count > 0)
+        return new ResourceUriSelectionResult(
+            result == ContentDialogResult.Primary,
+            listView.SelectedItems.OfType<string>().ToList());
+    }
+
+    private async Task ApplySettingsInputPresentationAsync(SettingsInputPresentation presentation)
+    {
+        if (presentation.HasError)
         {
-            ResourceUrisBox.Text = Helpers.SettingsInputParser.MergeResourceUris(
-                ResourceUrisBox.Text,
-                listView.SelectedItems.OfType<string>());
+            await ShowAlertDialogAsync(presentation.ErrorTitle!, presentation.ErrorMessage!);
+            return;
+        }
+
+        if (presentation.GatewayUrl is not null)
+        {
+            GatewayUrlBox.Text = presentation.GatewayUrl;
+        }
+
+        if (presentation.ResourceUrisText is not null)
+        {
+            ResourceUrisBox.Text = presentation.ResourceUrisText;
         }
     }
 
