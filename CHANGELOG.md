@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- コピー通知の文言・表示期限・再表示時のキャンセルを `CopyFeedbackCoordinator` へ抽出し、`MainWindow.xaml.cs` には InfoBar 反映と UI スレッド配送だけを残した（#262）
 - `MainWindow.xaml.cs` の残存責務を棚卸しし、責務境界・検証資産・後続の抽出計画を文書化した（#285）。行数とカバレッジは抽出結果を観測する指標として扱い、数値の達成自体は目的としない
 - `MainWindow.xaml.cs` のURL起動を既存の `IUrlOpener` に委譲し、URL経路のプロセス起動をUIコードから分離した（#286）
 - `MainWindow.xaml.cs` のログフォルダー起動を `IFileOpener` に委譲し、フォルダー経路のプロセス起動をUIコードから分離した（#286）

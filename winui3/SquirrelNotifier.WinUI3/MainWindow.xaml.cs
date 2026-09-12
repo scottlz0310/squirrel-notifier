@@ -37,6 +37,7 @@ internal sealed partial class MainWindow : Window
     private readonly IUrlOpener _urlOpener;
     private readonly IFileOpener _fileOpener;
     private readonly IClipboardService _clipboardService;
+    private readonly CopyFeedbackCoordinator _copyFeedbackCoordinator;
     private readonly IWindowIconService _windowIconService;
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly ReviewRegistrationService _reviewRegistrationService;
@@ -63,7 +64,6 @@ internal sealed partial class MainWindow : Window
     // Window ラッパーが GC 対象になり、失敗時に診断用として開き続けるべきウィンドウが死ぬ。
     // 同時実行抑止によりウィンドウは常に 1 つのため単一フィールドで足りる
     private AgentExecutionWindow? _agentExecutionWindow;
-    private CancellationTokenSource? _copyFeedbackCts;
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
@@ -112,6 +112,9 @@ internal sealed partial class MainWindow : Window
         _urlOpener = urlOpener;
         _fileOpener = fileOpener;
         _clipboardService = clipboardService;
+        _copyFeedbackCoordinator = new CopyFeedbackCoordinator();
+        _copyFeedbackCoordinator.Expired += OnCopyFeedbackExpired;
+        _copyFeedbackCoordinator.ExpirationFailed += OnCopyFeedbackExpirationFailed;
         _updateCheckCoordinator = new UpdateCheckCoordinator(
             autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, _urlOpener);
         _notificationService = notificationService;
@@ -342,6 +345,9 @@ internal sealed partial class MainWindow : Window
         _reviewNotificationContent.LaunchReviewRequested -= OnTrayPopupLaunchReviewRequested;
         _reviewNotificationContent.OpenAppRequested -= OnTrayPopupOpenAppRequested;
         _reviewNotificationContent.DismissRequested -= OnTrayPopupDismissRequested;
+        _copyFeedbackCoordinator.Expired -= OnCopyFeedbackExpired;
+        _copyFeedbackCoordinator.ExpirationFailed -= OnCopyFeedbackExpirationFailed;
+        _copyFeedbackCoordinator.Dispose();
         _trayIconService?.Dispose();
         Close();
     }
@@ -1042,44 +1048,34 @@ internal sealed partial class MainWindow : Window
 
             _clipboardService.SetText(commandLine);
 
-            ShowCopyFeedback("起動コマンドをクリップボードにコピーしました。", isError: false);
+            ShowCopyFeedback(_copyFeedbackCoordinator.ShowLaunchCommandCopied());
         }
         catch (Exception ex)
         {
-            ShowCopyFeedback($"コピーに失敗しました: {ex.Message}", isError: true);
+            ShowCopyFeedback(_copyFeedbackCoordinator.ShowFailure(ex));
         }
     }
 
-    private void ShowCopyFeedback(string message, bool isError)
+    private void ShowCopyFeedback(CopyFeedbackPresentation presentation)
     {
-        _copyFeedbackCts?.Cancel();
-        _copyFeedbackCts?.Dispose();
-        _copyFeedbackCts = new CancellationTokenSource();
-        CancellationToken token = _copyFeedbackCts.Token;
-
-        CopyFeedbackInfoBar.Severity = isError ? InfoBarSeverity.Error : InfoBarSeverity.Success;
-        CopyFeedbackInfoBar.Message = message;
+        CopyFeedbackInfoBar.Severity = presentation.Severity == CopyFeedbackSeverity.Error
+            ? InfoBarSeverity.Error
+            : InfoBarSeverity.Success;
+        CopyFeedbackInfoBar.Message = presentation.Message;
         CopyFeedbackInfoBar.IsOpen = true;
-
-        _ = HideCopyFeedbackAfterDelayAsync(token);
     }
 
-    private async Task HideCopyFeedbackAfterDelayAsync(CancellationToken token)
+    private void OnCopyFeedbackExpired(object? sender, EventArgs e)
     {
-        try
+        if (!DispatcherQueue.TryEnqueue(() => CopyFeedbackInfoBar.IsOpen = false))
         {
-            await Task.Delay(TimeSpan.FromSeconds(2.5), token).ConfigureAwait(true);
-            CopyFeedbackInfoBar.IsOpen = false;
+            _ = _loggingService.WriteAsync("コピー通知の自動クローズを UI へ配送できませんでした。");
         }
-        catch (OperationCanceledException)
-        {
-            // superseded by a newer copy feedback; nothing to do
-        }
-        catch (Exception ex)
-        {
-            // ウィンドウ終了中などで InfoBar 更新が失敗しても致命的ではないためログのみ
-            _ = _loggingService.WriteAsync($"Failed to hide copy feedback InfoBar: {ex.Message}");
-        }
+    }
+
+    private void OnCopyFeedbackExpirationFailed(object? sender, CopyFeedbackExpirationFailure failure)
+    {
+        _ = _loggingService.WriteAsync(failure.Message);
     }
 
     /// <summary>
@@ -1467,11 +1463,11 @@ internal sealed partial class MainWindow : Window
         try
         {
             _clipboardService.SetText(text);
-            ShowCopyFeedback("クリップボードにコピーしました。", isError: false);
+            ShowCopyFeedback(_copyFeedbackCoordinator.ShowTextCopied());
         }
         catch (Exception ex)
         {
-            ShowCopyFeedback($"コピーに失敗しました: {ex.Message}", isError: true);
+            ShowCopyFeedback(_copyFeedbackCoordinator.ShowFailure(ex));
         }
     }
 
