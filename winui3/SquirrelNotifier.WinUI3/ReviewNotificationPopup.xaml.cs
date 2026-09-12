@@ -41,9 +41,7 @@ public sealed partial class ReviewNotificationPopup : UserControl
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
         _reviewEvent = reviewEvent;
-        TitleText.Text = isAutoStarted
-            ? $"自動でレビューを開始しました: {reviewEvent.Repository}#{reviewEvent.PrNumber}"
-            : $"{reviewEvent.Reason}: {reviewEvent.Repository}#{reviewEvent.PrNumber}";
+        TitleText.Text = ReviewNotificationFormatter.BuildSummary(reviewEvent, isAutoStarted);
         MessageText.Text = reviewEvent.Message;
         OpenPrButton.Visibility = UrlValidator.IsSafeGitHubUrl(
             reviewEvent.PrUrl,

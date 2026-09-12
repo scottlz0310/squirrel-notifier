@@ -3,12 +3,12 @@
 ## 1. 調査範囲と判定基準
 
 調査時点は 2026-09-12、`main` の HEAD は
-`498abaa1ad8fada547bef4754f2015ebe3b9dbde` である。
+`6472a1584b0110a96fe74471e2c39c37be0c1a16` である。
 対象は `winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs` と、同ファイルが直接参照する
 既存の `Services/`・`Helpers/`・`Models/`・テストである。
 
-同ファイルの物理行数は 1,547 行で、`scripts/check-code-behind-size.ps1` の上限も
-1,547 行である。これは抽出結果と無意識の肥大化を観測するための指標であり、
+同ファイルの物理行数は 1,545 行で、`scripts/check-code-behind-size.ps1` の上限も
+1,545 行である。これは抽出結果と無意識の肥大化を観測するための指標であり、
 本棚卸しの完了条件や、後続作業の削減目標ではない。
 
 判定は次の基準で行う。
@@ -141,7 +141,7 @@
 | 913-924 | `OnReviewEventReceived` | 維持候補 | UIスレッドへ配送するDispatcherQueue境界 |
 | 925-956 | `HandleReviewEvent` | 抽出候補 | 一覧上限、削除追跡、Action可否、自動起動、通知の順序を判断している |
 | 957-979 | `ShowReviewNotification` | 境界確認 | ポップアップとバルーンのフォールバック境界。UI所有の理由を明文化する |
-| 980-990 | `ShowReviewBalloon` | 抽出候補 | 自動起動か否かによる通知文言の規則を含む |
+| 926-933 | `ShowReviewBalloon` | 境界確認 | 通知文言は `ReviewNotificationFormatter` へ委譲し、ここにはトレイ通知の表示だけを残す |
 | 991-996 | `OnNotificationRequested` | 維持候補 | 通知モデルをトレイ通知へ反映する配線 |
 | 997-1005 | `OnDismissEventClick` | 境界確認 | UI一覧の削除とCleanup Coordinatorの追跡解除を接続する |
 | 1006-1023 | `OnReviewEventsRemoved` | 維持候補 | Coordinatorの削除結果をUI一覧へ反映する |
@@ -204,9 +204,9 @@
 | 優先 | 抽出単位 | 主な対象 | 受け皿候補 | 必要な検証 |
 | ---: | --- | --- | --- | --- |
 | 1 | 外部起動・OS境界 | `CopyToClipboard`（URL 起動は #286 初回実装、フォルダー起動は #289、ウィンドウアイコンは #290、Clipboard は #291 で移行済み） | `IClipboardService`、アイコン Service | fake を使う失敗・引数テスト、URL・フォルダー・アイコン・Clipboard を含む #166 の該当 GUI 確認 |
-| 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`OnCopyFeedbackExpired`、`ShowReviewBalloon` | `CopyFeedbackCoordinator`（コピー通知の文言・表示期限・キャンセルを抽出済み）、通知Policy | `CopyFeedbackCoordinatorTests`で文言・キャンセル・失敗通知を検証し、コピーGUI確認。`ShowReviewBalloon`は後続で整理 |
+| 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`OnCopyFeedbackExpired` | `CopyFeedbackCoordinator`（コピー通知の文言・表示期限・キャンセルを抽出済み） | `CopyFeedbackCoordinatorTests`で文言・キャンセル・失敗通知を検証し、コピーGUI確認 |
 | 3 | 購読状態・トレイ実行 | `OnStateChanged`、`UpdateTrayIcon`、`OnTrayRightClickCommandExecuteRequested`、`ExitApplication` | 状態Presentation、TrayCommand/Lifecycle Coordinator | 状態表・一回通知・終了順序のテスト、トレイGUI確認 |
-| 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification` | ReviewNotification Coordinator/Presentation | 上限・終了済み・自動起動結果のテスト、通知GUI確認 |
+| 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification`、`ReviewNotificationFormatter` | ReviewNotification Coordinator/Presentation | 上限・終了済み・自動起動結果・通知文言のテスト、通知GUI確認 |
 | 5 | 設定・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnRateLimitAgentOptionChanged`、`OnToggleRateLimitReminderClick` | Settings/RateLimit Coordinator | 初期化中・変更時・Schedule/Cancelのテスト、設定GUI確認 |
 | 6 | GatewayログインUI lifecycle | `StartGatewayLoginAsync`、`HandleLoginResultAsync` | Login Dialog ControllerまたはUI向けCoordinator | 成功・失敗・キャンセル・再入のテスト、実機GUI確認 |
 | 7 | 構成ルート整理 | コンストラクター内のCoordinator/Service生成 | `App`またはcomposition root | 依存グラフと起動・終了の回帰確認 |
