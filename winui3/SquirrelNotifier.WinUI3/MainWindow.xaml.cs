@@ -26,7 +26,7 @@ internal sealed partial class MainWindow : Window
     private readonly LoggingService _loggingService;
     private readonly SettingsService _settingsService;
     private readonly UpdateCheckCoordinator _updateCheckCoordinator;
-    private readonly ObservableCollection<string> _logEntries = new();
+    private readonly LogEntryCollectionCoordinator _logEntryCoordinator = new();
     private readonly ObservableCollection<Models.ReviewEvent> _reviewEvents = new();
     private readonly TrayIconService _trayIconService;
     private readonly nint _hwnd;
@@ -157,7 +157,7 @@ internal sealed partial class MainWindow : Window
         _reviewNotificationContent.LaunchReviewRequested += OnTrayPopupLaunchReviewRequested;
         _reviewNotificationContent.OpenAppRequested += OnTrayPopupOpenAppRequested;
         _reviewNotificationContent.DismissRequested += OnTrayPopupDismissRequested;
-        LogList.ItemsSource = _logEntries;
+        LogList.ItemsSource = _logEntryCoordinator.Entries;
         ReviewEventList.ItemsSource = _reviewEvents;
         RateLimitList.ItemsSource = _rateLimits;
         RateLimitAgentList.ItemsSource = _rateLimitAgentOptions;
@@ -417,16 +417,11 @@ internal sealed partial class MainWindow : Window
             // 「末尾にいた」状態が末尾付近でなくなるため（#232）
             bool shouldFollow = ShouldFollowLogTail();
 
-            _logEntries.Add(line);
-            const int maxEntries = 200;
-            if (_logEntries.Count > maxEntries)
-            {
-                _logEntries.RemoveAt(0);
-            }
+            _logEntryCoordinator.Add(line);
 
-            if (shouldFollow && _logEntries.Count > 0)
+            if (shouldFollow && _logEntryCoordinator.Entries.Count > 0)
             {
-                LogList.ScrollIntoView(_logEntries[^1]);
+                LogList.ScrollIntoView(_logEntryCoordinator.Entries[^1]);
             }
         });
     }
