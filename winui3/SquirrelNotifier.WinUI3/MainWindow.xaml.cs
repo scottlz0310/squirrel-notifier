@@ -22,7 +22,6 @@ namespace SquirrelNotifier.WinUI3;
 [ExcludeFromCodeCoverage]
 internal sealed partial class MainWindow : Window
 {
-    private bool _isExitRequested;
     private readonly McpSubscriptionService _service;
     private readonly LoggingService _loggingService;
     private readonly SettingsService _settingsService;
@@ -48,6 +47,7 @@ internal sealed partial class MainWindow : Window
     private readonly SubscriptionStateCoordinator _subscriptionStateCoordinator = new();
     private readonly ReviewStartCoordinator _reviewStartCoordinator;
     private readonly TrayCommandCoordinator _trayCommandCoordinator;
+    private readonly WindowLifecycleCoordinator _windowLifecycleCoordinator;
     private readonly RateLimitRefreshCoordinator _rateLimitRefreshCoordinator;
     private readonly SettingsCoordinator _settingsCoordinator;
     private readonly LauncherPresetCoordinator _launcherPresetCoordinator;
@@ -94,7 +94,7 @@ internal sealed partial class MainWindow : Window
 
         // Auto-Pause（#147）の状態はセッション終了時（ライブログウィンドウ側の評価）にも
         // 変わるため、イベント経由でメイン UI の表示へ反映する
-        _autoPauseGate.StateChanged += (_, _) => UpdateAutoPauseInfoBar();
+        _autoPauseGate.StateChanged += OnAutoPauseStateChanged;
 
         // Set window size (WinUI3 requires this in code)
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -118,12 +118,6 @@ internal sealed partial class MainWindow : Window
         _copyFeedbackCoordinator.ExpirationFailed += OnCopyFeedbackExpirationFailed;
         _updateCheckCoordinator = new UpdateCheckCoordinator(
             autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, _urlOpener);
-        _trayCommandCoordinator = new TrayCommandCoordinator(
-            ShowWindowFromTray,
-            _service.Start,
-            _service.StopAsync,
-            () => CheckForUpdatesAsync(showNoUpdateDialog: true),
-            ExitApplication);
         _notificationService = notificationService;
         _launcherService = launcherService;
         _taskSchedulerService = taskSchedulerService;
@@ -215,6 +209,14 @@ internal sealed partial class MainWindow : Window
         // TrayIcon.WindowHandle が確定する。このハンドラは TaskbarIcon のコンストラクタで
         // 登録済みのため後から登録するこちらが後に走る（#229）
         TrayIcon.Loaded += OnTrayIconLoaded;
+
+        _windowLifecycleCoordinator = new(UnsubscribeEventHandlers, DisposeOwnedResources, Close);
+        _trayCommandCoordinator = new TrayCommandCoordinator(
+            ShowWindowFromTray,
+            _service.Start,
+            _service.StopAsync,
+            () => CheckForUpdatesAsync(showNoUpdateDialog: true),
+            _windowLifecycleCoordinator.RequestExit);
 
         // Update control states
         UpdateControls(service.State);
@@ -320,23 +322,31 @@ internal sealed partial class MainWindow : Window
         await _trayCommandCoordinator.ExecuteAsync(selected);
     }
 
-    private void ExitApplication()
+    private void OnAutoPauseStateChanged(object? sender, EventArgs e) => UpdateAutoPauseInfoBar();
+
+    private void UnsubscribeEventHandlers()
     {
-        _isExitRequested = true;
         _service.StatusTextChanged -= OnStatusTextChanged;
         _service.StateChanged -= OnStateChanged;
         _loggingService.LogAppended -= OnLogAppended;
         _notificationService.ReviewEventReceived -= OnReviewEventReceived;
+        _reviewEventCleanupCoordinator.EventsRemoved -= OnReviewEventsRemoved;
         _notificationService.NotificationRequested -= OnNotificationRequested;
+        _rateLimitReminderService.ReminderFired -= OnRateLimitReminderFired;
         _reviewNotificationContent.OpenPrRequested -= OnTrayPopupOpenPrRequested;
         _reviewNotificationContent.LaunchReviewRequested -= OnTrayPopupLaunchReviewRequested;
         _reviewNotificationContent.OpenAppRequested -= OnTrayPopupOpenAppRequested;
         _reviewNotificationContent.DismissRequested -= OnTrayPopupDismissRequested;
         _copyFeedbackCoordinator.Expired -= OnCopyFeedbackExpired;
         _copyFeedbackCoordinator.ExpirationFailed -= OnCopyFeedbackExpirationFailed;
+        _autoPauseGate.StateChanged -= OnAutoPauseStateChanged;
+        TrayIcon.Loaded -= OnTrayIconLoaded;
+    }
+
+    private void DisposeOwnedResources()
+    {
         _copyFeedbackCoordinator.Dispose();
-        _trayIconService?.Dispose();
-        Close();
+        _trayIconService.Dispose();
     }
 
     private void OnStatusTextChanged(object? sender, string message)
@@ -795,7 +805,7 @@ internal sealed partial class MainWindow : Window
 
     private void OnAppWindowClosing(object? sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs e)
     {
-        if (_isExitRequested)
+        if (_windowLifecycleCoordinator.IsExitRequested)
         {
             return;
         }

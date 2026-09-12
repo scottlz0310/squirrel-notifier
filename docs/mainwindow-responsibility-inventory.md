@@ -3,12 +3,13 @@
 ## 1. 調査範囲と判定基準
 
 調査時点は 2026-09-12、`main` の HEAD は
-`b6a5789d64d7d22ae17d798d6c8d704f6fc300ab` である。
+`cb2810811d1f3868a3f80e1f2cc914eeec5f143e` である。
 対象は `winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs` と、同ファイルが直接参照する
 既存の `Services/`・`Helpers/`・`Models/`・テストである。
 
-同ファイルの物理行数は 1,521 行で、`scripts/check-code-behind-size.ps1` の上限も
-1,521 行である。これは抽出結果と無意識の肥大化を観測するための指標であり、
+同ファイルの物理行数は 1,531 行で、`scripts/check-code-behind-size.ps1` の上限も
+1,531 行である。終了時のイベント解除を明示する UI 配線を追加したため、前回の 1,521 行から増えている。
+これは抽出結果と無意識の肥大化を観測するための指標であり、
 本棚卸しの完了条件や、後続作業の削減目標ではない。
 
 判定は次の基準で行う。
@@ -28,7 +29,7 @@
 
 | 行 | 項目 | 判定 | 現状と後続方針 |
 | ---: | --- | --- | --- |
-| 27 | `_isExitRequested` | 抽出候補 | ウィンドウ終了要求の状態。終了処理の責務を分離する場合はライフサイクル境界へ移す |
+| 27 | `_isExitRequested` | 抽出済み | 終了要求の状態と冪等性は `WindowLifecycleCoordinator` が所有する |
 | 28 | `_service` | 維持候補 | 購読サービスのDI依存。UIからの開始・停止呼び出しに使用 |
 | 29 | `_loggingService` | 境界確認 | DI依存自体は妥当。UI固有のログ文言・例外処理を残す理由を経路ごとに確認 |
 | 30 | `_settingsService` | 境界確認 | Coordinator経由へ寄せられているが、一部イベントから直接更新している |
@@ -96,7 +97,7 @@
 | 313-327 | `AttachTrayPopup` | 境界確認 | H.NotifyIconのUI初期化は残す必要があるが、失敗ログと能力状態はService側候補 |
 | 328-332 | `OnTrayOpenCommandExecuteRequested` | 維持候補 | トレイメニューからWindowを表示する配線 |
 | 315-321 | `OnTrayRightClickCommandExecuteRequested` | 抽出済み | `TrayContextMenu.Show` と `TrayMenuLayout.Build` を UI 境界に残し、選択後の振り分けを `TrayCommandCoordinator` へ委譲 |
-| 323-340 | `ExitApplication` | 抽出候補 | 終了状態、イベント解除、Service破棄を一か所で管理している |
+| 323-340 | `ExitApplication` | 抽出済み | 終了要求の状態、イベント解除、UI所有リソース破棄、`Close()` の順序を `WindowLifecycleCoordinator` へ移した |
 | 377-381 | `OnStatusTextChanged` | 維持候補 | DispatcherQueue経由のText反映 |
 | 360-369 | `OnStateChanged` | 維持候補 | 購読状態を UI スレッドへ配送し、`SubscriptionStateCoordinator` の結果を反映する配線 |
 | 371-400 | `ApplySubscriptionStatePresentation` | 維持候補 | Coordinator が決めたログ・トレイ・InfoBar の値を UI へ反映する境界 |
@@ -128,7 +129,7 @@
 | 800-818 | `OnToggleRateLimitReminderClick` | 抽出候補 | Cancel/Scheduleの分岐とUI状態更新を直接所有している |
 | 819-828 | `OnTimeoutChanged` | 維持候補 | UI入力変更から設定保存を呼ぶ配線 |
 | 829-852 | `SaveCurrentSettings` | 境界確認 | 複数のUI入力を`SettingsInput`へ変換する境界。変換規則はCoordinator/Helper側で維持する |
-| 853-863 | `OnAppWindowClosing` | 維持候補 | 閉じる要求をトレイ非表示へ変換するWindowイベント |
+| 853-863 | `OnAppWindowClosing` | 維持候補 | `WindowLifecycleCoordinator` の終了要求状態を参照し、通常の閉じる要求をトレイ非表示へ変換するWindowイベント |
 
 ### 3.3 更新・通知・レビュー（864-1284行）
 
@@ -194,6 +195,7 @@
 | 自動起動と更新 | `AutoStartCoordinatorTests`、`AutoUpdateServiceTests`、`UpdateCheckCoordinatorTests`、更新GUIの実機E2E | 判定は抽出済み。UIはPresentation反映に限定し、以後の変更でも起動時・手動時のE2Eを維持 |
 | Gatewayログイン | `GatewayLoginCoordinatorTests`、`McpLoginServiceTests`、`DeviceLoginOutputParserTests` | Device flowのUI進行、キャンセル、Dialog lifecycleは未分離。UI依存を注入可能な境界へ整理 |
 | 購読状態・レビュー登録・起動・通知 | `SubscriptionStateCoordinatorTests`、`ReviewStartCoordinatorTests`、`ReviewEventCleanupCoordinatorTests`、`ReviewNotificationPolicyTests`、`ClipboardServiceTests`、`CopyFeedbackCoordinatorTests` | 購読状態表示の判断・一回通知は抽出済み。イベント一覧上限、通知文言、コピーの表示期限・キャンセル、トレイフォールバックを個別の結果・Policyへ分離 |
+| ウィンドウ終了 | `WindowLifecycleCoordinatorTests` | 終了要求の冪等性と、イベント解除・リソース破棄・`Close()` の順序をテストする。WinUI Window の生成や実体の破棄は UI ランタイム境界のため直接テストしない |
 | URL、フォルダー、アイコン、Clipboard | `UrlValidatorTests`、`ClipboardServiceTests`、各UIの手動確認 | `Process.Start`、ファイル読み込み、Clipboardは直接I/Oのため、fake可能なServiceを追加して失敗時を単体テストする。Clipboard の OS 境界は #291 で抽出済み |
 
 ## 5. 抽出計画
@@ -205,7 +207,7 @@
 | ---: | --- | --- | --- | --- |
 | 1 | 外部起動・OS境界 | `CopyToClipboard`（URL 起動は #286 初回実装、フォルダー起動は #289、ウィンドウアイコンは #290、Clipboard は #291 で移行済み） | `IClipboardService`、アイコン Service | fake を使う失敗・引数テスト、URL・フォルダー・アイコン・Clipboard を含む #166 の該当 GUI 確認 |
 | 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`OnCopyFeedbackExpired` | `CopyFeedbackCoordinator`（コピー通知の文言・表示期限・キャンセルを抽出済み） | `CopyFeedbackCoordinatorTests`で文言・キャンセル・失敗通知を検証し、コピーGUI確認 |
-| 3 | 購読状態・トレイ実行 | `OnTrayRightClickCommandExecuteRequested`、`ExitApplication`（購読状態表示は `SubscriptionStateCoordinator` へ、コマンド振り分けは `TrayCommandCoordinator` へ抽出済み） | TrayCommand/Lifecycle Coordinator | コマンド振り分けは `TrayCommandCoordinatorTests` で検証。終了順序とトレイGUI確認は後続 |
+| 3 | 購読状態・トレイ実行 | `OnTrayRightClickCommandExecuteRequested`、`ExitApplication`（購読状態表示は `SubscriptionStateCoordinator` へ、コマンド振り分けは `TrayCommandCoordinator` へ、終了処理は `WindowLifecycleCoordinator` へ抽出済み） | TrayCommand/Lifecycle Coordinator | コマンド振り分けは `TrayCommandCoordinatorTests`、終了要求は `WindowLifecycleCoordinatorTests` で検証。トレイGUI確認は #295 で完了 |
 | 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification`、`ReviewNotificationFormatter` | ReviewNotification Coordinator/Presentation | 上限・終了済み・自動起動結果・通知文言のテスト、通知GUI確認 |
 | 5 | 設定・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnRateLimitAgentOptionChanged`、`OnToggleRateLimitReminderClick` | Settings/RateLimit Coordinator | 初期化中・変更時・Schedule/Cancelのテスト、設定GUI確認 |
 | 6 | GatewayログインUI lifecycle | `StartGatewayLoginAsync`、`HandleLoginResultAsync` | Login Dialog ControllerまたはUI向けCoordinator | 成功・失敗・キャンセル・再入のテスト、実機GUI確認 |
