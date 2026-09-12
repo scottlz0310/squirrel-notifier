@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - レートリミット通知予約の Schedule / Cancel 分岐と表示状態同期を `RateLimitReminderCoordinator` へ抽出した（#262、#286）
 - レートリミット監視対象の変更抑止・ID収集・設定永続化を `RateLimitAgentMonitoringCoordinator` へ抽出した（#262、#286）
 - Recent activity のログ保持上限と最古行の削除を `LogEntryCollectionCoordinator` へ抽出した（#262、#286）
+- Recent review events の表示順、保持上限、最古イベントの追放と削除を `ReviewEventCollectionCoordinator` へ抽出した（#262、#286）
 
 ## [0.9.0] - 2026-09-11
 
