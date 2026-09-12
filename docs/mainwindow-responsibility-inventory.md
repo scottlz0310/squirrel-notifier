@@ -65,7 +65,7 @@
 | 61 | `_logListScrollViewer` | 境界確認 | Visual Tree探索結果のキャッシュ。UIアダプターとして残すか、キャッシュ状態を移すか判断 |
 | 61 | `_reviewNotificationContent` | 維持候補 | トレイポップアップのUIコンテンツ |
 | 62 | `_isTrayPopupAvailable` | 境界確認 | UI能力状態。`TrayIconService` が所有できるか確認 |
-| 65 | `_agentExecutionWindow` | 境界確認 | Windowラッパーを保持するライフサイクル状態。保持理由は妥当だが所有者を後続で確認 |
+| 65 | `_agentExecutionWindow` | 抽出済み | `AgentExecutionWindowCoordinator` が Window ラッパーの参照保持、同時表示抑止、クローズ時の状態解除を所有 |
 | 40 | `_copyFeedbackCoordinator` | 維持候補 | コピー通知の文言・表示期限・キャンセルを管理するCoordinator。MainWindowはInfoBar反映だけを担当 |
 | — | `SettingsCoordinator.KnownResourceUris` | 抽出済み | ドメイン上の既知 URI 一覧を設定入力Coordinatorが所有し、テスト可能にする |
 | — | `ReviewRegistrationCoordinator.Reasons` | 抽出済み | 登録理由の許容値をCoordinatorが所有し、画面の選択肢へ渡す |
@@ -165,7 +165,7 @@
 | 1076-1079 | `OnCopyFeedbackExpirationFailed` | 維持候補 | Coordinatorが整形した失敗メッセージをログServiceへ委譲 |
 | 1165-1200 | `ExecuteReviewAsync` | 境界確認 | 起動可否はCoordinatorへ抽出済み。結果のUI表示分岐をPresentationへ移すか確認する |
 | 1201-1212 | `ShowReviewStartErrorDialogAsync` | 維持候補 | ContentDialog生成・表示のみ |
-| 1218-1243 | `ShowAgentExecutionWindow` | 境界確認 | Window生成と参照保持。WindowライフサイクルのUI境界として残す理由を記録する |
+| 1102-1105 | `ShowAgentExecutionWindow` | 抽出済み | `AgentExecutionWindowCoordinator` へ起動結果を渡し、Window生成と表示を UI 境界へ委譲 |
 | 1244-1260 | `ConfirmAutoPauseOverrideAsync` | 維持候補 | 確認Dialogの生成・表示と結果変換 |
 | 1261-1271 | `UpdateAutoPauseInfoBar` | 維持候補 | Formatterの結果をInfoBarへ反映する |
 | 1272-1284 | `UpdateAutoPauseNotApplicableInfoBar` | 境界確認 | 設定Serviceから対象を解決して文言を作る境界。Formatterとの責務を確認 |

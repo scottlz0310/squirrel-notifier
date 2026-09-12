@@ -65,10 +65,7 @@ internal sealed partial class MainWindow : Window
     private readonly ReviewNotificationPopup _reviewNotificationContent;
     private bool _isTrayPopupAvailable;
 
-    // ライブログウィンドウ（#144）のマネージド参照。保持しないと ExecuteReviewAsync 終了後に
-    // Window ラッパーが GC 対象になり、失敗時に診断用として開き続けるべきウィンドウが死ぬ。
-    // 同時実行抑止によりウィンドウは常に 1 つのため単一フィールドで足りる
-    private AgentExecutionWindow? _agentExecutionWindow;
+    private readonly AgentExecutionWindowCoordinator _agentExecutionWindowCoordinator;
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
@@ -151,6 +148,15 @@ internal sealed partial class MainWindow : Window
             _rateLimitSnapshotService,
             _autoPauseGate,
             _loggingService);
+        _agentExecutionWindowCoordinator = new AgentExecutionWindowCoordinator(
+            launch => new AgentExecutionWindowAdapter(
+                new AgentExecutionWindow(
+                    launch.Session,
+                    launch.ViewModel,
+                    launch.RateLimitGaugeViewModel,
+                    launch.RateLimitSessionMonitor,
+                    _autoPauseGate,
+                    _launcherService.Cancel)));
         _reviewEventProcessingCoordinator = new ReviewEventProcessingCoordinator(
             _reviewEventCollectionCoordinator,
             _reviewEventCleanupCoordinator,
@@ -849,7 +855,7 @@ internal sealed partial class MainWindow : Window
             }
 
             ReviewStartResult result = processingResult.StartResult!;
-            ShowAgentExecutionWindow(result);
+            _agentExecutionWindowCoordinator.Show(result);
             ShowReviewNotification(reviewEvent, result.IsStarted);
         }
         catch (Exception ex)
@@ -1059,7 +1065,7 @@ internal sealed partial class MainWindow : Window
         switch (result.Status)
         {
             case ReviewStartStatus.Started:
-                ShowAgentExecutionWindow(result);
+                _agentExecutionWindowCoordinator.Show(result);
                 return true;
             case ReviewStartStatus.SkippedBusy:
                 await ShowReviewStartErrorDialogAsync(
@@ -1088,36 +1094,6 @@ internal sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
         };
         await dialog.ShowAsync(ContentDialogPlacement.Popup);
-    }
-
-    /// <summary>
-    /// 起動したセッションのライブログウィンドウ（#144）を開く。lifecycle
-    /// （成功時自動クローズ・失敗時保持・クローズ時キャンセル）はウィンドウ側の責務.
-    /// </summary>
-    /// <param name="result">レビュー起動の結果。起動していない場合は何もしない.</param>
-    private void ShowAgentExecutionWindow(ReviewStartResult result)
-    {
-        if (result.Launch is not ReviewStartLaunch launch)
-        {
-            return;
-        }
-
-        var window = new AgentExecutionWindow(
-            launch.Session,
-            launch.ViewModel,
-            launch.RateLimitGaugeViewModel,
-            launch.RateLimitSessionMonitor,
-            _autoPauseGate,
-            _launcherService.Cancel);
-        _agentExecutionWindow = window;
-        window.Closed += (_, _) =>
-        {
-            if (ReferenceEquals(_agentExecutionWindow, window))
-            {
-                _agentExecutionWindow = null;
-            }
-        };
-        window.Activate();
     }
 
     // 誤操作で常用されないよう既定ボタンはキャンセル側にする（#147 手動 override の設計論点）
@@ -1382,5 +1358,24 @@ internal sealed partial class MainWindow : Window
         AutoStartStatusText.Text = presentation.StatusText;
         RepairAutoStartButton.IsEnabled = presentation.IsRepairEnabled;
         OnboardingInfoBar.IsOpen = presentation.IsOnboardingOpen;
+    }
+
+    private sealed class AgentExecutionWindowAdapter : IAgentExecutionWindow
+    {
+        private readonly AgentExecutionWindow _window;
+
+        public AgentExecutionWindowAdapter(AgentExecutionWindow window)
+        {
+            ArgumentNullException.ThrowIfNull(window);
+            _window = window;
+            _window.Closed += OnWindowClosed;
+        }
+
+        public event EventHandler? Closed;
+
+        public void Activate() => _window.Activate();
+
+        private void OnWindowClosed(object sender, WindowEventArgs args)
+            => Closed?.Invoke(this, EventArgs.Empty);
     }
 }
