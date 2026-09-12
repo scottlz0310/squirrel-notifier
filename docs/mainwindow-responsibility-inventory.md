@@ -3,12 +3,12 @@
 ## 1. 調査範囲と判定基準
 
 調査時点は 2026-09-12、`main` の HEAD は
-`2fad01d13b5b33fc9f2a97e02430960b1ab60be1` である。
+`427d8530af8ba771b4a63c0e209c41eb79887ad8` である。
 対象は `winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs` と、同ファイルが直接参照する
 既存の `Services/`・`Helpers/`・`Models/`・テストである。
 
-同ファイルの物理行数は 1,519 行で、`scripts/check-code-behind-size.ps1` の上限も
-1,519 行である。監視対象選択の抑止・収集・永続化を抽出したことで、前回の 1,524 行から減っている。
+同ファイルの物理行数は 1,514 行で、`scripts/check-code-behind-size.ps1` の上限も
+1,514 行である。Recent activity のログ行保持を抽出したことで、前回の 1,519 行から減っている。
 これは抽出結果と無意識の肥大化を観測するための指標であり、
 本棚卸しの完了条件や、後続作業の削減目標ではない。
 
@@ -34,7 +34,7 @@
 | 29 | `_loggingService` | 境界確認 | DI依存自体は妥当。UI固有のログ文言・例外処理を残す理由を経路ごとに確認 |
 | 30 | `_settingsService` | 境界確認 | Coordinator経由へ寄せられているが、一部イベントから直接更新している |
 | 31 | `_updateCheckCoordinator` | 維持候補 | 更新判定とスキップ状態は抽出済み。UIはダイアログ表示と結果変換を担当 |
-| 32 | `_logEntries` | 維持候補 | `ObservableCollection` のUI反映用。上限・追従判断は別責務として抽出候補 |
+| 32 | `_logEntryCoordinator` | 抽出済み | `LogEntryCollectionCoordinator` が表示行の追加順と上限200行を管理し、code-behind はUI反映と末尾追従だけを担当 |
 | 33 | `_reviewEvents` | 境界確認 | UI一覧用。上限、削除、終了状態との連携はCoordinator候補 |
 | 34 | `_trayIconService` | 維持候補 | トレイUIのサービス依存 |
 | 35 | `_hwnd` | 維持候補 | Window/Win32境界のハンドル |
@@ -107,8 +107,8 @@
 
 | 行範囲 | メソッド | 判定 | 推奨する受け皿・理由 |
 | ---: | --- | --- | --- |
-| 443-469 | `OnLogAppended` | 抽出候補 | 表示上限200行、削除、末尾追従を一つのイベント処理に含む |
-| 470-482 | `ShouldFollowLogTail` | 境界確認 | 判定は`LogFollowPolicy`へ抽出済み。ScrollViewer取得との境界だけを残す |
+| 412-427 | `OnLogAppended` | 境界確認 | ログ行の保持上限と削除は`LogEntryCollectionCoordinator`へ抽出済み。DispatcherQueueと末尾追従だけを残す |
+| 434-446 | `ShouldFollowLogTail` | 境界確認 | 判定は`LogFollowPolicy`へ抽出済み。ScrollViewer取得との境界だけを残す |
 | 483-493 | `ResolveLogListScrollViewer` | 境界確認 | Visual Treeとキャッシュを扱うUIアダプター候補 |
 | 494-514 | `FindDescendantScrollViewer` | 維持候補 | Visual Treeを探索するUI補助。テスト可能性が必要ならUIアダプターへ移す |
 | 520-523 | `OnOpenLogFolder` | 抽出済み | #289 で `IFileOpener` へ委譲し、フォルダー起動の直接 I/O と例外処理を code-behind から除去 |
@@ -189,7 +189,7 @@
 
 | 経路 | 既存の検証資産 | 棚卸し上の不足・後続方針 |
 | --- | --- | --- |
-| レイアウト、購読状態、トレイメニュー、ログ追従 | `MainWindowLayoutTests`、`SubscriptionControlAvailabilityTests`、`TrayMenuLayoutTests`、`LogFollowPolicyTests` | UIイベントの分岐・トレイ選択実行はcode-behindに残るため、抽出時に結果型またはCoordinatorのテストを追加 |
+| レイアウト、購読状態、トレイメニュー、ログ追従 | `MainWindowLayoutTests`、`SubscriptionControlAvailabilityTests`、`TrayMenuLayoutTests`、`LogFollowPolicyTests`、`LogEntryCollectionCoordinatorTests` | ログ行の追加順と上限200行の削除は`LogEntryCollectionCoordinator`で検証済み。UIイベントの分岐・トレイ選択実行はcode-behindに残るため、抽出時に結果型またはCoordinatorのテストを追加 |
 | 設定入力、保存、プリセット、Resource URI | `SettingsInputParserTests`、`SettingsCoordinatorTests`、`SettingsServiceTests`、`LauncherPresetCoordinatorTests` | 直接設定更新、既知URI/理由一覧、Dialog入力の境界を整理し、入力変換をテスト対象にする |
 | レートリミットとリマインダー | `RateLimitRefreshCoordinatorTests`、`RateLimitSnapshot*Tests`、`RateLimitReminderServiceTests`、`RateLimitReminderCoordinatorTests`、`RateLimitAgentMonitoringCoordinatorTests` | 通知予約と監視対象変更の判断・永続化は抽出済み。更新結果の UI 反映は維持する |
 | 自動起動と更新 | `AutoStartCoordinatorTests`、`AutoUpdateServiceTests`、`UpdateCheckCoordinatorTests`、更新GUIの実機E2E | 判定は抽出済み。UIはPresentation反映に限定し、以後の変更でも起動時・手動時のE2Eを維持 |
