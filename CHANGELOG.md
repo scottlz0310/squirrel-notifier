@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - トレイメニューの選択コマンド振り分けを `TrayCommandCoordinator` へ抽出し、`MainWindow.xaml.cs` にはメニュー表示と委譲だけを残した（#262、#286）
 - ウィンドウ終了要求の冪等性、イベント購読解除、UI所有リソース破棄と `Close()` の順序を `WindowLifecycleCoordinator` へ抽出した（#262、#286）
 - レートリミット通知予約の Schedule / Cancel 分岐と表示状態同期を `RateLimitReminderCoordinator` へ抽出した（#262、#286）
+- レートリミット監視対象の変更抑止・ID収集・設定永続化を `RateLimitAgentMonitoringCoordinator` へ抽出した（#262、#286）
 
 ## [0.9.0] - 2026-09-11
 
