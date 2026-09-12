@@ -45,6 +45,7 @@ internal sealed partial class MainWindow : Window
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate = new();
+    private readonly SubscriptionStateCoordinator _subscriptionStateCoordinator = new();
     private readonly ReviewStartCoordinator _reviewStartCoordinator;
     private readonly RateLimitRefreshCoordinator _rateLimitRefreshCoordinator;
     private readonly SettingsCoordinator _settingsCoordinator;
@@ -54,7 +55,6 @@ internal sealed partial class MainWindow : Window
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
     private ScrollViewer? _logListScrollViewer;
-    private bool _hasShownErrorBalloon;
 
     // トレイポップアップのコンテンツ。XAML ではなくコードで生成し TaskbarIcon へ後から代入する（#229）
     private readonly ReviewNotificationPopup _reviewNotificationContent;
@@ -362,48 +362,37 @@ internal sealed partial class MainWindow : Window
         UpdateControls(state);
         _ = DispatcherQueue.TryEnqueue(() =>
         {
-            UpdateTrayIcon(state);
-            if (state == SubscriptionState.Error && !string.IsNullOrEmpty(_service.LastError))
-            {
-                StatusText.Text = $"Error: {_service.LastError}";
-            }
-
-            // 認証が必要な Error になったら、アプリ内ログイン導線（#183）を提示する。
-            // 認証以外のエラーや回復時は閉じる。
-            AuthRequiredInfoBar.IsOpen = state == SubscriptionState.Error && _service.IsAuthenticationRequired;
+            ApplySubscriptionStatePresentation(_subscriptionStateCoordinator.Update(
+                state,
+                _service.LastError,
+                _service.IsAuthenticationRequired));
         });
     }
 
-    private void UpdateTrayIcon(SubscriptionState state)
+    private void ApplySubscriptionStatePresentation(SubscriptionStatePresentation presentation)
     {
-        if (state == SubscriptionState.Error)
+        _ = _loggingService.WriteAsync(presentation.StateLogMessage);
+        if (presentation.NotificationLogMessage is not null)
         {
-            _ = _loggingService.WriteAsync($"[UI] Updating tray icon to error state. Error: {_service.LastError}");
-            _trayIconService.UpdateIcon("squirrel-notifier-error.ico");
-            _trayIconService.UpdateTooltip($"Squirrel Notifier - Error: {_service.LastError}");
+            _ = _loggingService.WriteAsync(presentation.NotificationLogMessage);
+        }
 
-            if (!_hasShownErrorBalloon)
-            {
-                _hasShownErrorBalloon = true;
-                if (_service.IsAuthenticationRequired)
-                {
-                    _ = _loggingService.WriteAsync("[UI] Showing authentication required balloon notification.");
-                    _trayIconService.ShowNotification("Squirrel Notifier", _service.LastError, H.NotifyIcon.Core.NotificationIcon.Error);
-                }
-                else
-                {
-                    _ = _loggingService.WriteAsync("[UI] Showing connection error balloon notification.");
-                    _trayIconService.ShowNotification("Squirrel Notifier", $"接続エラー: {_service.LastError}", H.NotifyIcon.Core.NotificationIcon.Error);
-                }
-            }
-        }
-        else
+        _trayIconService.UpdateIcon(presentation.IconFileName);
+        _trayIconService.UpdateTooltip(presentation.Tooltip);
+        if (presentation.Notification is not null)
         {
-            _ = _loggingService.WriteAsync($"[UI] Updating tray icon to normal state. State: {state}");
-            _trayIconService.UpdateIcon("squirrel-notifier.ico");
-            _trayIconService.UpdateTooltip("Squirrel Notifier");
-            _hasShownErrorBalloon = false;
+            _trayIconService.ShowNotification(
+                presentation.Notification.Title,
+                presentation.Notification.Message,
+                presentation.Notification.Icon);
         }
+
+        if (presentation.StatusText is not null)
+        {
+            StatusText.Text = presentation.StatusText;
+        }
+
+        AuthRequiredInfoBar.IsOpen = presentation.IsAuthenticationRequired;
     }
 
     private void UpdateControls(SubscriptionState state)
