@@ -3,12 +3,12 @@
 ## 1. 調査範囲と判定基準
 
 調査時点は 2026-09-11、`main` の HEAD は
-`ee73e36a0e4f46824ad23a3afe6d410f01e98220` である。
+`43c0b458ce2ec541c279c5baea918b8c02eb4b90` である。
 対象は `winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs` と、同ファイルが直接参照する
 既存の `Services/`・`Helpers/`・`Models/`・テストである。
 
-同ファイルの物理行数は 1,553 行で、`scripts/check-code-behind-size.ps1` の上限も
-1,553 行である。これは抽出結果と無意識の肥大化を観測するための指標であり、
+同ファイルの物理行数は 1,551 行で、`scripts/check-code-behind-size.ps1` の上限も
+1,551 行である。これは抽出結果と無意識の肥大化を観測するための指標であり、
 本棚卸しの完了条件や、後続作業の削減目標ではない。
 
 判定は次の基準で行う。
@@ -40,26 +40,30 @@
 | 36 | `_isInitializing` | 抽出候補 | 設定イベント抑止の状態。初期化と入力反映の境界をCoordinatorまたはViewModelで管理する |
 | 37 | `_notificationService` | 維持候補 | 通知イベントの購読依存 |
 | 38 | `_launcherService` | 境界確認 | 起動・キャンセル・コマンド生成を利用。コマンド生成は既存Serviceに委譲済み |
-| 39 | `_taskSchedulerService` | 境界確認 | `AutoStartCoordinator` の構築に使用。構成ルートを`App`へ寄せるか後続で判断 |
-| 40 | `_reviewRegistrationService` | 維持候補 | レビュー登録のサービス依存 |
-| 41 | `_reviewEventCleanupCoordinator` | 維持候補 | イベント保持・終了確認のCoordinator依存 |
-| 42 | `_rateLimitReminderService` | 境界確認 | リマインダーの操作依存。選択・状態反映の境界を確認 |
-| 43 | `_rateLimitSnapshotService` | 境界確認 | MainWindow内で生成されるService。構成ルートで生成する案を検討 |
-| 44 | `_autoPauseGate` | 境界確認 | 複数経路とライブログウィンドウで共有する状態。所有者を維持する理由を記録 |
-| 45 | `_reviewStartCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。生成責務とUI依存の分離を検討 |
-| 46 | `_rateLimitRefreshCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。構成ルートへの移動を検討 |
-| 47 | `_settingsCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。設定UIとの境界を維持しつつ構成を検討 |
-| 48 | `_launcherPresetCoordinator` | 維持候補 | プリセット適用・選択同期の状態を保持するCoordinator |
-| 49 | `_autoStartCoordinator` | 維持候補 | 自動起動の判定・I/Oは抽出済み。UIは結果反映を担当 |
-| 50 | `_gatewayLoginCoordinator` | 維持候補 | ログイン開始可否と結果解釈は抽出済み。UI進行状態は後続で確認 |
-| 51 | `_rateLimits` | 維持候補 | レートリミット一覧のUI反映用 |
-| 52 | `_rateLimitAgentOptions` | 境界確認 | UI選択状態。設定更新とリマインダー操作を分離する |
-| 53 | `_logListScrollViewer` | 境界確認 | Visual Tree探索結果のキャッシュ。UIアダプターとして残すか、キャッシュ状態を移すか判断 |
-| 54 | `_hasShownErrorBalloon` | 抽出候補 | 一度だけ通知する状態。通知ポリシーまたはトレイ状態Coordinatorへ移す |
-| 57 | `_reviewNotificationContent` | 維持候補 | トレイポップアップのUIコンテンツ |
-| 58 | `_isTrayPopupAvailable` | 境界確認 | UI能力状態。`TrayIconService` が所有できるか確認 |
-| 63 | `_agentExecutionWindow` | 境界確認 | Windowラッパーを保持するライフサイクル状態。保持理由は妥当だが所有者を後続で確認 |
-| 64 | `_copyFeedbackCts` | 抽出候補 | コピー通知のタイマー状態。UIフィードバックControllerまたはViewModel候補 |
+| 39 | `_urlOpener` | 維持候補 | URL起動のサービス依存 |
+| 40 | `_fileOpener` | 維持候補 | ファイル・フォルダー起動のサービス依存 |
+| 41 | `_clipboardService` | 維持候補 | クリップボード設定のサービス依存 |
+| 42 | `_windowIconService` | 維持候補 | ウィンドウアイコン設定のサービス依存 |
+| 43 | `_taskSchedulerService` | 境界確認 | `AutoStartCoordinator` の構築に使用。構成ルートを`App`へ寄せるか後続で判断 |
+| 44 | `_reviewRegistrationService` | 維持候補 | レビュー登録のサービス依存 |
+| 45 | `_reviewEventCleanupCoordinator` | 維持候補 | イベント保持・終了確認のCoordinator依存 |
+| 46 | `_rateLimitReminderService` | 境界確認 | リマインダーの操作依存。選択・状態反映の境界を確認 |
+| 47 | `_rateLimitSnapshotService` | 境界確認 | MainWindow内で生成されるService。構成ルートで生成する案を検討 |
+| 48 | `_autoPauseGate` | 境界確認 | 複数経路とライブログウィンドウで共有する状態。所有者を維持する理由を記録 |
+| 49 | `_reviewStartCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。生成責務とUI依存の分離を検討 |
+| 50 | `_rateLimitRefreshCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。構成ルートへの移動を検討 |
+| 51 | `_settingsCoordinator` | 境界確認 | MainWindow内で生成されるCoordinator。設定UIとの境界を維持しつつ構成を検討 |
+| 52 | `_launcherPresetCoordinator` | 維持候補 | プリセット適用・選択同期の状態を保持するCoordinator |
+| 53 | `_autoStartCoordinator` | 維持候補 | 自動起動の判定・I/Oは抽出済み。UIは結果反映を担当 |
+| 54 | `_gatewayLoginCoordinator` | 維持候補 | ログイン開始可否と結果解釈は抽出済み。UI進行状態は後続で確認 |
+| 55 | `_rateLimits` | 維持候補 | レートリミット一覧のUI反映用 |
+| 56 | `_rateLimitAgentOptions` | 境界確認 | UI選択状態。設定更新とリマインダー操作を分離する |
+| 57 | `_logListScrollViewer` | 境界確認 | Visual Tree探索結果のキャッシュ。UIアダプターとして残すか、キャッシュ状態を移すか判断 |
+| 58 | `_hasShownErrorBalloon` | 抽出候補 | 一度だけ通知する状態。通知ポリシーまたはトレイ状態Coordinatorへ移す |
+| 61 | `_reviewNotificationContent` | 維持候補 | トレイポップアップのUIコンテンツ |
+| 62 | `_isTrayPopupAvailable` | 境界確認 | UI能力状態。`TrayIconService` が所有できるか確認 |
+| 65 | `_agentExecutionWindow` | 境界確認 | Windowラッパーを保持するライフサイクル状態。保持理由は妥当だが所有者を後続で確認 |
+| 66 | `_copyFeedbackCts` | 抽出候補 | コピー通知のタイマー状態。UIフィードバックControllerまたはViewModel候補 |
 | 674 | `_knownResourceUris` | 抽出候補 | ドメイン上の既知URI一覧。`Models/`または設定用Helperへ移しテスト可能にする |
 | 680 | `_enqueueReviewReasons` | 抽出候補 | 登録理由の許容値。登録用Model/Helperへ移し、入力検証と共有する |
 
@@ -150,7 +154,7 @@
 | 1084-1091 | `OnLaunchReviewedClick` | 維持候補 | 既存のレビュー起動へ委譲するUIイベント |
 | 1092-1099 | `OnCopyReviewerCommandClick` | 維持候補 | 対象イベントとroleをコピー処理へ渡す配線 |
 | 1100-1107 | `OnCopyReviewedCommandClick` | 維持候補 | 対象イベントとroleをコピー処理へ渡す配線 |
-| 1108-1125 | `CopyLaunchCommand` | 抽出候補 | コマンド生成、Clipboard I/O、例外文言、フィードバックを混在させている |
+| 1037-1051 | `CopyLaunchCommand` | 抽出候補 | コマンド生成、例外文言、フィードバックを混在させている。Clipboard I/O は #291 で Service へ委譲 |
 | 1126-1139 | `ShowCopyFeedback` | 抽出候補 | CancellationTokenSourceと表示タイマー状態を所有している |
 | 1140-1157 | `HideCopyFeedbackAfterDelayAsync` | 抽出候補 | 遅延処理、キャンセル、UI状態、ログを所有している |
 | 1165-1200 | `ExecuteReviewAsync` | 境界確認 | 起動可否はCoordinatorへ抽出済み。結果のUI表示分岐をPresentationへ移すか確認する |
@@ -169,7 +173,7 @@
 | 1361-1367 | `OnLoginToGatewayClick` | 維持候補 | ログイン処理を呼ぶだけのUIイベント |
 | 1368-1517 | `StartGatewayLoginAsync` | 抽出候補 | LoginService生成、CTS、進行UI、イベント購読、Dialog lifecycle、完了待ちを混在させている |
 | 1518-1537 | `HandleLoginResultAsync` | 境界確認 | 結果解釈はCoordinatorへ委譲済み。InfoBar、購読再開、Dialog表示の境界を確認 |
-| 1538-1552 | `CopyToClipboard` | 抽出候補 | Clipboard I/Oと例外文言を直接所有している |
+| 1465-1476 | `CopyToClipboard` | 境界確認 | Clipboard I/O は `IClipboardService` へ委譲済み。例外文言とフィードバック表示は UI 境界として後続で整理 |
 | 1553-1578 | `OnAutoStartToggled` | 境界確認 | Coordinatorへ委譲済み。UI状態反映とDialog表示だけに限定できているか確認 |
 | 1579-1592 | `ShowAutoStartConfirmationAsync` | 維持候補 | 確認Dialogの生成・表示 |
 | 1593-1611 | `OnRepairAutoStartClick` | 境界確認 | Coordinatorへ修復を委譲し、結果をDialog/UIへ反映する |
@@ -188,8 +192,8 @@
 | レートリミットとリマインダー | `RateLimitRefreshCoordinatorTests`、`RateLimitSnapshot*Tests`、`RateLimitReminderServiceTests` | 監視対象の変更とSchedule/Cancel分岐をCoordinatorまたはServiceへ寄せる |
 | 自動起動と更新 | `AutoStartCoordinatorTests`、`AutoUpdateServiceTests`、`UpdateCheckCoordinatorTests`、更新GUIの実機E2E | 判定は抽出済み。UIはPresentation反映に限定し、以後の変更でも起動時・手動時のE2Eを維持 |
 | Gatewayログイン | `GatewayLoginCoordinatorTests`、`McpLoginServiceTests`、`DeviceLoginOutputParserTests` | Device flowのUI進行、キャンセル、Dialog lifecycleは未分離。UI依存を注入可能な境界へ整理 |
-| レビュー登録・起動・通知 | `ReviewStartCoordinatorTests`、`ReviewEventCleanupCoordinatorTests`、`ReviewNotificationPolicyTests` | イベント一覧上限、通知文言、Clipboard、トレイフォールバックを個別の結果・Policyへ分離 |
-| URL、フォルダー、アイコン、Clipboard | `UrlValidatorTests`、各UIの手動確認 | `Process.Start`、ファイル読み込み、Clipboardは直接I/Oのため、fake可能なServiceを追加して失敗時を単体テストする |
+| レビュー登録・起動・通知 | `ReviewStartCoordinatorTests`、`ReviewEventCleanupCoordinatorTests`、`ReviewNotificationPolicyTests`、`ClipboardServiceTests` | イベント一覧上限、通知文言、コピーのフィードバック、トレイフォールバックを個別の結果・Policyへ分離 |
+| URL、フォルダー、アイコン、Clipboard | `UrlValidatorTests`、`ClipboardServiceTests`、各UIの手動確認 | `Process.Start`、ファイル読み込み、Clipboardは直接I/Oのため、fake可能なServiceを追加して失敗時を単体テストする。Clipboard の OS 境界は #291 で抽出済み |
 
 ## 5. 抽出計画
 
@@ -198,7 +202,7 @@
 
 | 優先 | 抽出単位 | 主な対象 | 受け皿候補 | 必要な検証 |
 | ---: | --- | --- | --- | --- |
-| 1 | 外部起動・OS境界 | `CopyToClipboard`（URL 起動は #286 初回実装、フォルダー起動は #289、ウィンドウアイコンは今回の実装で移行済み） | `IClipboardService`、アイコン Service | fake を使う失敗・引数テスト、URL・フォルダー・アイコンを含む #166 の該当 GUI 確認 |
+| 1 | 外部起動・OS境界 | `CopyToClipboard`（URL 起動は #286 初回実装、フォルダー起動は #289、ウィンドウアイコンは #290、Clipboard は #291 で移行済み） | `IClipboardService`、アイコン Service | fake を使う失敗・引数テスト、URL・フォルダー・アイコン・Clipboard を含む #166 の該当 GUI 確認 |
 | 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`HideCopyFeedbackAfterDelayAsync`、`ShowReviewBalloon` | Clipboard/通知Policy、UIフィードバックController | 文言・キャンセル・失敗分類のパラメータ化テスト、コピーGUI確認 |
 | 3 | 購読状態・トレイ実行 | `OnStateChanged`、`UpdateTrayIcon`、`OnTrayRightClickCommandExecuteRequested`、`ExitApplication` | 状態Presentation、TrayCommand/Lifecycle Coordinator | 状態表・一回通知・終了順序のテスト、トレイGUI確認 |
 | 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification` | ReviewNotification Coordinator/Presentation | 上限・終了済み・自動起動結果のテスト、通知GUI確認 |

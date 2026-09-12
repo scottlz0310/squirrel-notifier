@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MainWindow.xaml.cs` のURL起動を既存の `IUrlOpener` に委譲し、URL経路のプロセス起動をUIコードから分離した（#286）
 - `MainWindow.xaml.cs` のログフォルダー起動を `IFileOpener` に委譲し、フォルダー経路のプロセス起動をUIコードから分離した（#286）
 - `MainWindow.xaml.cs` のウィンドウアイコン設定を `WindowIconService` に委譲し、アイコンファイルの I/O と Win32 境界を UI コードから分離した（#286）
+- `MainWindow.xaml.cs` のクリップボード設定を `IClipboardService` に委譲し、Windows API への直接依存を UI コードから分離した（#286）
 
 ## [0.9.0] - 2026-09-11
 
