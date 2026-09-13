@@ -954,11 +954,11 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private void CopyLaunchCommand(Models.ReviewEvent reviewEvent, Models.LauncherRole role)
+    private async void CopyLaunchCommand(Models.ReviewEvent reviewEvent, Models.LauncherRole role)
     {
         try
         {
-            string commandLine = _launcherService.BuildCommandLine(reviewEvent, role);
+            string commandLine = await _launcherService.BuildCommandLineAsync(reviewEvent, role).ConfigureAwait(true);
 
             _clipboardService.SetText(commandLine);
 

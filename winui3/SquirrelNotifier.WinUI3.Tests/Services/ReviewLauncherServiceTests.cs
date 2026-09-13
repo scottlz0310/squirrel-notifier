@@ -71,7 +71,9 @@ public class ReviewLauncherServiceTests : IDisposable
         string reviewerArgs = "--reviewer-arg",
         string reviewedCmd = "reviewed-cmd",
         string reviewedArgs = "--reviewed-arg",
-        int timeoutMs = 10000)
+        int timeoutMs = 10000,
+        string reviewerPresetId = "custom",
+        string reviewedPresetId = "custom")
     {
         _settingsService.UpdateSettings(
             "my-review-cmd", "--repo {owner}/{repo}",
@@ -79,7 +81,7 @@ public class ReviewLauncherServiceTests : IDisposable
             reviewerCmd, reviewerArgs,
             reviewedCmd, reviewedArgs,
             timeoutMs,
-            "custom", "custom");
+            reviewerPresetId, reviewedPresetId);
 
         string checkoutPath = Path.Combine(_tempDir, "checkouts", "squirrel-notifier");
         Directory.CreateDirectory(Path.Combine(checkoutPath, ".git"));
@@ -392,7 +394,7 @@ public class ReviewLauncherServiceTests : IDisposable
     [Theory]
     [InlineData("reviewer", "reviewer-cmd", "--reviewer-arg")]
     [InlineData("reviewed", "reviewed-cmd", "--reviewed-arg")]
-    public void BuildCommandLine_ShouldSelectCorrectSlotByRole(
+    public async Task BuildCommandLine_ShouldSelectCorrectSlotByRole(
         string roleName, string expectedCmd, string expectedArg)
     {
         // Arrange
@@ -414,7 +416,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
 
         // Act
-        string commandLine = service.BuildCommandLine(reviewEvent, role);
+        string commandLine = await service.BuildCommandLineAsync(reviewEvent, role);
 
         // Assert
         commandLine.Should().Be($"{expectedCmd} {expectedArg}");
@@ -422,7 +424,7 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Fact]
-    public void BuildCommandLine_ShouldExpandPlaceholdersAndQuoteArgumentsWithSpaces()
+    public async Task BuildCommandLine_ShouldExpandPlaceholdersAndQuoteArgumentsWithSpaces()
     {
         // Arrange: 既定のテンプレートは -p "<prompt>" 形式で、prompt にプレースホルダーを含む
         var reviewEvent = new ReviewEvent
@@ -443,10 +445,322 @@ public class ReviewLauncherServiceTests : IDisposable
         var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
 
         // Act
-        string commandLine = service.BuildCommandLine(reviewEvent, LauncherRole.Reviewer);
+        string commandLine = await service.BuildCommandLineAsync(reviewEvent, LauncherRole.Reviewer);
 
         // Assert
         commandLine.Should().Be("claude -p \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\" --verbose --output-format stream-json");
+    }
+
+    [Theory]
+    [InlineData("claude", "Reviewer", "--resume")]
+    [InlineData("claude", "Reviewed", "--resume")]
+    [InlineData("copilot", "Reviewer", "--session-id")]
+    [InlineData("copilot", "Reviewed", "--session-id")]
+    public async Task LaunchAsync_ShouldSaveSessionThenResumeAndRemoveAfterResumeFailure(
+        string presetId,
+        string roleName,
+        string resumeOption)
+    {
+        ConfigureClientAssignedSettings(presetId);
+        LauncherRole role = Enum.Parse<LauncherRole>(roleName);
+        var store = new RecordingSessionResumeStore();
+        var processes = new Queue<IProcessInstance>(new[]
+        {
+            CreateMockProcess(0, "first", string.Empty).Object,
+            CreateMockProcess(0, "second", string.Empty).Object,
+            CreateMockProcess(1, string.Empty, "resume failed").Object,
+        });
+        var capturedArguments = new List<IReadOnlyList<string>>();
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedArguments.Add(GetLauncherArguments(psi)))
+            .Returns(() => processes.Dequeue());
+
+        var service = new ReviewLauncherService(
+            _settingsService,
+            _loggingService,
+            runner.Object,
+            sessionResumeStore: store);
+        ReviewEvent reviewEvent = CreateReviewEvent("client-assigned-transition");
+
+        LauncherResult first = await service.LaunchAsync(reviewEvent, role, CancellationToken.None);
+        LauncherResult second = await service.LaunchAsync(reviewEvent, role, CancellationToken.None);
+        LauncherResult failedResume = await service.LaunchAsync(reviewEvent, role, CancellationToken.None);
+
+        first.Success.Should().BeTrue();
+        second.Success.Should().BeTrue();
+        failedResume.Success.Should().BeFalse();
+        capturedArguments.Should().HaveCount(3);
+
+        string sessionId = GetArgumentValue(capturedArguments[0], "--session-id");
+        Guid.TryParseExact(sessionId, "D", out _).Should().BeTrue();
+        capturedArguments[1].Should().ContainInOrder(resumeOption, sessionId);
+        capturedArguments[2].Should().ContainInOrder(resumeOption, sessionId);
+        store.SavedSessionIds.Should().Equal(Guid.Parse(sessionId), Guid.Parse(sessionId));
+        store.RemoveCalls.Should().Be(1);
+        store.Entry.Should().BeNull();
+        runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Exactly(3));
+    }
+
+    [Theory]
+    [InlineData("NotFound")]
+    [InlineData("Expired")]
+    [InlineData("WorkingDirectoryMismatch")]
+    public async Task LaunchAsync_ShouldStartNewSessionWhenResumeLookupMisses(string statusName)
+    {
+        ConfigureClientAssignedSettings();
+        SessionResumeLookupStatus status = Enum.Parse<SessionResumeLookupStatus>(statusName);
+        var store = new RecordingSessionResumeStore { NextLookupStatus = status };
+        Mock<IProcessInstance> process = CreateMockProcess(0, string.Empty, string.Empty);
+        IReadOnlyList<string>? capturedArguments = null;
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedArguments = GetLauncherArguments(psi))
+            .Returns(process.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+
+        LauncherResult result = await service.LaunchAsync(
+            CreateReviewEvent($"client-assigned-miss-{status}"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        capturedArguments.Should().NotBeNull();
+        capturedArguments!.Should().Contain("--session-id");
+        capturedArguments.Should().NotContain("--resume");
+        store.TryGetCalls.Should().Be(1);
+        store.SavedSessionIds.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("cancelled", 10000, "cancelled by user")]
+    [InlineData("timed-out", 100, "timed out")]
+    public async Task LaunchAsync_ShouldSaveNewSessionAfterCancellationOrTimeout(
+        string completionMode,
+        int timeoutMs,
+        string expectedError)
+    {
+        ConfigureClientAssignedSettings();
+        _settingsService.Settings.LauncherTimeoutMs = timeoutMs;
+        var store = new RecordingSessionResumeStore();
+        Mock<IProcessInstance> process = CreateMockProcess(0, string.Empty, string.Empty, delayMs: 5000);
+        var processStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback(() => processStarted.SetResult())
+            .Returns(process.Object);
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        using var cancellation = new CancellationTokenSource();
+
+        Task<LauncherResult> launch = service.LaunchAsync(
+            CreateReviewEvent($"client-assigned-{completionMode}"),
+            LauncherRole.Reviewer,
+            cancellation.Token);
+        await processStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        if (completionMode == "cancelled")
+        {
+            cancellation.Cancel();
+        }
+
+        LauncherResult result = await launch;
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain(expectedError);
+        store.SavedSessionIds.Should().ContainSingle();
+        store.Entry.Should().NotBeNull();
+        store.RemoveCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldNotSaveNewSessionAfterNonZeroExit()
+    {
+        ConfigureClientAssignedSettings();
+        var store = new RecordingSessionResumeStore();
+        Mock<IProcessInstance> process = CreateMockProcess(17, string.Empty, "failed");
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+
+        LauncherResult result = await service.LaunchAsync(
+            CreateReviewEvent("client-assigned-failed"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ExitCode.Should().Be(17);
+        store.SavedSessionIds.Should().BeEmpty();
+        store.RemoveCalls.Should().Be(0);
+        store.Entry.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldNotReadOrWriteStoreWhenResumeIsDisabled()
+    {
+        ConfigureClientAssignedSettings();
+        _settingsService.Settings.SessionResumeEnabled = false;
+        var store = new RecordingSessionResumeStore
+        {
+            Entry = new SessionResumeEntry(
+                Guid.NewGuid(),
+                "claude",
+                Path.Combine(_tempDir, "launcher-workspace", "reviewer"),
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow),
+        };
+        Mock<IProcessInstance> process = CreateMockProcess(0, string.Empty, string.Empty);
+        IReadOnlyList<string>? capturedArguments = null;
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedArguments = GetLauncherArguments(psi))
+            .Returns(process.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+
+        LauncherResult result = await service.LaunchAsync(CreateReviewEvent("resume-disabled"), LauncherRole.Reviewer, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        capturedArguments.Should().NotBeNull();
+        capturedArguments!.Should().NotContain("--session-id");
+        capturedArguments.Should().NotContain("--resume");
+        store.TryGetCalls.Should().Be(0);
+        store.SavedSessionIds.Should().BeEmpty();
+        store.RemoveCalls.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("custom")]
+    [InlineData("codex")]
+    public async Task LaunchAsync_ShouldKeepExistingCommandForUnsupportedResumePreset(string presetId)
+    {
+        if (presetId == "codex")
+        {
+            LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
+            ConfigureSettings(
+                reviewerCmd: codex.Command,
+                reviewerArgs: codex.ReviewerArgumentsTemplate,
+                reviewerPresetId: codex.Id);
+        }
+        else
+        {
+            ConfigureSettings();
+        }
+
+        _settingsService.Settings.SessionResumeEnabled = true;
+        var store = new RecordingSessionResumeStore();
+        Mock<IProcessInstance> process = CreateMockProcess(0, string.Empty, string.Empty);
+        IReadOnlyList<string>? capturedArguments = null;
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedArguments = GetLauncherArguments(psi))
+            .Returns(process.Object);
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+
+        ReviewEvent reviewEvent = CreateReviewEvent($"unsupported-{presetId}");
+        List<string> expectedArguments = LauncherArgumentBuilder.BuildArguments(
+            _settingsService.Settings.ReviewerLauncherArguments,
+            reviewEvent);
+
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        capturedArguments.Should().NotBeNull();
+        capturedArguments!.Should().Equal(expectedArguments);
+        capturedArguments.Should().NotContain("--session-id");
+        capturedArguments.Should().NotContain("--resume");
+        store.TryGetCalls.Should().Be(0);
+        store.SavedSessionIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task BuildCommandLineAsync_ShouldUseSameResumeTemplateAndSessionIdAsLaunch()
+    {
+        ConfigureClientAssignedSettings();
+        Guid sessionId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        var store = new RecordingSessionResumeStore
+        {
+            Entry = new SessionResumeEntry(
+                sessionId,
+                "claude",
+                Path.Combine(_tempDir, "launcher-workspace", "reviewer"),
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow),
+        };
+        ReviewEvent reviewEvent = CreateReviewEvent("copy-resume");
+        var runner = new Mock<IProcessRunner>();
+        Mock<IProcessInstance> process = CreateMockProcess(0, string.Empty, string.Empty);
+        IReadOnlyList<string>? capturedArguments = null;
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedArguments = GetLauncherArguments(psi))
+            .Returns(process.Object);
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+
+        string commandLine = await service.BuildCommandLineAsync(reviewEvent, LauncherRole.Reviewer);
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        commandLine.Should().Contain($"--resume {sessionId:D}");
+        capturedArguments.Should().NotBeNull();
+        capturedArguments!.Should().ContainInOrder("--resume", sessionId.ToString("D"));
+        runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once);
+    }
+
+    private void ConfigureClientAssignedSettings(string presetId = "claude")
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+        ConfigureSettings(
+            reviewerCmd: definition.Command,
+            reviewerArgs: definition.ReviewerArgumentsTemplate,
+            reviewedCmd: definition.Command,
+            reviewedArgs: definition.ReviewedArgumentsTemplate,
+            reviewerPresetId: definition.Id,
+            reviewedPresetId: definition.Id);
+        _settingsService.Settings.SessionResumeEnabled = true;
+    }
+
+    private static string GetArgumentValue(IReadOnlyList<string> arguments, string option)
+    {
+        int optionIndex = -1;
+        for (int index = 0; index < arguments.Count; index++)
+        {
+            if (arguments[index] == option)
+            {
+                optionIndex = index;
+                break;
+            }
+        }
+
+        optionIndex.Should().BeGreaterThanOrEqualTo(
+            0,
+            "arguments に {0} が含まれること。実際の引数: {1}",
+            option,
+            string.Join(" | ", arguments));
+        optionIndex.Should().BeLessThan(arguments.Count - 1);
+        return arguments[optionIndex + 1];
+    }
+
+    private static IReadOnlyList<string> GetLauncherArguments(ProcessStartInfo startInfo)
+    {
+        if (startInfo.ArgumentList.Count > 0)
+        {
+            return [.. startInfo.ArgumentList];
+        }
+
+        var arguments = new List<string>();
+        for (int index = 0; ; index++)
+        {
+            string name = AgentProcessStartInfoFactory.ArgumentEnvironmentVariablePrefix + index;
+            if (!startInfo.Environment.TryGetValue(name, out string? value))
+            {
+                break;
+            }
+
+            value.Should().NotBeNull();
+            arguments.Add(value!);
+        }
+
+        return arguments;
     }
 
     // ---- #143: 実行イベントのストリーミング ----
@@ -826,5 +1140,63 @@ public class ReviewLauncherServiceTests : IDisposable
         result.Stdout.Should().Contain(line2);
         result.Stdout.Should().Contain(line3);
         result.Stdout.Should().Contain(line4);
+    }
+
+    private sealed class RecordingSessionResumeStore : ISessionResumeStore
+    {
+        public SessionResumeEntry? Entry { get; set; }
+
+        public SessionResumeLookupStatus NextLookupStatus { get; set; } = SessionResumeLookupStatus.NotFound;
+
+        public int TryGetCalls { get; private set; }
+
+        public int RemoveCalls { get; private set; }
+
+        public List<Guid> SavedSessionIds { get; } = [];
+
+        public Task<SessionResumeLookupResult> TryGetAsync(
+            ReviewEvent reviewEvent,
+            LauncherRole role,
+            string agentId,
+            string workingDirectory,
+            CancellationToken cancellationToken = default)
+        {
+            TryGetCalls++;
+            if (Entry is not null)
+            {
+                return Task.FromResult(new SessionResumeLookupResult(SessionResumeLookupStatus.Found, Entry));
+            }
+
+            return Task.FromResult(new SessionResumeLookupResult(NextLookupStatus, null));
+        }
+
+        public Task SaveAsync(
+            ReviewEvent reviewEvent,
+            LauncherRole role,
+            string agentId,
+            string workingDirectory,
+            Guid sessionId,
+            CancellationToken cancellationToken = default)
+        {
+            SavedSessionIds.Add(sessionId);
+            Entry = new SessionResumeEntry(
+                sessionId,
+                agentId,
+                workingDirectory,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow);
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveAsync(
+            ReviewEvent reviewEvent,
+            LauncherRole role,
+            string agentId,
+            CancellationToken cancellationToken = default)
+        {
+            RemoveCalls++;
+            Entry = null;
+            return Task.CompletedTask;
+        }
     }
 }

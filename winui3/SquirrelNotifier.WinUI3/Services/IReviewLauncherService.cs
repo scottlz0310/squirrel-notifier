@@ -26,5 +26,8 @@ internal interface IReviewLauncherService
 
     void Cancel();
 
-    string BuildCommandLine(ReviewEvent reviewEvent, LauncherRole role);
+    Task<string> BuildCommandLineAsync(
+        ReviewEvent reviewEvent,
+        LauncherRole role,
+        CancellationToken cancellationToken = default);
 }

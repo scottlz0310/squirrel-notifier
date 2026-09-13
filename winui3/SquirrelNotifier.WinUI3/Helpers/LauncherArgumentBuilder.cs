@@ -14,7 +14,7 @@ internal static class LauncherArgumentBuilder
 {
     private static readonly Regex _safeNameRegex = new(@"^[a-zA-Z0-9_\-\.]+$", RegexOptions.Compiled);
 
-    public static List<string> BuildArguments(string template, ReviewEvent reviewEvent)
+    public static List<string> BuildArguments(string template, ReviewEvent reviewEvent, string? sessionId = null)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
 
@@ -25,6 +25,21 @@ internal static class LauncherArgumentBuilder
 
         // Parse arguments structure safely (quotes, backslashes, spaces)
         List<string> rawArgs = McpSubscriptionService.ParseArguments(template);
+
+        bool containsSessionId = false;
+        foreach (string arg in rawArgs)
+        {
+            if (arg.Contains("{sessionId}", StringComparison.Ordinal))
+            {
+                containsSessionId = true;
+                break;
+            }
+        }
+
+        if (containsSessionId && (string.IsNullOrWhiteSpace(sessionId) || !Guid.TryParseExact(sessionId, "D", out _)))
+        {
+            throw new ArgumentException("sessionId には D 形式の UUID が必要です。", nameof(sessionId));
+        }
 
         string owner = string.Empty;
         string repo = string.Empty;
@@ -72,7 +87,8 @@ internal static class LauncherArgumentBuilder
                 .Replace("{repo}", repo, StringComparison.Ordinal)
                 .Replace("{prNumber}", reviewEvent.PrNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("{prUrl}", reviewEvent.PrUrl, StringComparison.Ordinal)
-                .Replace("{reason}", reviewEvent.Reason, StringComparison.Ordinal);
+                .Replace("{reason}", reviewEvent.Reason, StringComparison.Ordinal)
+                .Replace("{sessionId}", sessionId ?? string.Empty, StringComparison.Ordinal);
             result.Add(replaced);
         }
 

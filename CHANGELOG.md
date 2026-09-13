@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 既定で無効な `SessionResumeEnabled` gate のもと、claude / copilot の新規セッションへ D 形式 UUID を渡し、成功・キャンセル・タイムアウト後の再起動では保存済みセッションを resume する起動経路を追加した。resume 失敗時は保存情報を破棄し、同一実行内では自動 retry しない（#304）
+
 ### Changed
 
 - Settings 入力の初期化中・プリセット適用中の保存抑止と LiveLog / AutoReview の toggle 永続化を `SettingsInputCoordinator` へ抽出し、`MainWindow.xaml.cs` には UI 値の読み取りと結果反映だけを残した（#262、#286）
