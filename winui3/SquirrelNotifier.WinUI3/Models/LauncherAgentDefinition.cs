@@ -199,22 +199,32 @@ internal static class LauncherAgentCatalog
         => All.FirstOrDefault(d => d.Command == command);
 
     /// <summary>
-    /// 現在の command / arguments 値がどのプリセットと一致するかを判定する。
+    /// 現在の command / arguments / resume arguments 値がどのプリセットと一致するかを判定する。
     /// どれとも一致しない場合は <see cref="CustomPresetId"/> を返す.
     /// </summary>
     /// <param name="command">現在の command 値.</param>
     /// <param name="arguments">現在の arguments 値.</param>
+    /// <param name="resumeArguments">現在の resume arguments 値.</param>
     /// <param name="role">判定対象の launcher スロット.</param>
     /// <returns>一致したプリセットの ID。一致しない場合は <see cref="CustomPresetId"/>.</returns>
-    public static string ResolvePresetId(string command, string arguments, LauncherRole role)
+    public static string ResolvePresetId(
+        string command,
+        string arguments,
+        string resumeArguments,
+        LauncherRole role)
     {
         foreach (LauncherAgentDefinition definition in All)
         {
             string expectedArguments = role == LauncherRole.Reviewer
                 ? definition.ReviewerArgumentsTemplate
                 : definition.ReviewedArgumentsTemplate;
+            string expectedResumeArguments = role == LauncherRole.Reviewer
+                ? definition.ReviewerResumeArgumentsTemplate
+                : definition.ReviewedResumeArgumentsTemplate;
 
-            if (definition.Command == command && expectedArguments == arguments)
+            if (definition.Command == command
+                && expectedArguments == arguments
+                && expectedResumeArguments == resumeArguments)
             {
                 return definition.Id;
             }

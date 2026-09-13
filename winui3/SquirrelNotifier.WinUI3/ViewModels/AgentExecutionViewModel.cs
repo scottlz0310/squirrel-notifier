@@ -32,6 +32,7 @@ internal sealed class AgentExecutionViewModel : INotifyPropertyChanged
     private double _progressValue;
     private string _statusText = "実行中...";
     private string? _verdict;
+    private string? _completionMessage;
     private AgentExecutionOutcome? _outcome;
 
     public AgentExecutionViewModel(
@@ -96,6 +97,13 @@ internal sealed class AgentExecutionViewModel : INotifyPropertyChanged
     {
         get => _verdict;
         private set => SetField(ref _verdict, value, nameof(Verdict));
+    }
+
+    /// <summary>Gets terminal InfoBar に表示する補足メッセージ。未指定なら null.</summary>
+    public string? CompletionMessage
+    {
+        get => _completionMessage;
+        private set => SetField(ref _completionMessage, value, nameof(CompletionMessage));
     }
 
     /// <summary>Gets 実行終了時の結果分類。実行中は null.</summary>
@@ -181,6 +189,7 @@ internal sealed class AgentExecutionViewModel : INotifyPropertyChanged
         IsRunning = false;
 
         LauncherResult? result = executionEvent.Result;
+        CompletionMessage = result?.ResumeFailureMessage;
         StatusText = executionEvent.Outcome switch
         {
             AgentExecutionOutcome.Succeeded => "完了しました",

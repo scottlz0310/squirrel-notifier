@@ -53,6 +53,10 @@ public class SettingsServiceTests : IDisposable
         settings.ResourceUri.Should().Be("queue://review/queue");
         settings.NotificationTimeoutMs.Should().Be(60000);
         settings.SessionResumeEnabled.Should().BeFalse();
+        settings.ReviewerLauncherResumeArguments.Should().Be(
+            LauncherAgentCatalog.Find("claude")!.ReviewerResumeArgumentsTemplate);
+        settings.ReviewedLauncherResumeArguments.Should().Be(
+            LauncherAgentCatalog.Find("claude")!.ReviewedResumeArgumentsTemplate);
     }
 
     [Fact]
@@ -119,13 +123,31 @@ public class SettingsServiceTests : IDisposable
         int timeout = 120000,
         string reviewerCmd = "reviewer-cmd",
         string reviewerArgs = "--reviewer-arg",
+        string reviewerResumeArgs = "",
         string reviewedCmd = "reviewed-cmd",
         string reviewedArgs = "--reviewed-arg",
+        string reviewedResumeArgs = "",
         int launcherTimeout = 150000,
+        bool sessionResumeEnabled = false,
         string reviewerPresetId = "custom",
         string reviewedPresetId = "custom")
     {
-        _settingsService.UpdateSettings(cmd, args, url, uris ?? _defaultUris, timeout, reviewerCmd, reviewerArgs, reviewedCmd, reviewedArgs, launcherTimeout, reviewerPresetId, reviewedPresetId);
+        _settingsService.UpdateSettings(
+            cmd,
+            args,
+            url,
+            uris ?? _defaultUris,
+            timeout,
+            reviewerCmd,
+            reviewerArgs,
+            reviewerResumeArgs,
+            reviewedCmd,
+            reviewedArgs,
+            reviewedResumeArgs,
+            launcherTimeout,
+            sessionResumeEnabled,
+            reviewerPresetId,
+            reviewedPresetId);
     }
 
     [Theory]
@@ -190,7 +212,11 @@ public class SettingsServiceTests : IDisposable
     public void UpdateSettings_ShouldUpdateSettings()
     {
         // Act
-        UpdateSettingsDefault(uris: new[] { "queue://custom", "queue://custom2" });
+        UpdateSettingsDefault(
+            uris: new[] { "queue://custom", "queue://custom2" },
+            reviewerResumeArgs: "--reviewer-resume {sessionId}",
+            reviewedResumeArgs: "--reviewed-resume {sessionId}",
+            sessionResumeEnabled: true);
 
         // Assert
         _settingsService.Settings.SubscriberCommandPath.Should().Be("custom-cmd");
@@ -201,11 +227,29 @@ public class SettingsServiceTests : IDisposable
         _settingsService.Settings.NotificationTimeoutMs.Should().Be(120000);
         _settingsService.Settings.ReviewerLauncherCommandPath.Should().Be("reviewer-cmd");
         _settingsService.Settings.ReviewerLauncherArguments.Should().Be("--reviewer-arg");
+        _settingsService.Settings.ReviewerLauncherResumeArguments.Should().Be("--reviewer-resume {sessionId}");
         _settingsService.Settings.ReviewedLauncherCommandPath.Should().Be("reviewed-cmd");
         _settingsService.Settings.ReviewedLauncherArguments.Should().Be("--reviewed-arg");
+        _settingsService.Settings.ReviewedLauncherResumeArguments.Should().Be("--reviewed-resume {sessionId}");
         _settingsService.Settings.LauncherTimeoutMs.Should().Be(150000);
+        _settingsService.Settings.SessionResumeEnabled.Should().BeTrue();
         _settingsService.Settings.ReviewerLauncherPresetId.Should().Be("custom");
         _settingsService.Settings.ReviewedLauncherPresetId.Should().Be("custom");
+    }
+
+    [Fact]
+    public void UpdateSettings_ShouldPersistSessionResumeSettings()
+    {
+        UpdateSettingsDefault(
+            reviewerResumeArgs: "--reviewer-resume {sessionId}",
+            reviewedResumeArgs: "--reviewed-resume {sessionId}",
+            sessionResumeEnabled: true);
+
+        var reloaded = new SettingsService(_settingsDirectory, pnpmBinDir: string.Empty);
+
+        reloaded.Settings.SessionResumeEnabled.Should().BeTrue();
+        reloaded.Settings.ReviewerLauncherResumeArguments.Should().Be("--reviewer-resume {sessionId}");
+        reloaded.Settings.ReviewedLauncherResumeArguments.Should().Be("--reviewed-resume {sessionId}");
     }
 
     [Fact]
@@ -1072,9 +1116,9 @@ public class SettingsServiceTests : IDisposable
         LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
         _settingsService.UpdateSettings(
             "cmd", "args", "http://localhost:3000", new[] { "queue://res" }, 30000,
-            definition.Command, definition.ReviewerArgumentsTemplate,
-            definition.Command, definition.ReviewedArgumentsTemplate,
-            300000, presetId, presetId);
+            definition.Command, definition.ReviewerArgumentsTemplate, definition.ReviewerResumeArgumentsTemplate,
+            definition.Command, definition.ReviewedArgumentsTemplate, definition.ReviewedResumeArgumentsTemplate,
+            300000, false, presetId, presetId);
 
         _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewer).Should().Be(expectedRateLimitAgentId);
         _settingsService.ResolveLauncherRateLimitAgentId(LauncherRole.Reviewed).Should().Be(expectedRateLimitAgentId);
@@ -1100,9 +1144,9 @@ public class SettingsServiceTests : IDisposable
         LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
         _settingsService.UpdateSettings(
             "cmd", "args", "http://localhost:3000", new[] { "queue://res" }, 30000,
-            definition.Command, definition.ReviewerArgumentsTemplate,
-            definition.Command, definition.ReviewedArgumentsTemplate,
-            300000, presetId, presetId);
+            definition.Command, definition.ReviewerArgumentsTemplate, definition.ReviewerResumeArgumentsTemplate,
+            definition.Command, definition.ReviewedArgumentsTemplate, definition.ReviewedResumeArgumentsTemplate,
+            300000, false, presetId, presetId);
 
         _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewer).Should().Be(expectedSupport);
         _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewed).Should().Be(expectedSupport);

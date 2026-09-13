@@ -131,9 +131,12 @@ internal sealed class SettingsCoordinator
                 values.NotificationTimeoutMs,
                 values.ReviewerLauncherCommandPath,
                 values.ReviewerLauncherArguments,
+                values.ReviewerLauncherResumeArguments,
                 values.ReviewedLauncherCommandPath,
                 values.ReviewedLauncherArguments,
+                values.ReviewedLauncherResumeArguments,
                 values.LauncherTimeoutMs,
+                values.SessionResumeEnabled,
                 values.ReviewerPresetId,
                 values.ReviewedPresetId);
             _settingsService.UpdateRepositoryCheckoutMappings(values.RepositoryCheckoutMappings);

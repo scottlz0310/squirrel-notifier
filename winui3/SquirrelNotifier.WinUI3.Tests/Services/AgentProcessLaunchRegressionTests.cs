@@ -158,9 +158,9 @@ public class AgentProcessLaunchRegressionTests : IDisposable
         settingsService.UpdateSettings(
             "my-review-cmd", string.Empty,
             "http://localhost:3000", ["queue://review/queue"], 30000,
-            script, string.Empty,
-            script, string.Empty,
-            30000,
+            script, string.Empty, string.Empty,
+            script, string.Empty, string.Empty,
+            30000, false,
             "custom", "custom");
         var loggingService = new LoggingService(_tempDir);
         var service = new ReviewLauncherService(settingsService, loggingService, new ProcessRunner());
@@ -201,9 +201,9 @@ public class AgentProcessLaunchRegressionTests : IDisposable
         settingsService.UpdateSettings(
             "my-review-cmd", string.Empty,
             "http://localhost:3000", ["queue://review/queue"], 30000,
-            script, "-p \"{owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            script, string.Empty,
-            30000,
+            script, "-p \"{owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", string.Empty,
+            script, string.Empty, string.Empty,
+            30000, false,
             "custom", "custom");
         var loggingService = new LoggingService(_tempDir);
         var service = new ReviewLauncherService(settingsService, loggingService, new ProcessRunner());

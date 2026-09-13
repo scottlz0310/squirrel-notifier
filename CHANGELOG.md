@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Settings の launcher セクションに、既定 off のセッション resume トグル、reviewer / reviewed 別の resume 引数テンプレート、対応状態表示を追加した。resume 適用・不能理由を短縮 session ID だけでログへ記録し、resume 失敗時は保存情報の破棄と次回の新規起動をライブログで可視化する（#305）
 - 既定で無効な `SessionResumeEnabled` gate のもと、claude / copilot の新規セッションへ D 形式 UUID を渡し、成功・キャンセル・タイムアウト後の再起動では保存済みセッションを resume する起動経路を追加した。resume 失敗時は保存情報を破棄し、同一実行内では自動 retry しない（#304）
 
 ### Changed

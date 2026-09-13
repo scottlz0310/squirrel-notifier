@@ -17,9 +17,12 @@ internal sealed record SettingsInput(
     double NotificationTimeoutValue,
     string ReviewerLauncherCommandPath,
     string ReviewerLauncherArguments,
+    string ReviewerLauncherResumeArguments,
     string ReviewedLauncherCommandPath,
     string ReviewedLauncherArguments,
+    string ReviewedLauncherResumeArguments,
     double LauncherTimeoutValue,
+    bool SessionResumeEnabled,
     string RepositoryCheckoutMappingsText);
 
 /// <summary>SettingsService へ渡せる形まで変換済みの入力値.</summary>
@@ -31,9 +34,12 @@ internal sealed record SettingsUpdateValues(
     int NotificationTimeoutMs,
     string ReviewerLauncherCommandPath,
     string ReviewerLauncherArguments,
+    string ReviewerLauncherResumeArguments,
     string ReviewedLauncherCommandPath,
     string ReviewedLauncherArguments,
+    string ReviewedLauncherResumeArguments,
     int LauncherTimeoutMs,
+    bool SessionResumeEnabled,
     string ReviewerPresetId,
     string ReviewedPresetId,
     IReadOnlyDictionary<string, string> RepositoryCheckoutMappings);
@@ -81,16 +87,21 @@ internal static class SettingsInputParser
             notificationTimeoutMs,
             input.ReviewerLauncherCommandPath,
             input.ReviewerLauncherArguments,
+            input.ReviewerLauncherResumeArguments,
             input.ReviewedLauncherCommandPath,
             input.ReviewedLauncherArguments,
+            input.ReviewedLauncherResumeArguments,
             launcherTimeoutMs,
+            input.SessionResumeEnabled,
             LauncherAgentCatalog.ResolvePresetId(
                 input.ReviewerLauncherCommandPath,
                 input.ReviewerLauncherArguments,
+                input.ReviewerLauncherResumeArguments,
                 LauncherRole.Reviewer),
             LauncherAgentCatalog.ResolvePresetId(
                 input.ReviewedLauncherCommandPath,
                 input.ReviewedLauncherArguments,
+                input.ReviewedLauncherResumeArguments,
                 LauncherRole.Reviewed),
             repositoryCheckoutMappings);
     }

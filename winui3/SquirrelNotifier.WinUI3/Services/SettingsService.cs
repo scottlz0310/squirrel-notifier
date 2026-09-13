@@ -145,14 +145,39 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // #305 より前の settings.json には resume テンプレートが無い。command / 通常引数が
+        // 現行プリセットと完全一致するスロットだけを補完し、自由編集された設定は空のまま保つ。
+        if (!_settings.LauncherResumeTemplatesMigrated)
+        {
+            LauncherAgentDefinition? reviewerDefinition = LauncherAgentCatalog.All.FirstOrDefault(
+                definition => definition.Command == _settings.ReviewerLauncherCommandPath
+                    && definition.ReviewerArgumentsTemplate == _settings.ReviewerLauncherArguments);
+            LauncherAgentDefinition? reviewedDefinition = LauncherAgentCatalog.All.FirstOrDefault(
+                definition => definition.Command == _settings.ReviewedLauncherCommandPath
+                    && definition.ReviewedArgumentsTemplate == _settings.ReviewedLauncherArguments);
+
+            _settings.ReviewerLauncherResumeArguments =
+                reviewerDefinition?.ReviewerResumeArgumentsTemplate ?? string.Empty;
+            _settings.ReviewedLauncherResumeArguments =
+                reviewedDefinition?.ReviewedResumeArgumentsTemplate ?? string.Empty;
+            _settings.LauncherResumeTemplatesMigrated = true;
+            SaveSettings();
+        }
+
         // launcher スロットの command / arguments がどのエージェントプリセットと一致するかを
         // 一回だけ判定して記録する（#149）。一致しない場合は「カスタム」として扱う.
         if (!_settings.LauncherPresetsMigrated)
         {
             _settings.ReviewerLauncherPresetId = LauncherAgentCatalog.ResolvePresetId(
-                _settings.ReviewerLauncherCommandPath, _settings.ReviewerLauncherArguments, LauncherRole.Reviewer);
+                _settings.ReviewerLauncherCommandPath,
+                _settings.ReviewerLauncherArguments,
+                _settings.ReviewerLauncherResumeArguments,
+                LauncherRole.Reviewer);
             _settings.ReviewedLauncherPresetId = LauncherAgentCatalog.ResolvePresetId(
-                _settings.ReviewedLauncherCommandPath, _settings.ReviewedLauncherArguments, LauncherRole.Reviewed);
+                _settings.ReviewedLauncherCommandPath,
+                _settings.ReviewedLauncherArguments,
+                _settings.ReviewedLauncherResumeArguments,
+                LauncherRole.Reviewed);
 
             _settings.LauncherPresetsMigrated = true;
             SaveSettings();
@@ -368,9 +393,12 @@ internal sealed class SettingsService
         int timeoutMs,
         string reviewerLauncherCommandPath,
         string reviewerLauncherArguments,
+        string reviewerLauncherResumeArguments,
         string reviewedLauncherCommandPath,
         string reviewedLauncherArguments,
+        string reviewedLauncherResumeArguments,
         int launcherTimeoutMs,
+        bool sessionResumeEnabled,
         string reviewerLauncherPresetId,
         string reviewedLauncherPresetId)
     {
@@ -430,9 +458,12 @@ internal sealed class SettingsService
         _settings.NotificationTimeoutMs = timeoutMs;
         _settings.ReviewerLauncherCommandPath = reviewerLauncherCommandPath;
         _settings.ReviewerLauncherArguments = reviewerLauncherArguments;
+        _settings.ReviewerLauncherResumeArguments = reviewerLauncherResumeArguments;
         _settings.ReviewedLauncherCommandPath = reviewedLauncherCommandPath;
         _settings.ReviewedLauncherArguments = reviewedLauncherArguments;
+        _settings.ReviewedLauncherResumeArguments = reviewedLauncherResumeArguments;
         _settings.LauncherTimeoutMs = launcherTimeoutMs;
+        _settings.SessionResumeEnabled = sessionResumeEnabled;
         _settings.ReviewerLauncherPresetId = reviewerLauncherPresetId;
         _settings.ReviewedLauncherPresetId = reviewedLauncherPresetId;
         SaveSettings();
@@ -464,10 +495,14 @@ internal sealed class AppSettings
 
     public string ReviewerLauncherArguments { get; set; } = "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --verbose --output-format stream-json";
 
+    public string ReviewerLauncherResumeArguments { get; set; } = string.Empty;
+
     // reviewed-side スロット
     public string ReviewedLauncherCommandPath { get; set; } = "claude";
 
     public string ReviewedLauncherArguments { get; set; } = "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --verbose --output-format stream-json";
+
+    public string ReviewedLauncherResumeArguments { get; set; } = string.Empty;
 
     public bool LauncherSlotsMigrated { get; set; }
 
@@ -490,6 +525,8 @@ internal sealed class AppSettings
     public string ReviewedLauncherPresetId { get; set; } = "claude";
 
     public bool LauncherPresetsMigrated { get; set; }
+
+    public bool LauncherResumeTemplatesMigrated { get; set; }
 
     // reviewed-side launcher が対象 repository の checkout を一意に解決するための明示 mapping（#186）
     public Dictionary<string, string> RepositoryCheckoutMappings { get; set; } = new(StringComparer.OrdinalIgnoreCase);

@@ -184,6 +184,23 @@ public class AgentExecutionViewModelTests
         vm.StatusText.Should().Be("失敗しました（終了コード: 2）");
     }
 
+    [Fact]
+    public void Apply_Completed_ShouldExposeResumeFailureMessage()
+    {
+        AgentExecutionViewModel vm = CreateViewModel();
+
+        vm.Apply(CompletedEvent(
+            AgentExecutionOutcome.Failed,
+            new LauncherResult
+            {
+                Success = false,
+                ExitCode = 2,
+                ResumeFailureMessage = "次回は新規セッションで起動します。",
+            }));
+
+        vm.CompletionMessage.Should().Be("次回は新規セッションで起動します。");
+    }
+
     [Theory]
     [InlineData("Succeeded", true, true)]
     [InlineData("Succeeded", false, false)]

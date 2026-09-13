@@ -15,4 +15,6 @@ internal sealed class LauncherResult
     public string Stderr { get; set; } = string.Empty;
 
     public string ErrorMessage { get; set; } = string.Empty;
+
+    public string? ResumeFailureMessage { get; set; }
 }
