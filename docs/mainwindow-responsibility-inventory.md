@@ -3,12 +3,12 @@
 ## 1. 調査範囲と判定基準
 
 調査時点は 2026-09-13、`main` の基点 HEAD は
-`2559728f94bf905d41062ddc45723e7607580427` である。
+`29e550983e81d2347090f12976a9af7a4debd8de` である。
 対象は `winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs` と、同ファイルが直接参照する
 既存の `Services/`・`Helpers/`・`Models/`・テストである。
 
-同ファイルの物理行数は 1,358 行で、`scripts/check-code-behind-size.ps1` の上限も
-1,358 行である。レビュー通知の表示経路とフォールバックを抽出したことで、前回の 1,381 行から減っている。
+同ファイルの物理行数は 1,332 行で、`scripts/check-code-behind-size.ps1` の上限も
+1,332 行である。Settings 入力状態と保存抑止を抽出したことで、前回の 1,358 行から減っている。
 これは抽出結果と無意識の肥大化を観測するための指標であり、
 本棚卸しの完了条件や、後続作業の削減目標ではない。
 
@@ -32,14 +32,14 @@
 | 27 | `_isExitRequested` | 抽出済み | 終了要求の状態と冪等性は `WindowLifecycleCoordinator` が所有する |
 | 28 | `_service` | 維持候補 | 購読サービスのDI依存。UIからの開始・停止呼び出しに使用 |
 | 29 | `_loggingService` | 境界確認 | DI依存自体は妥当。UI固有のログ文言・例外処理を残す理由を経路ごとに確認 |
-| 30 | `_settingsService` | 境界確認 | Coordinator経由へ寄せられているが、一部イベントから直接更新している |
+| 30 | `_settingsService` | 境界確認 | Settings 入力の状態管理と toggle 永続化は `SettingsInputCoordinator` へ移し、他のサービス依存は既存境界を維持する |
 | 31 | `_updateCheckCoordinator` | 維持候補 | 更新判定とスキップ状態は抽出済み。UIはダイアログ表示と結果変換を担当 |
 | 32 | `_logEntryCoordinator` | 抽出済み | `LogEntryCollectionCoordinator` が表示行の追加順と上限200行を管理し、code-behind はUI反映と末尾追従だけを担当 |
 | 33 | `_reviewEventCollectionCoordinator` | 抽出済み | `ReviewEventCollectionCoordinator` が最新順、上限20件、最古イベントの追放、イベントID指定の削除を管理し、code-behind は cleanup coordinator と UI の接続を担当 |
 | 33 | `_reviewEventProcessingCoordinator` | 抽出済み | `ReviewEventProcessingCoordinator` がイベント保持、終了済みPRの除外、自動起動呼び出しの順序を管理し、code-behind は実行ウィンドウと通知表示を担当 |
 | 34 | `_trayIconService` | 維持候補 | トレイUIのサービス依存 |
 | 35 | `_hwnd` | 維持候補 | Window/Win32境界のハンドル |
-| 36 | `_isInitializing` | 抽出候補 | 設定イベント抑止の状態。初期化と入力反映の境界をCoordinatorまたはViewModelで管理する |
+| 36 | `_settingsInputCoordinator` | 抽出済み | Settings 入力の初期化状態、プリセット適用中の保存抑止、LiveLog / AutoReview toggle の永続化を管理する |
 | 37 | `_notificationService` | 維持候補 | 通知イベントの購読依存 |
 | 38 | `_launcherService` | 境界確認 | 起動・キャンセル・コマンド生成を利用。コマンド生成は既存Serviceに委譲済み |
 | 39 | `_urlOpener` | 維持候補 | URL起動のサービス依存 |
@@ -114,9 +114,9 @@
 | 483-493 | `ResolveLogListScrollViewer` | 境界確認 | Visual Treeとキャッシュを扱うUIアダプター候補 |
 | 494-514 | `FindDescendantScrollViewer` | 維持候補 | Visual Treeを探索するUI補助。テスト可能性が必要ならUIアダプターへ移す |
 | 520-523 | `OnOpenLogFolder` | 抽出済み | #289 で `IFileOpener` へ委譲し、フォルダー起動の直接 I/O と例外処理を code-behind から除去 |
-| 531-540 | `OnSettingChanged` | 境界確認 | 初期化・プリセット適用の抑止と設定保存を判断している |
-| 541-550 | `OnLiveLogAutoCloseToggled` | 境界確認 | UI値から設定Serviceを直接更新。入力反映境界を`SettingsCoordinator`と整理 |
-| 551-560 | `OnAutoReviewStartToggled` | 境界確認 | UI値から設定Serviceを直接更新。上記と同じ境界 |
+| 495 | `OnSettingChanged` | 抽出済み | 保存可否の状態判断と設定保存を `SettingsInputCoordinator` へ委譲し、入力値の読み取りだけを残す |
+| 497-498 | `OnLiveLogAutoCloseToggled` | 抽出済み | UI値を `SettingsInputCoordinator` へ渡し、初期化中の抑止と設定永続化を委譲する |
+| 500-501 | `OnAutoReviewStartToggled` | 抽出済み | UI値を `SettingsInputCoordinator` へ渡し、初期化中の抑止と設定永続化を委譲する |
 | 566-575 | `OnReviewerPresetSelectionChanged` | 維持候補 | Coordinatorへ適用を委譲し、UIイベントを接続する |
 | 576-585 | `OnReviewedPresetSelectionChanged` | 維持候補 | Coordinatorへ適用を委譲し、UIイベントを接続する |
 | 586-609 | `ApplyLauncherPreset` | 維持候補 | Coordinatorの結果をTextBoxへ反映し、保存を呼ぶ |
@@ -131,8 +131,8 @@
 | 732-733 | `OnRateLimitAgentOptionChanged` | 抽出済み | `RateLimitAgentMonitoringCoordinator` が初期化中・無関係な変更を抑止し、監視対象 ID の収集と設定永続化を所有する |
 | 785-799 | `OnRateLimitReminderFired` | 維持候補 | ReminderイベントをUI一覧へ反映する |
 | 800-818 | `OnToggleRateLimitReminderClick` | 抽出済み | `RateLimitReminderCoordinator` が Cancel/Schedule の分岐と `IsReminderScheduled` の状態同期を所有する |
-| 819-828 | `OnTimeoutChanged` | 維持候補 | UI入力変更から設定保存を呼ぶ配線 |
-| 829-852 | `SaveCurrentSettings` | 境界確認 | 複数のUI入力を`SettingsInput`へ変換する境界。変換規則はCoordinator/Helper側で維持する |
+| 734-735 | `OnTimeoutChanged` | 維持候補 | UI入力変更から設定保存を呼ぶ配線 |
+| 737-759 | `SaveCurrentSettings` | 維持候補 | 複数のUI入力を`SettingsInput`へ変換し、保存結果をコンボボックスへ反映するUIアダプター。保存可否と永続化は`SettingsInputCoordinator`へ委譲 |
 | 853-863 | `OnAppWindowClosing` | 維持候補 | `WindowLifecycleCoordinator` の終了要求状態を参照し、通常の閉じる要求をトレイ非表示へ変換するWindowイベント |
 
 ### 3.3 更新・通知・レビュー（864-1284行）
@@ -212,7 +212,7 @@
 | 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`OnCopyFeedbackExpired` | `CopyFeedbackCoordinator`（コピー通知の文言・表示期限・キャンセルを抽出済み） | `CopyFeedbackCoordinatorTests`で文言・キャンセル・失敗通知を検証し、コピーGUI確認 |
 | 3 | 購読状態・トレイ実行 | `OnTrayRightClickCommandExecuteRequested`、`ExitApplication`（購読状態表示は `SubscriptionStateCoordinator` へ、コマンド振り分けは `TrayCommandCoordinator` へ、終了処理は `WindowLifecycleCoordinator` へ抽出済み） | TrayCommand/Lifecycle Coordinator | コマンド振り分けは `TrayCommandCoordinatorTests`、終了要求は `WindowLifecycleCoordinatorTests` で検証。トレイGUI確認は #295 で完了 |
 | 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewPopup`、`ShowReviewBalloon`、`ReviewNotificationFormatter`（処理順序と通知経路の判断はCoordinatorへ抽出済み） | `ReviewEventCollectionCoordinator` / `ReviewEventProcessingCoordinator` / `ReviewNotificationCoordinator` | イベント一覧の最新順・上限・削除、終了済みPRの除外、自動起動順序、ポップアップ接続失敗・表示失敗時のフォールバックを各Coordinatorのテストで検証。通知文言はFormatter、WinUI表示はGUI境界で確認 |
-| 5 | 設定・レビュー登録・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnEnqueueReviewClick`（Gateway URL 自動検出と既知／MCP Resource URI の選択結果は `SettingsCoordinator` へ、レビュー登録の入力検証・結果分類は `ReviewRegistrationCoordinator` へ、レートリミット監視対象の変更は `RateLimitAgentMonitoringCoordinator`、通知予約の切替は `RateLimitReminderCoordinator` へ抽出済み） | Settings/ReviewRegistration/RateLimit Coordinator | 初期化中・変更時の設定入力、レビュー登録結果分類、設定GUI確認 |
+| 5 | 設定・レビュー登録・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnEnqueueReviewClick`（設定入力の初期化・保存抑止・toggle 永続化は `SettingsInputCoordinator`、Gateway URL 自動検出と既知／MCP Resource URI の選択結果は `SettingsCoordinator`、レビュー登録の入力検証・結果分類は `ReviewRegistrationCoordinator`、レートリミット監視対象の変更は `RateLimitAgentMonitoringCoordinator`、通知予約の切替は `RateLimitReminderCoordinator` へ抽出済み） | Settings/ReviewRegistration/RateLimit Coordinator | 設定入力はCoordinator単体テスト、レビュー登録結果分類、設定GUI確認 |
 | 6 | GatewayログインUI lifecycle | `StartGatewayLoginAsync`、`CreateGatewayLoginDialog` | `GatewayLoginWorkflowCoordinator`（イベント購読、キャンセル、Dialog lifecycle、結果適用を抽出済み） | 成功・失敗・キャンセル・再入のテスト、実機GUI確認 |
 | 7 | 構成ルート整理 | コンストラクター内のCoordinator/Service生成 | `App`またはcomposition root | 依存グラフと起動・終了の回帰確認 |
 

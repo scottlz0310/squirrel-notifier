@@ -30,7 +30,6 @@ internal sealed partial class MainWindow : Window
     private readonly ReviewEventCollectionCoordinator _reviewEventCollectionCoordinator = new();
     private readonly TrayIconService _trayIconService;
     private readonly nint _hwnd;
-    private readonly bool _isInitializing = true;
     private readonly INotificationService _notificationService;
     private readonly IReviewLauncherService _launcherService;
     private readonly IUrlOpener _urlOpener;
@@ -52,6 +51,7 @@ internal sealed partial class MainWindow : Window
     private readonly WindowLifecycleCoordinator _windowLifecycleCoordinator;
     private readonly RateLimitRefreshCoordinator _rateLimitRefreshCoordinator;
     private readonly SettingsCoordinator _settingsCoordinator;
+    private readonly SettingsInputCoordinator _settingsInputCoordinator;
     private readonly LauncherPresetCoordinator _launcherPresetCoordinator;
     private readonly AutoStartCoordinator _autoStartCoordinator;
     private readonly GatewayLoginCoordinator _gatewayLoginCoordinator = new();
@@ -136,6 +136,7 @@ internal sealed partial class MainWindow : Window
             _autoPauseGate,
             _rateLimitReminderService);
         _settingsCoordinator = new SettingsCoordinator(_settingsService);
+        _settingsInputCoordinator = new SettingsInputCoordinator(_settingsService, _settingsCoordinator);
         _launcherPresetCoordinator = new LauncherPresetCoordinator();
         _autoStartCoordinator = new AutoStartCoordinator(_taskSchedulerService);
         _gatewayLoginWorkflowCoordinator = new GatewayLoginWorkflowCoordinator(
@@ -215,7 +216,7 @@ internal sealed partial class MainWindow : Window
         }
 
         _rateLimitAgentMonitoringCoordinator.CompleteInitialization();
-        _isInitializing = false;
+        _settingsInputCoordinator.CompleteInitialization();
 
         UpdateAutoPauseNotApplicableInfoBar();
 
@@ -491,35 +492,13 @@ internal sealed partial class MainWindow : Window
         _ = _fileOpener.TryOpen(_loggingService.LogDirectory);
     }
 
-    private void OnSettingChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_isInitializing || _launcherPresetCoordinator.IsApplying)
-        {
-            return;
-        }
-
-        SaveCurrentSettings();
-    }
+    private void OnSettingChanged(object sender, TextChangedEventArgs e) => SaveCurrentSettings();
 
     private void OnLiveLogAutoCloseToggled(object sender, RoutedEventArgs e)
-    {
-        if (_isInitializing)
-        {
-            return;
-        }
-
-        _settingsService.UpdateLiveLogAutoCloseEnabled(LiveLogAutoCloseToggle.IsOn);
-    }
+        => _settingsInputCoordinator.UpdateLiveLogAutoCloseEnabled(LiveLogAutoCloseToggle.IsOn);
 
     private void OnAutoReviewStartToggled(object sender, RoutedEventArgs e)
-    {
-        if (_isInitializing)
-        {
-            return;
-        }
-
-        _settingsService.UpdateAutoReviewStartEnabled(AutoReviewStartToggle.IsOn);
-    }
+        => _settingsInputCoordinator.UpdateAutoReviewStartEnabled(AutoReviewStartToggle.IsOn);
 
     // プリセット選択（#149）: ComboBox で選んだプリセットの command / arguments を
     // テキストボックスへ反映する。反映後の TextChanged から SaveCurrentSettings が呼ばれ、
@@ -528,7 +507,7 @@ internal sealed partial class MainWindow : Window
     // 「カスタム」表示へ自然に戻すため.
     private void OnReviewerPresetSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isInitializing || _launcherPresetCoordinator.IsSynchronizing)
+        if (_settingsInputCoordinator.IsInitializing || _launcherPresetCoordinator.IsSynchronizing)
         {
             return;
         }
@@ -538,7 +517,7 @@ internal sealed partial class MainWindow : Window
 
     private void OnReviewedPresetSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isInitializing || _launcherPresetCoordinator.IsSynchronizing)
+        if (_settingsInputCoordinator.IsInitializing || _launcherPresetCoordinator.IsSynchronizing)
         {
             return;
         }
@@ -753,30 +732,25 @@ internal sealed partial class MainWindow : Window
     }
 
     private void OnTimeoutChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
-    {
-        if (_isInitializing)
-        {
-            return;
-        }
-
-        SaveCurrentSettings();
-    }
+        => SaveCurrentSettings();
 
     private void SaveCurrentSettings()
     {
-        SettingsSaveResult result = _settingsCoordinator.Save(new SettingsInput(
-            CommandPathBox.Text,
-            ArgumentsBox.Text,
-            GatewayUrlBox.Text,
-            ResourceUrisBox.Text,
-            TimeoutBox.Value,
-            ReviewerPathBox.Text,
-            ReviewerArgumentsBox.Text,
-            ReviewedPathBox.Text,
-            ReviewedArgumentsBox.Text,
-            LauncherTimeoutBox.Value,
-            RepositoryCheckoutMappingsBox.Text));
-        if (!result.IsSaved)
+        SettingsSaveResult? result = _settingsInputCoordinator.SaveIfReady(
+            new SettingsInput(
+                CommandPathBox.Text,
+                ArgumentsBox.Text,
+                GatewayUrlBox.Text,
+                ResourceUrisBox.Text,
+                TimeoutBox.Value,
+                ReviewerPathBox.Text,
+                ReviewerArgumentsBox.Text,
+                ReviewedPathBox.Text,
+                ReviewedArgumentsBox.Text,
+                LauncherTimeoutBox.Value,
+                RepositoryCheckoutMappingsBox.Text),
+            _launcherPresetCoordinator.IsApplying);
+        if (result?.IsSaved != true)
         {
             return;
         }
