@@ -507,6 +507,10 @@ internal sealed class AppSettings
     // 起動するため既定は off とし、on でも Auto-Pause（#147）と同時実行抑止を必ず経由する
     public bool AutoReviewStartEnabled { get; set; }
 
+    // 保存済みの CLI session を次回起動へ引き継ぐか（#304）。resume は #305 の設定 UI で
+    // 明示的に有効化するまで dormant にする。
+    public bool SessionResumeEnabled { get; set; }
+
     // ローカルの statusline スクリプトがレートリミット状態を書き出すエージェント ID
     // （RateLimitAgentCatalog 参照）のうち、監視対象として選択されているもの
     public List<string> RateLimitMonitoredAgentIds { get; set; } = new();

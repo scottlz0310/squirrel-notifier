@@ -52,6 +52,7 @@ public class SettingsServiceTests : IDisposable
         settings.GatewayUrl.Should().Be("http://localhost:3000");
         settings.ResourceUri.Should().Be("queue://review/queue");
         settings.NotificationTimeoutMs.Should().Be(60000);
+        settings.SessionResumeEnabled.Should().BeFalse();
     }
 
     [Fact]

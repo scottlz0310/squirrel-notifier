@@ -67,6 +67,67 @@ public class LauncherArgumentBuilderTests
         result[1].Should().Contain(reason);
     }
 
+    [Theory]
+    [InlineData("01234567-89ab-cdef-0123-456789abcdef")]
+    [InlineData("01234567-89AB-CDEF-0123-456789ABCDEF")]
+    public void BuildArguments_ShouldSubstituteSessionIdPlaceholder(string sessionId)
+    {
+        ReviewEvent reviewEvent = new()
+        {
+            EventId = "test-event-session",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+        };
+
+        List<string> result = LauncherArgumentBuilder.BuildArguments(
+            "--session-id {sessionId}",
+            reviewEvent,
+            sessionId);
+
+        result.Should().Equal("--session-id", sessionId);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-uuid")]
+    [InlineData("0123456789abcdef0123456789abcdef")]
+    public void BuildArguments_ShouldRejectNonDFormatSessionId(string sessionId)
+    {
+        ReviewEvent reviewEvent = new()
+        {
+            EventId = "test-event-session-invalid",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+        };
+
+        Action act = () => LauncherArgumentBuilder.BuildArguments(
+            "--session-id {sessionId}",
+            reviewEvent,
+            sessionId);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void BuildArguments_ShouldRejectMissingSessionIdWhenPlaceholderIsPresent()
+    {
+        ReviewEvent reviewEvent = new()
+        {
+            EventId = "test-event-session-missing",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+        };
+
+        Action act = () => LauncherArgumentBuilder.BuildArguments(
+            "--session-id {sessionId}",
+            reviewEvent);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
     [Fact]
     public void BuildArguments_ShouldThrowForInvalidReason()
     {

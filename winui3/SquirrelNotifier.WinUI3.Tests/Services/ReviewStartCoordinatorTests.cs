@@ -363,6 +363,7 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
 
         public void Cancel() => throw new NotSupportedException();
 
-        public string BuildCommandLine(ReviewEvent reviewEvent, LauncherRole role) => throw new NotSupportedException();
+        public Task<string> BuildCommandLineAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 }
