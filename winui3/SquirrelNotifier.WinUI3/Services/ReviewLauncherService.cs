@@ -166,6 +166,18 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             CancellationToken combinedToken = cts.Token;
 
             plan = await CreateLaunchPlanAsync(reviewEvent, role, combinedToken).ConfigureAwait(false);
+            if (plan.ResumeUnavailableReason is SessionResumeUnavailableReason unavailableReason)
+            {
+                await LogAsync(SessionResumeMessageFormatter.BuildUnavailable(unavailableReason)).ConfigureAwait(false);
+            }
+
+            if (plan.IsResume && plan.SessionId is Guid resumedSessionId)
+            {
+                string resumedMessage = SessionResumeMessageFormatter.BuildApplied(resumedSessionId);
+                await LogAsync(resumedMessage).ConfigureAwait(false);
+                session.PublishStdout(resumedMessage);
+            }
+
             string commandPath = plan.CommandPath;
             string resolvedPath = SettingsService.ResolveCommandPath(commandPath);
             if (string.IsNullOrWhiteSpace(resolvedPath))
@@ -306,7 +318,18 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     {
         try
         {
-            await PersistSessionStateAsync(reviewEvent, role, plan, outcome, processStarted).ConfigureAwait(false);
+            bool resumeEntryRemoved = await PersistSessionStateAsync(
+                reviewEvent,
+                role,
+                plan,
+                outcome,
+                processStarted).ConfigureAwait(false);
+            if (resumeEntryRemoved)
+            {
+                string message = SessionResumeMessageFormatter.BuildFailure();
+                await LogAsync(message).ConfigureAwait(false);
+                result.ResumeFailureMessage = message;
+            }
         }
         catch (Exception ex)
         {
@@ -326,58 +349,69 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         CancellationToken cancellationToken)
     {
         AppSettings settings = _settingsService.Settings;
-        (string commandPath, string argumentsTemplate, string presetId) = ResolveLauncherSlot(settings, role);
-        LauncherAgentDefinition? definition = ResolveClientAssignedDefinition(
+        (string commandPath, string argumentsTemplate, string resumeArgumentsTemplate, string presetId)
+            = ResolveLauncherSlot(settings, role);
+
+        if (!settings.SessionResumeEnabled)
+        {
+            return new LauncherLaunchPlan(commandPath, argumentsTemplate, null, null, null, false, null);
+        }
+
+        LauncherSessionResumeCapability capability = LauncherSessionResumePolicy.Evaluate(
             commandPath,
             argumentsTemplate,
+            resumeArgumentsTemplate,
             presetId,
             role);
-
-        if (!settings.SessionResumeEnabled || definition is null)
+        if (!capability.IsSupported)
         {
-            return new LauncherLaunchPlan(commandPath, argumentsTemplate, null, null, null, false);
+            return new LauncherLaunchPlan(
+                commandPath,
+                argumentsTemplate,
+                null,
+                null,
+                null,
+                false,
+                SessionResumeUnavailableReason.UnsupportedPreset);
         }
 
         string workingDirectory = _workingDirectoryResolver.Resolve(reviewEvent, role);
         SessionResumeLookupResult lookup = await _sessionResumeStore.TryGetAsync(
             reviewEvent,
             role,
-            definition.Id,
+            capability.AgentId!,
             workingDirectory,
             cancellationToken).ConfigureAwait(false);
 
-        string resumeTemplate = role == LauncherRole.Reviewer
-            ? definition.ReviewerResumeArgumentsTemplate
-            : definition.ReviewedResumeArgumentsTemplate;
-
         if (lookup.Status == SessionResumeLookupStatus.Found
             && lookup.Entry is not null
-            && lookup.Entry.SessionId != Guid.Empty
-            && !string.IsNullOrWhiteSpace(resumeTemplate))
+            && lookup.Entry.SessionId != Guid.Empty)
         {
             return new LauncherLaunchPlan(
                 commandPath,
-                resumeTemplate,
-                definition.Id,
+                resumeArgumentsTemplate,
+                capability.AgentId,
                 workingDirectory,
                 lookup.Entry.SessionId,
-                true);
+                true,
+                null);
         }
 
         Guid sessionId = Guid.NewGuid();
         string newSessionTemplate = AppendArgumentTemplates(
             argumentsTemplate,
-            definition.NewSessionArgumentsTemplate);
+            capability.NewSessionArgumentsTemplate);
         return new LauncherLaunchPlan(
             commandPath,
             newSessionTemplate,
-            definition.Id,
+            capability.AgentId,
             workingDirectory,
             sessionId,
-            false);
+            false,
+            MapUnavailableReason(lookup.Status));
     }
 
-    private async Task PersistSessionStateAsync(
+    private async Task<bool> PersistSessionStateAsync(
         ReviewEvent reviewEvent,
         LauncherRole role,
         LauncherLaunchPlan? plan,
@@ -386,7 +420,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     {
         if (plan is null || plan.AgentId is null || plan.SessionId is not Guid sessionId)
         {
-            return;
+            return false;
         }
 
         if (outcome == AgentExecutionOutcome.Failed)
@@ -398,14 +432,15 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                     role,
                     plan.AgentId,
                     CancellationToken.None).ConfigureAwait(false);
+                return true;
             }
 
-            return;
+            return false;
         }
 
         if (!processStarted || plan.WorkingDirectory is null)
         {
-            return;
+            return false;
         }
 
         if (outcome is AgentExecutionOutcome.Succeeded
@@ -420,30 +455,18 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 sessionId,
                 CancellationToken.None).ConfigureAwait(false);
         }
+
+        return false;
     }
 
-    private static LauncherAgentDefinition? ResolveClientAssignedDefinition(
-        string commandPath,
-        string argumentsTemplate,
-        string presetId,
-        LauncherRole role)
-    {
-        LauncherAgentDefinition? definition = LauncherAgentCatalog.Find(presetId);
-        if (definition is null
-            || definition.SessionIdSupply != SessionIdSupply.ClientAssigned
-            || !string.Equals(definition.Command, commandPath, StringComparison.Ordinal)
-            || !definition.NewSessionArgumentsTemplate.Contains("{sessionId}", StringComparison.Ordinal))
+    private static SessionResumeUnavailableReason MapUnavailableReason(SessionResumeLookupStatus status)
+        => status switch
         {
-            return null;
-        }
-
-        string expectedArguments = role == LauncherRole.Reviewer
-            ? definition.ReviewerArgumentsTemplate
-            : definition.ReviewedArgumentsTemplate;
-        return string.Equals(expectedArguments, argumentsTemplate, StringComparison.Ordinal)
-            ? definition
-            : null;
-    }
+            SessionResumeLookupStatus.NotFound => SessionResumeUnavailableReason.NotFound,
+            SessionResumeLookupStatus.Expired => SessionResumeUnavailableReason.Expired,
+            SessionResumeLookupStatus.WorkingDirectoryMismatch => SessionResumeUnavailableReason.WorkingDirectoryMismatch,
+            _ => throw new InvalidOperationException($"新規 session 起動へ遷移できない lookup status です: {status}"),
+        };
 
     private static string AppendArgumentTemplates(string baseTemplate, string additionalTemplate)
     {
@@ -543,11 +566,20 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     }
 
     // スロットはユーザーが押したアクションのロールだけで決まる（#127）
-    private static (string CommandPath, string ArgumentsTemplate, string PresetId) ResolveLauncherSlot(AppSettings settings, LauncherRole role)
+    private static (string CommandPath, string ArgumentsTemplate, string ResumeArgumentsTemplate, string PresetId)
+        ResolveLauncherSlot(AppSettings settings, LauncherRole role)
     {
         return role == LauncherRole.Reviewer
-            ? (settings.ReviewerLauncherCommandPath, settings.ReviewerLauncherArguments, settings.ReviewerLauncherPresetId)
-            : (settings.ReviewedLauncherCommandPath, settings.ReviewedLauncherArguments, settings.ReviewedLauncherPresetId);
+            ? (
+                settings.ReviewerLauncherCommandPath,
+                settings.ReviewerLauncherArguments,
+                settings.ReviewerLauncherResumeArguments,
+                settings.ReviewerLauncherPresetId)
+            : (
+                settings.ReviewedLauncherCommandPath,
+                settings.ReviewedLauncherArguments,
+                settings.ReviewedLauncherResumeArguments,
+                settings.ReviewedLauncherPresetId);
     }
 
     private sealed record LauncherLaunchPlan(
@@ -556,7 +588,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         string? AgentId,
         string? WorkingDirectory,
         Guid? SessionId,
-        bool IsResume);
+        bool IsResume,
+        SessionResumeUnavailableReason? ResumeUnavailableReason);
 
     private void KillActiveProcess()
     {

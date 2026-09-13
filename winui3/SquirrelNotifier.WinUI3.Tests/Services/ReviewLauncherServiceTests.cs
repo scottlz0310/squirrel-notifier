@@ -69,18 +69,21 @@ public class ReviewLauncherServiceTests : IDisposable
     private void ConfigureSettings(
         string reviewerCmd = "reviewer-cmd",
         string reviewerArgs = "--reviewer-arg",
+        string reviewerResumeArgs = "",
         string reviewedCmd = "reviewed-cmd",
         string reviewedArgs = "--reviewed-arg",
+        string reviewedResumeArgs = "",
         int timeoutMs = 10000,
+        bool sessionResumeEnabled = false,
         string reviewerPresetId = "custom",
         string reviewedPresetId = "custom")
     {
         _settingsService.UpdateSettings(
             "my-review-cmd", "--repo {owner}/{repo}",
             "http://localhost:3000", new[] { "queue://res" }, 30000,
-            reviewerCmd, reviewerArgs,
-            reviewedCmd, reviewedArgs,
-            timeoutMs,
+            reviewerCmd, reviewerArgs, reviewerResumeArgs,
+            reviewedCmd, reviewedArgs, reviewedResumeArgs,
+            timeoutMs, sessionResumeEnabled,
             reviewerPresetId, reviewedPresetId);
 
         string checkoutPath = Path.Combine(_tempDir, "checkouts", "squirrel-notifier");
@@ -499,14 +502,21 @@ public class ReviewLauncherServiceTests : IDisposable
         store.SavedSessionIds.Should().Equal(Guid.Parse(sessionId), Guid.Parse(sessionId));
         store.RemoveCalls.Should().Be(1);
         store.Entry.Should().BeNull();
+        failedResume.ResumeFailureMessage.Should().Be(SessionResumeMessageFormatter.BuildFailure());
+        string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+        log.Should().Contain($"resumed session {sessionId[..8]}…");
+        log.Should().Contain(SessionResumeMessageFormatter.BuildFailure());
+        log.Should().NotContain(sessionId);
         runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Exactly(3));
     }
 
     [Theory]
-    [InlineData("NotFound")]
-    [InlineData("Expired")]
-    [InlineData("WorkingDirectoryMismatch")]
-    public async Task LaunchAsync_ShouldStartNewSessionWhenResumeLookupMisses(string statusName)
+    [InlineData("NotFound", "保存済みエントリがありません")]
+    [InlineData("Expired", "TTL が切れています")]
+    [InlineData("WorkingDirectoryMismatch", "working directory が保存時と一致しません")]
+    public async Task LaunchAsync_ShouldStartNewSessionWhenResumeLookupMisses(
+        string statusName,
+        string expectedLog)
     {
         ConfigureClientAssignedSettings();
         SessionResumeLookupStatus status = Enum.Parse<SessionResumeLookupStatus>(statusName);
@@ -531,6 +541,8 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedArguments.Should().NotContain("--resume");
         store.TryGetCalls.Should().Be(1);
         store.SavedSessionIds.Should().ContainSingle();
+        string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+        log.Should().Contain(expectedLog);
     }
 
     [Theory]
@@ -671,6 +683,47 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedArguments.Should().NotContain("--resume");
         store.TryGetCalls.Should().Be(0);
         store.SavedSessionIds.Should().BeEmpty();
+        string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+        log.Should().Contain("現在の launcher 設定は resume に対応していません");
+    }
+
+    [Fact]
+    public async Task StartSession_ShouldPublishShortResumeMessageBeforeProcessOutput()
+    {
+        ConfigureClientAssignedSettings();
+        Guid sessionId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        var store = new RecordingSessionResumeStore
+        {
+            Entry = new SessionResumeEntry(
+                sessionId,
+                "claude",
+                Path.Combine(_tempDir, "launcher-workspace", "reviewer"),
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow),
+        };
+        Mock<IProcessInstance> process = CreateMockProcess(0, "agent-output", string.Empty);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        var service = new ReviewLauncherService(
+            _settingsService,
+            _loggingService,
+            runner.Object,
+            sessionResumeStore: store);
+
+        AgentExecutionSession session = service.StartSession(
+            CreateReviewEvent("resume-live-log"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent executionEvent in session.ReadEventsAsync())
+        {
+            events.Add(executionEvent);
+        }
+
+        events[0].Kind.Should().Be(AgentExecutionEventKind.Stdout);
+        events[0].Text.Should().Be("resumed session 01234567…");
+        events[0].Text.Should().NotContain(sessionId.ToString("D"));
+        events.Should().Contain(e => e.Text == "agent-output");
     }
 
     [Fact]
@@ -712,11 +765,13 @@ public class ReviewLauncherServiceTests : IDisposable
         ConfigureSettings(
             reviewerCmd: definition.Command,
             reviewerArgs: definition.ReviewerArgumentsTemplate,
+            reviewerResumeArgs: definition.ReviewerResumeArgumentsTemplate,
             reviewedCmd: definition.Command,
             reviewedArgs: definition.ReviewedArgumentsTemplate,
+            reviewedResumeArgs: definition.ReviewedResumeArgumentsTemplate,
+            sessionResumeEnabled: true,
             reviewerPresetId: definition.Id,
             reviewedPresetId: definition.Id);
-        _settingsService.Settings.SessionResumeEnabled = true;
     }
 
     private static string GetArgumentValue(IReadOnlyList<string> arguments, string option)

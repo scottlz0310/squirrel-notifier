@@ -114,7 +114,7 @@
                     <ScrollViewer x:Name="SettingsScrollViewer" Height="160" MinHeight="80"
                                   MaxHeight="80"
                                   HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
-                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                               ColumnDefinitions="Auto,*"
                               RowSpacing="8"
                               ColumnSpacing="8"
@@ -165,45 +165,62 @@
                             <TextBlock Grid.Row="7" Grid.Column="0" Text="Reviewer Args:" VerticalAlignment="Center"/>
                             <TextBox Grid.Row="7" Grid.Column="1" x:Name="ReviewerArgumentsBox" TextChanged="OnSettingChanged"/>
 
-                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Reviewed Preset:" VerticalAlignment="Center"/>
-                            <ComboBox Grid.Row="8" Grid.Column="1" x:Name="ReviewedPresetComboBox"
+                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Reviewer Resume Args:" VerticalAlignment="Top" Margin="0,4,0,0"/>
+                            <StackPanel Grid.Row="8" Grid.Column="1" Spacing="2">
+                                <TextBox x:Name="ReviewerResumeArgumentsBox" TextChanged="OnSettingChanged"/>
+                                <TextBlock x:Name="ReviewerSessionResumeSupportText" FontSize="11" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Reviewed Preset:" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Row="9" Grid.Column="1" x:Name="ReviewedPresetComboBox"
                                       DisplayMemberPath="DisplayName"
                                       SelectionChanged="OnReviewedPresetSelectionChanged"/>
 
-                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Reviewed Path:" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="9" Grid.Column="1" x:Name="ReviewedPathBox" TextChanged="OnSettingChanged"/>
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Reviewed Path:" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="10" Grid.Column="1" x:Name="ReviewedPathBox" TextChanged="OnSettingChanged"/>
 
-                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Reviewed Args:" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="10" Grid.Column="1" x:Name="ReviewedArgumentsBox" TextChanged="OnSettingChanged"/>
+                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Reviewed Args:" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="11" Grid.Column="1" x:Name="ReviewedArgumentsBox" TextChanged="OnSettingChanged"/>
 
-                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Checkout Mappings:" VerticalAlignment="Top" Margin="0,4,0,0"/>
-                            <TextBox Grid.Row="11" Grid.Column="1" x:Name="RepositoryCheckoutMappingsBox"
+                            <TextBlock Grid.Row="12" Grid.Column="0" Text="Reviewed Resume Args:" VerticalAlignment="Top" Margin="0,4,0,0"/>
+                            <StackPanel Grid.Row="12" Grid.Column="1" Spacing="2">
+                                <TextBox x:Name="ReviewedResumeArgumentsBox" TextChanged="OnSettingChanged"/>
+                                <TextBlock x:Name="ReviewedSessionResumeSupportText" FontSize="11" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="13" Grid.Column="0" Text="Checkout Mappings:" VerticalAlignment="Top" Margin="0,4,0,0"/>
+                            <TextBox Grid.Row="13" Grid.Column="1" x:Name="RepositoryCheckoutMappingsBox"
                                      AcceptsReturn="True"
                                      Height="60"
                                      TextWrapping="NoWrap"
                                      PlaceholderText="owner/repo=C:\src\repo（1行に1件）"
                                      TextChanged="OnSettingChanged"/>
 
-                            <TextBlock Grid.Row="12" Grid.Column="0" Text="Launcher Timeout:" VerticalAlignment="Center"/>
-                            <NumberBox Grid.Row="12" Grid.Column="1" x:Name="LauncherTimeoutBox" Minimum="1" Maximum="7200000" ValueChanged="OnTimeoutChanged"/>
+                            <TextBlock Grid.Row="14" Grid.Column="0" Text="Launcher Timeout:" VerticalAlignment="Center"/>
+                            <NumberBox Grid.Row="14" Grid.Column="1" x:Name="LauncherTimeoutBox" Minimum="1" Maximum="7200000" ValueChanged="OnTimeoutChanged"/>
 
-                            <TextBlock Grid.Row="13" Grid.Column="0" Text="レビュー自動開始:" VerticalAlignment="Center"/>
-                            <ToggleSwitch Grid.Row="13" Grid.Column="1" x:Name="AutoReviewStartToggle"
+                            <TextBlock Grid.Row="15" Grid.Column="0" Text="前回セッションを引き継ぐ（resume）:" VerticalAlignment="Center"/>
+                            <ToggleSwitch Grid.Row="15" Grid.Column="1" x:Name="SessionResumeToggle"
+                                          OnContent="有効" OffContent="無効"
+                                          Toggled="OnSessionResumeToggled"/>
+
+                            <TextBlock Grid.Row="16" Grid.Column="0" Text="レビュー自動開始:" VerticalAlignment="Center"/>
+                            <ToggleSwitch Grid.Row="16" Grid.Column="1" x:Name="AutoReviewStartToggle"
                                           OnContent="有効" OffContent="無効"
                                           Toggled="OnAutoReviewStartToggled"/>
 
-                            <TextBlock Grid.Row="14" Grid.Column="0" Text="ライブログ自動クローズ:" VerticalAlignment="Center"/>
-                            <ToggleSwitch Grid.Row="14" Grid.Column="1" x:Name="LiveLogAutoCloseToggle"
+                            <TextBlock Grid.Row="17" Grid.Column="0" Text="ライブログ自動クローズ:" VerticalAlignment="Center"/>
+                            <ToggleSwitch Grid.Row="17" Grid.Column="1" x:Name="LiveLogAutoCloseToggle"
                                           OnContent="有効" OffContent="無効"
                                           Toggled="OnLiveLogAutoCloseToggled"/>
 
-                            <TextBlock Grid.Row="15" Grid.Column="0" Text="自動起動:" VerticalAlignment="Center"/>
-                            <ToggleSwitch Grid.Row="15" Grid.Column="1" x:Name="AutoStartToggle"
+                            <TextBlock Grid.Row="18" Grid.Column="0" Text="自動起動:" VerticalAlignment="Center"/>
+                            <ToggleSwitch Grid.Row="18" Grid.Column="1" x:Name="AutoStartToggle"
                                           OnContent="有効" OffContent="無効"
                                           Toggled="OnAutoStartToggled"/>
 
-                            <TextBlock Grid.Row="16" Grid.Column="0" Text="タスク状態:" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Row="16" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Grid.Row="19" Grid.Column="0" Text="タスク状態:" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="19" Grid.Column="1" Orientation="Horizontal" Spacing="8">
                                 <TextBlock x:Name="AutoStartStatusText" VerticalAlignment="Center" Text="確認中..."/>
                                 <Button x:Name="RepairAutoStartButton" Content="修復" Click="OnRepairAutoStartClick" IsEnabled="False"/>
                             </StackPanel>

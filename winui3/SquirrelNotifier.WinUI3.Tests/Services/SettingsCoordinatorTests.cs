@@ -32,12 +32,15 @@ public sealed class SettingsCoordinatorTests : IDisposable
         SettingsCoordinator coordinator = new(_settingsService);
 
         SettingsSaveResult result = coordinator.Save(CreateInput(
-            repositoryMappings: $"owner/repo={checkoutPath}"));
+            repositoryMappings: $"owner/repo={checkoutPath}",
+            sessionResumeEnabled: true));
 
         result.IsSaved.Should().BeTrue();
         result.ReviewerPresetId.Should().Be("claude");
         _settingsService.Settings.ResourceUris.Should().Equal("queue://review/queue");
         _settingsService.Settings.NotificationTimeoutMs.Should().Be(30000);
+        _settingsService.Settings.SessionResumeEnabled.Should().BeTrue();
+        _settingsService.Settings.ReviewerLauncherResumeArguments.Should().Contain("--resume {sessionId}");
         _settingsService.Settings.RepositoryCheckoutMappings["owner/repo"].Should().Be(checkoutPath);
     }
 
@@ -386,7 +389,8 @@ public sealed class SettingsCoordinatorTests : IDisposable
         string commandPath = "mcp-resource-subscriber",
         string gatewayUrl = "http://localhost:3000/mcp",
         string resourceUrisText = "queue://review/queue",
-        string repositoryMappings = "")
+        string repositoryMappings = "",
+        bool sessionResumeEnabled = false)
     {
         LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
         return new SettingsInput(
@@ -397,9 +401,12 @@ public sealed class SettingsCoordinatorTests : IDisposable
             30000,
             claude.Command,
             claude.ReviewerArgumentsTemplate,
+            claude.ReviewerResumeArgumentsTemplate,
             claude.Command,
             claude.ReviewedArgumentsTemplate,
+            claude.ReviewedResumeArgumentsTemplate,
             300000,
+            sessionResumeEnabled,
             repositoryMappings);
     }
 

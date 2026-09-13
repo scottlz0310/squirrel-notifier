@@ -190,17 +190,21 @@ internal sealed partial class MainWindow : Window
         TimeoutBox.Value = settings.NotificationTimeoutMs;
         ReviewerPathBox.Text = settings.ReviewerLauncherCommandPath;
         ReviewerArgumentsBox.Text = settings.ReviewerLauncherArguments;
+        ReviewerResumeArgumentsBox.Text = settings.ReviewerLauncherResumeArguments;
         ReviewedPathBox.Text = settings.ReviewedLauncherCommandPath;
         ReviewedArgumentsBox.Text = settings.ReviewedLauncherArguments;
+        ReviewedResumeArgumentsBox.Text = settings.ReviewedLauncherResumeArguments;
         RepositoryCheckoutMappingsBox.Text = Helpers.RepositoryCheckoutMappingParser.Format(settings.RepositoryCheckoutMappings);
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
         LiveLogAutoCloseToggle.IsOn = settings.LiveLogAutoCloseEnabled;
         AutoReviewStartToggle.IsOn = settings.AutoReviewStartEnabled;
+        SessionResumeToggle.IsOn = settings.SessionResumeEnabled;
 
         ReviewerPresetComboBox.ItemsSource = Models.LauncherAgentCatalog.AllWithCustomOption;
         ReviewedPresetComboBox.ItemsSource = Models.LauncherAgentCatalog.AllWithCustomOption;
         UpdateLauncherPresetComboBoxSelection(ReviewerPresetComboBox, settings.ReviewerLauncherPresetId);
         UpdateLauncherPresetComboBoxSelection(ReviewedPresetComboBox, settings.ReviewedLauncherPresetId);
+        UpdateSessionResumeSupportText(settings.ReviewerLauncherPresetId, settings.ReviewedLauncherPresetId);
 
         ReasonComboBox.ItemsSource = ReviewRegistrationCoordinator.Reasons;
         ReasonComboBox.SelectedIndex = 0;
@@ -500,6 +504,8 @@ internal sealed partial class MainWindow : Window
     private void OnAutoReviewStartToggled(object sender, RoutedEventArgs e)
         => _settingsInputCoordinator.UpdateAutoReviewStartEnabled(AutoReviewStartToggle.IsOn);
 
+    private void OnSessionResumeToggled(object sender, RoutedEventArgs e) => SaveCurrentSettings();
+
     // プリセット選択（#149）: ComboBox で選んだプリセットの command / arguments を
     // テキストボックスへ反映する。反映後の TextChanged から SaveCurrentSettings が呼ばれ、
     // 実際に永続化されるプリセット ID は（選択操作ではなく）その時点のテキスト内容から
@@ -512,7 +518,12 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        ApplyLauncherPreset(LauncherRole.Reviewer, ReviewerPresetComboBox, ReviewerPathBox, ReviewerArgumentsBox);
+        ApplyLauncherPreset(
+            LauncherRole.Reviewer,
+            ReviewerPresetComboBox,
+            ReviewerPathBox,
+            ReviewerArgumentsBox,
+            ReviewerResumeArgumentsBox);
     }
 
     private void OnReviewedPresetSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -522,22 +533,29 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        ApplyLauncherPreset(LauncherRole.Reviewed, ReviewedPresetComboBox, ReviewedPathBox, ReviewedArgumentsBox);
+        ApplyLauncherPreset(
+            LauncherRole.Reviewed,
+            ReviewedPresetComboBox,
+            ReviewedPathBox,
+            ReviewedArgumentsBox,
+            ReviewedResumeArgumentsBox);
     }
 
     private void ApplyLauncherPreset(
         LauncherRole role,
         ComboBox comboBox,
         TextBox pathBox,
-        TextBox argumentsBox)
+        TextBox argumentsBox,
+        TextBox resumeArgumentsBox)
     {
         bool applied = _launcherPresetCoordinator.TryApply(
             comboBox.SelectedItem as Models.LauncherAgentDefinition,
             role,
-            (command, arguments) =>
+            values =>
             {
-                pathBox.Text = command;
-                argumentsBox.Text = arguments;
+                pathBox.Text = values.Command;
+                argumentsBox.Text = values.Arguments;
+                resumeArgumentsBox.Text = values.ResumeArguments;
             });
         if (!applied)
         {
@@ -745,9 +763,12 @@ internal sealed partial class MainWindow : Window
                 TimeoutBox.Value,
                 ReviewerPathBox.Text,
                 ReviewerArgumentsBox.Text,
+                ReviewerResumeArgumentsBox.Text,
                 ReviewedPathBox.Text,
                 ReviewedArgumentsBox.Text,
+                ReviewedResumeArgumentsBox.Text,
                 LauncherTimeoutBox.Value,
+                SessionResumeToggle.IsOn,
                 RepositoryCheckoutMappingsBox.Text),
             _launcherPresetCoordinator.IsApplying);
         if (result?.IsSaved != true)
@@ -757,7 +778,26 @@ internal sealed partial class MainWindow : Window
 
         UpdateLauncherPresetComboBoxSelection(ReviewerPresetComboBox, result.ReviewerPresetId!);
         UpdateLauncherPresetComboBoxSelection(ReviewedPresetComboBox, result.ReviewedPresetId!);
+        UpdateSessionResumeSupportText(result.ReviewerPresetId!, result.ReviewedPresetId!);
         UpdateAutoPauseNotApplicableInfoBar();
+    }
+
+    private void UpdateSessionResumeSupportText(string reviewerPresetId, string reviewedPresetId)
+    {
+        ReviewerSessionResumeSupportText.Text = SessionResumeMessageFormatter.BuildCapabilityLabel(
+            LauncherSessionResumePolicy.Evaluate(
+                ReviewerPathBox.Text,
+                ReviewerArgumentsBox.Text,
+                ReviewerResumeArgumentsBox.Text,
+                reviewerPresetId,
+                LauncherRole.Reviewer));
+        ReviewedSessionResumeSupportText.Text = SessionResumeMessageFormatter.BuildCapabilityLabel(
+            LauncherSessionResumePolicy.Evaluate(
+                ReviewedPathBox.Text,
+                ReviewedArgumentsBox.Text,
+                ReviewedResumeArgumentsBox.Text,
+                reviewedPresetId,
+                LauncherRole.Reviewed));
     }
 
     private void OnAppWindowClosing(object? sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs e)

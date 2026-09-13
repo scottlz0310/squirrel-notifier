@@ -259,7 +259,8 @@ internal sealed partial class AgentExecutionWindow : Window
             _ => InfoBarSeverity.Error,
         };
         ResultInfoBar.Title = ViewModel.StatusText;
-        ResultInfoBar.Message = ViewModel.Verdict is string verdict ? $"Verdict: {verdict}" : string.Empty;
+        ResultInfoBar.Message = ViewModel.CompletionMessage
+            ?? (ViewModel.Verdict is string verdict ? $"Verdict: {verdict}" : string.Empty);
         ResultInfoBar.IsOpen = true;
 
         // 成功時のみ短い猶予の後に自動クローズ（設定で無効化可能）。失敗時は診断のため保持する

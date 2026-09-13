@@ -123,8 +123,12 @@ public class LauncherAgentCatalogTests
     public void ResolvePresetId_ShouldMatchExactCommandAndArguments(string command, string arguments, string roleName, string expectedPresetId)
     {
         LauncherRole role = roleName == "reviewer" ? LauncherRole.Reviewer : LauncherRole.Reviewed;
+        LauncherAgentDefinition? definition = LauncherAgentCatalog.FindByCommand(command);
+        string resumeArguments = role == LauncherRole.Reviewer
+            ? definition?.ReviewerResumeArgumentsTemplate ?? string.Empty
+            : definition?.ReviewedResumeArgumentsTemplate ?? string.Empty;
 
-        LauncherAgentCatalog.ResolvePresetId(command, arguments, role).Should().Be(expectedPresetId);
+        LauncherAgentCatalog.ResolvePresetId(command, arguments, resumeArguments, role).Should().Be(expectedPresetId);
     }
 
     [Theory]
@@ -148,7 +152,12 @@ public class LauncherAgentCatalogTests
     public void FindByCommand_ShouldIgnoreArgumentCustomization()
     {
         // arguments を編集しても ResolvePresetId は custom を返すが、FindByCommand は claude を返す（#233）
-        LauncherAgentCatalog.ResolvePresetId("claude", "--model opus", LauncherRole.Reviewer)
+        LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
+        LauncherAgentCatalog.ResolvePresetId(
+            "claude",
+            "--model opus",
+            claude.ReviewerResumeArgumentsTemplate,
+            LauncherRole.Reviewer)
             .Should().Be(LauncherAgentCatalog.CustomPresetId);
         LauncherAgentCatalog.FindByCommand("claude")!.Id.Should().Be("claude");
     }
@@ -159,7 +168,24 @@ public class LauncherAgentCatalogTests
         // reviewer 用テンプレートを reviewed ロールで判定した場合は一致しない（custom 扱い）
         LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
 
-        LauncherAgentCatalog.ResolvePresetId(claude.Command, claude.ReviewerArgumentsTemplate, LauncherRole.Reviewed)
+        LauncherAgentCatalog.ResolvePresetId(
+            claude.Command,
+            claude.ReviewerArgumentsTemplate,
+            claude.ReviewedResumeArgumentsTemplate,
+            LauncherRole.Reviewed)
+            .Should().Be(LauncherAgentCatalog.CustomPresetId);
+    }
+
+    [Fact]
+    public void ResolvePresetId_ShouldTreatEditedResumeTemplateAsCustom()
+    {
+        LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
+
+        LauncherAgentCatalog.ResolvePresetId(
+            claude.Command,
+            claude.ReviewerArgumentsTemplate,
+            "--resume {sessionId} --custom",
+            LauncherRole.Reviewer)
             .Should().Be(LauncherAgentCatalog.CustomPresetId);
     }
 }

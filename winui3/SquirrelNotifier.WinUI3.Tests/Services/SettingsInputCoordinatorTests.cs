@@ -96,9 +96,12 @@ public sealed class SettingsInputCoordinatorTests : IDisposable
             30000,
             claude.Command,
             claude.ReviewerArgumentsTemplate,
+            claude.ReviewerResumeArgumentsTemplate,
             claude.Command,
             claude.ReviewedArgumentsTemplate,
+            claude.ReviewedResumeArgumentsTemplate,
             300000,
+            false,
             string.Empty);
     }
 }

@@ -20,15 +20,17 @@ public sealed class LauncherPresetCoordinatorTests
         var coordinator = new LauncherPresetCoordinator();
         string? command = null;
         string? arguments = null;
+        string? resumeArguments = null;
         bool wasApplying = false;
 
         bool result = coordinator.TryApply(
             claude,
             role,
-            (selectedCommand, selectedArguments) =>
+            values =>
             {
-                command = selectedCommand;
-                arguments = selectedArguments;
+                command = values.Command;
+                arguments = values.Arguments;
+                resumeArguments = values.ResumeArguments;
                 wasApplying = coordinator.IsApplying;
             });
 
@@ -37,6 +39,9 @@ public sealed class LauncherPresetCoordinatorTests
         arguments.Should().Be(role == LauncherRole.Reviewer
             ? claude.ReviewerArgumentsTemplate
             : claude.ReviewedArgumentsTemplate);
+        resumeArguments.Should().Be(role == LauncherRole.Reviewer
+            ? claude.ReviewerResumeArgumentsTemplate
+            : claude.ReviewedResumeArgumentsTemplate);
         wasApplying.Should().BeTrue();
         coordinator.IsApplying.Should().BeFalse();
     }
@@ -50,7 +55,7 @@ public sealed class LauncherPresetCoordinatorTests
         bool result = coordinator.TryApply(
             LauncherAgentCatalog.CustomPreset,
             LauncherRole.Reviewer,
-            (_, _) => callbackCalled = true);
+            _ => callbackCalled = true);
 
         result.Should().BeFalse();
         callbackCalled.Should().BeFalse();
@@ -65,7 +70,7 @@ public sealed class LauncherPresetCoordinatorTests
         Action act = () => coordinator.TryApply(
             LauncherAgentCatalog.Find("claude"),
             LauncherRole.Reviewer,
-            (_, _) => throw new InvalidOperationException("test"));
+            _ => throw new InvalidOperationException("test"));
 
         act.Should().Throw<InvalidOperationException>();
         coordinator.IsApplying.Should().BeFalse();

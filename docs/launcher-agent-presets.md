@@ -22,11 +22,33 @@ codex / agy / copilot はスキル呼び出し機構を持たないため、clau
 ## Settings UI での挙動
 
 - reviewer / reviewed 各スロットにプリセット選択 ComboBox を用意する。選択すると command / arguments が既定値で上書きされる
-- 選択後も command / arguments は自由編集できる。保存時（`LauncherAgentCatalog.ResolvePresetId`）に現在の command / arguments を各プリセットの既定値と突き合わせ、完全一致しなければ「カスタム」として扱う。プリセット選択 ComboBox はこの判定結果を表示するだけで、選択操作そのものを永続化するわけではない
+- 選択後も command / arguments / resume arguments は自由編集できる。保存時（`LauncherAgentCatalog.ResolvePresetId`）に現在の 3 値を各プリセットの既定値と突き合わせ、完全一致しなければ「カスタム」として扱う。プリセット選択 ComboBox はこの判定結果を表示するだけで、選択操作そのものを永続化するわけではない
 - 既存ユーザーの設定は `LauncherPresetsMigrated` フラグで一回だけ移行し、移行時点の command / arguments がどのプリセットと一致するかを判定して `ReviewerLauncherPresetId` / `ReviewedLauncherPresetId` に記録する
 - #180 より前の `agy` 既定引数は CLI 内部の print timeout が 5 分だったため、未変更の既定値だけを `AgyPrintTimeoutMigrated` で `--print-timeout 30m` 付きへ移行する。自由編集された command / arguments は変更しない
 - reviewer は対象 checkout 外の専用ディレクトリから起動するため、#186 より前の Codex reviewer 既定引数だけを `CodexReviewerWorkingDirectoryMigrated` で `--skip-git-repo-check` 付きへ移行する。自由編集された command / arguments と reviewed 側は変更しない
 - #187 より前の `claude` 既定引数は text 出力のため progress event を実行中に取得できなかった。未変更の既定値だけを `ClaudeStreamJsonMigrated` で `--verbose --output-format stream-json` 付きへ移行する。自由編集された command / arguments は変更しない
+
+## セッション resume
+
+「前回セッションを引き継ぐ（resume）」は既定で無効である。無効時は `sessions.json` を読み書きせず、起動コマンドも resume 導入前と同じになる。有効時は同じ repository / PR / role / agent / working directory の保存済み session があれば role 別の resume arguments を使用する。
+
+| プリセット | CLI の session ID 供給方式 | 現在のアプリ対応 | 新規起動 | 2 回目以降 |
+|---|---|---|---|---|
+| `claude` | `ClientAssigned` | 対応 | `--session-id {sessionId}` | `--resume {sessionId}` |
+| `copilot` | `ClientAssigned` | 対応 | `--session-id {sessionId}` | `--session-id {sessionId}` |
+| `codex` | `ParsedFromOutput` | #306 で対応予定 | 通常起動 | `exec resume {sessionId}` |
+| `agy` | `ParsedFromOutput` | #306 で対応予定 | 通常起動 | `--conversation {sessionId}` |
+
+`{sessionId}` は D 形式 UUID（例: `01234567-89ab-cdef-0123-456789abcdef`）だけを受け付ける。完全な値は実行コマンドと「コマンドをコピー」の出力に必要だが、永続ログとライブログには `resumed session 01234567…` のように先頭 8 文字だけを出す。
+
+プリセット選択時は reviewer / reviewed の resume arguments も既定値へ戻る。resume arguments を編集すると、通常 arguments と同様にプリセット表示は「カスタム」へ変わる。カスタム設定は次を満たす場合だけ `ClientAssigned` として扱う。
+
+- resume arguments が空でなく `{sessionId}` を含む
+- command が `claude` / `copilot` と一致して既知の新規 session 引数を利用できる、または通常 arguments 自身が `{sessionId}` を含む
+
+任意 CLI の新規 session ID 指定方法をコマンド名から推測して `--session-id` を付けることはしない。Settings UI の各スロットには、この判定結果を「resume 対応 / 非対応」として表示する。
+
+session 情報は `%LOCALAPPDATA%\SquirrelNotifier\sessions.json` に保存する。TTL は最終利用から 7 日、上限は 100 件で、古い entry から削除する。TTL 切れ、working directory 不一致、保存 entry なし、非対応設定では理由を永続ログへ残して新規 session を起動する。resume 起動が失敗した場合は entry を破棄し、ライブログの InfoBar に「次回は新規セッションで起動する」旨を表示する。同一実行内で新規 session へ自動 retry はしない。
 
 ## 作業ディレクトリ契約
 

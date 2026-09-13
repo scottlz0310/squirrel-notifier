@@ -6,6 +6,11 @@ using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
+internal sealed record LauncherPresetValues(
+    string Command,
+    string Arguments,
+    string ResumeArguments);
+
 /// <summary>Launcher プリセットの UI 反映に必要な状態と判断を管理する（#267）.</summary>
 internal sealed class LauncherPresetCoordinator
 {
@@ -19,7 +24,7 @@ internal sealed class LauncherPresetCoordinator
     public bool TryApply(
         LauncherAgentDefinition? selected,
         LauncherRole role,
-        Action<string, string> apply)
+        Action<LauncherPresetValues> apply)
     {
         ArgumentNullException.ThrowIfNull(apply);
 
@@ -34,11 +39,17 @@ internal sealed class LauncherPresetCoordinator
             LauncherRole.Reviewed => selected.ReviewedArgumentsTemplate,
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, "未知の launcher role です。"),
         };
+        string resumeArguments = role switch
+        {
+            LauncherRole.Reviewer => selected.ReviewerResumeArgumentsTemplate,
+            LauncherRole.Reviewed => selected.ReviewedResumeArgumentsTemplate,
+            _ => throw new ArgumentOutOfRangeException(nameof(role), role, "未知の launcher role です。"),
+        };
 
         _isApplying = true;
         try
         {
-            apply(selected.Command, arguments);
+            apply(new LauncherPresetValues(selected.Command, arguments, resumeArguments));
         }
         finally
         {

@@ -41,6 +41,25 @@ public sealed class SettingsInputParserTests
         result.LauncherTimeoutMs.Should().Be(1800000);
         result.ReviewerPresetId.Should().Be("claude");
         result.ReviewedPresetId.Should().Be("claude");
+        result.SessionResumeEnabled.Should().BeFalse();
+        result.ReviewerLauncherResumeArguments.Should().Contain("--resume {sessionId}");
+    }
+
+    [Fact]
+    public void TryParse_ShouldTreatEditedResumeTemplateAsCustom()
+    {
+        SettingsInput input = CreateInput() with
+        {
+            ReviewerLauncherResumeArguments = "--resume {sessionId} --custom",
+            SessionResumeEnabled = true,
+        };
+
+        SettingsUpdateValues? result = SettingsInputParser.TryParse(input);
+
+        result.Should().NotBeNull();
+        result!.ReviewerPresetId.Should().Be(LauncherAgentCatalog.CustomPresetId);
+        result.SessionResumeEnabled.Should().BeTrue();
+        result.ReviewerLauncherResumeArguments.Should().Be("--resume {sessionId} --custom");
     }
 
     [Theory]
@@ -81,9 +100,12 @@ public sealed class SettingsInputParserTests
             notificationTimeoutValue,
             claude.Command,
             claude.ReviewerArgumentsTemplate,
+            claude.ReviewerResumeArgumentsTemplate,
             claude.Command,
             claude.ReviewedArgumentsTemplate,
+            claude.ReviewedResumeArgumentsTemplate,
             launcherTimeoutValue,
+            false,
             repositoryMappings);
     }
 }

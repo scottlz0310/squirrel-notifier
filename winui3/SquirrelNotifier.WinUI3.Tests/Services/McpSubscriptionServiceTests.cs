@@ -355,7 +355,7 @@ public class McpSubscriptionServiceTests : IDisposable
     public async Task Start_ShouldPassArgumentsAndSecretsCorrectly()
     {
         // Arrange
-        _settingsService.UpdateSettings("my-cmd", "--foo bar", "http://gateway:80", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", 300000, "custom", "custom");
+        _settingsService.UpdateSettings("my-cmd", "--foo bar", "http://gateway:80", new[] { "queue://res" }, 30000, "review-raven", "", "", "review-raven", "", "", 300000, false, "custom", "custom");
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", "super-secret-token");
 
         var preflightProcess = CreateMockProcess(0, "help", "");
@@ -511,7 +511,7 @@ public class McpSubscriptionServiceTests : IDisposable
     public async Task Start_ShouldSkipTokenAndArgumentsWhenEmpty()
     {
         // Arrange
-        _settingsService.UpdateSettings("my-cmd", "", "http://gateway:80", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", 300000, "custom", "custom");
+        _settingsService.UpdateSettings("my-cmd", "", "http://gateway:80", new[] { "queue://res" }, 30000, "review-raven", "", "", "review-raven", "", "", 300000, false, "custom", "custom");
         Environment.SetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN", null);
 
         var preflightProcess = CreateMockProcess(0, "help", "");
@@ -765,7 +765,7 @@ public class McpSubscriptionServiceTests : IDisposable
         await File.WriteAllTextAsync(testCmd, "@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\nexit /b 1\r\n", Encoding.ASCII);
 
         var settingsService = new SettingsService(tempDir);
-        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", new[] { "queue://res" }, 30000, "review-raven", "", "review-raven", "", 300000, "custom", "custom");
+        settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", new[] { "queue://res" }, 30000, "review-raven", "", "", "review-raven", "", "", 300000, false, "custom", "custom");
 
         var runner = new ProcessRunner();
         await using var service = new McpSubscriptionService(settingsService, _notificationService, _loggingService, runner);
@@ -1585,7 +1585,7 @@ public class McpSubscriptionServiceTests : IDisposable
         _settingsService.UpdateSettings(
             "my-cmd", "", "http://gateway:80",
             new[] { "queue://uri-one", "queue://uri-two" },
-            30000, "review-raven", "", "review-raven", "", 300000, "custom", "custom");
+            30000, "review-raven", "", "", "review-raven", "", "", 300000, false, "custom", "custom");
 
         var preflightProcess = CreateMockProcess(0, "help", "");
         var launchedUris = new System.Collections.Concurrent.ConcurrentBag<string>();
@@ -1638,7 +1638,7 @@ public class McpSubscriptionServiceTests : IDisposable
         _settingsService.UpdateSettings(
             "my-cmd", "", "http://gateway:80",
             new[] { "queue://uri-one", "ratelimit://status/claude" },
-            30000, "review-raven", "", "review-raven", "", 300000, "custom", "custom");
+            30000, "review-raven", "", "", "review-raven", "", "", 300000, false, "custom", "custom");
 
         var preflightProcess = CreateMockProcess(0, "help", "");
         var launchedUris = new System.Collections.Concurrent.ConcurrentBag<string>();
@@ -1688,7 +1688,7 @@ public class McpSubscriptionServiceTests : IDisposable
         _settingsService.UpdateSettings(
             "my-cmd", "", "http://gateway:80",
             new[] { "ratelimit://status/claude" },
-            30000, "review-raven", "", "review-raven", "", 300000, "custom", "custom");
+            30000, "review-raven", "", "", "review-raven", "", "", 300000, false, "custom", "custom");
 
         var preflightProcess = CreateMockProcess(0, "help", "");
         var mockRunner = new Mock<IProcessRunner>();
@@ -1724,7 +1724,7 @@ public class McpSubscriptionServiceTests : IDisposable
         _settingsService.UpdateSettings(
             "my-cmd", "", "http://gateway:80",
             new[] { "queue://uri-one", "queue://uri-two" },
-            30000, "review-raven", "", "review-raven", "", 300000, "custom", "custom");
+            30000, "review-raven", "", "", "review-raven", "", "", 300000, false, "custom", "custom");
 
         var preflightProcess = CreateMockProcess(0, "help", "");
         int retryingCount = 0;
