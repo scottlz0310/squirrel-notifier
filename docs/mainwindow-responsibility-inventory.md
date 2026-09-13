@@ -2,13 +2,13 @@
 
 ## 1. 調査範囲と判定基準
 
-調査時点は 2026-09-12、`main` の HEAD は
-`a894233f71117d22c9d5c1f1ca31c094ce3aea9a` である。
+調査時点は 2026-09-13、`main` の基点 HEAD は
+`2559728f94bf905d41062ddc45723e7607580427` である。
 対象は `winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs` と、同ファイルが直接参照する
 既存の `Services/`・`Helpers/`・`Models/`・テストである。
 
-同ファイルの物理行数は 1,481 行で、`scripts/check-code-behind-size.ps1` の上限も
-1,481 行である。レビュー登録結果の分類を抽出したことで、前回の 1,509 行から減っている。
+同ファイルの物理行数は 1,358 行で、`scripts/check-code-behind-size.ps1` の上限も
+1,358 行である。レビュー通知の表示経路とフォールバックを抽出したことで、前回の 1,381 行から減っている。
 これは抽出結果と無意識の肥大化を観測するための指標であり、
 本棚卸しの完了条件や、後続作業の削減目標ではない。
 
@@ -64,7 +64,7 @@
 | 60 | `_rateLimitAgentOptions` | 境界確認 | UI選択状態。設定更新とリマインダー操作を分離する |
 | 61 | `_logListScrollViewer` | 境界確認 | Visual Tree探索結果のキャッシュ。UIアダプターとして残すか、キャッシュ状態を移すか判断 |
 | 61 | `_reviewNotificationContent` | 維持候補 | トレイポップアップのUIコンテンツ |
-| 62 | `_isTrayPopupAvailable` | 境界確認 | UI能力状態。`TrayIconService` が所有できるか確認 |
+| 62 | `_reviewNotificationCoordinator` | 抽出済み | ポップアップ接続可否、表示失敗時のログ記録とバルーン通知へのフォールバックを管理し、WinUI型はUIコールバックへ閉じ込める |
 | 65 | `_agentExecutionWindow` | 抽出済み | `AgentExecutionWindowCoordinator` が Window ラッパーの参照保持、同時表示抑止、クローズ時の状態解除を所有 |
 | 40 | `_copyFeedbackCoordinator` | 維持候補 | コピー通知の文言・表示期限・キャンセルを管理するCoordinator。MainWindowはInfoBar反映だけを担当 |
 | — | `SettingsCoordinator.KnownResourceUris` | 抽出済み | ドメイン上の既知 URI 一覧を設定入力Coordinatorが所有し、テスト可能にする |
@@ -96,7 +96,7 @@
 | 285-289 | `OnRetryClick` | 維持候補 | 購読Serviceの再開始を呼ぶだけ |
 | 290-294 | `OnExit` | 維持候補 | トレイへ隠すUI操作 |
 | 295-312 | `OnTrayIconLoaded` | 維持候補 | `Loaded` 後にポップアップを接続する#229のUIランタイム境界 |
-| 313-327 | `AttachTrayPopup` | 境界確認 | H.NotifyIconのUI初期化は残す必要があるが、失敗ログと能力状態はService側候補 |
+| 322-324 | `AttachTrayPopup` | 抽出済み | H.NotifyIconのUI初期化だけを`ReviewNotificationCoordinator`へ渡し、接続失敗の状態・ログ・フォールバック判断はService側で管理 |
 | 328-332 | `OnTrayOpenCommandExecuteRequested` | 維持候補 | トレイメニューからWindowを表示する配線 |
 | 315-321 | `OnTrayRightClickCommandExecuteRequested` | 抽出済み | `TrayContextMenu.Show` と `TrayMenuLayout.Build` を UI 境界に残し、選択後の振り分けを `TrayCommandCoordinator` へ委譲 |
 | 323-340 | `ExitApplication` | 抽出済み | 終了要求の状態、イベント解除、UI所有リソース破棄、`Close()` の順序を `WindowLifecycleCoordinator` へ移した |
@@ -143,12 +143,12 @@
 | 867-886 | `ShowUpdateDialogAsync` | 維持候補 | UpdatePresentationをDialogとActionへ変換するUI境界 |
 | 887-907 | `TryOpenUrl` | 抽出済み | #286の初回実装で削除し、URL起動を既存`IUrlOpener`へ委譲した |
 | 908-912 | `OnOpenStatuslineDocsClick` | 維持候補 | 固定URLを既存`IUrlOpener`へ渡すUIイベント |
-| 828-838 | `OnReviewEventReceived` | 維持候補 | UIスレッドへ配送するDispatcherQueue境界 |
-| 840-862 | `HandleReviewEvent` | 抽出済み | `ReviewEventProcessingCoordinator` が一覧追跡、Action可否、自動起動の順序を管理し、code-behind は実行ウィンドウと通知表示へ結果を渡す |
-| 869-890 | `ShowReviewNotification` | 境界確認 | ポップアップとバルーンのフォールバック境界。UI所有の理由を明文化する |
-| 892-899 | `ShowReviewBalloon` | 境界確認 | 通知文言は `ReviewNotificationFormatter` へ委譲し、ここにはトレイ通知の表示だけを残す |
-| 901-905 | `OnNotificationRequested` | 維持候補 | 通知モデルをトレイ通知へ反映する配線 |
-| 907-916 | `OnDismissEventClick` | 維持候補 | `ReviewEventCollectionCoordinator` の削除と `ReviewEventCleanupCoordinator` の追跡解除を接続する |
+| 828-834 | `OnReviewEventReceived` | 維持候補 | UIスレッドへ配送するDispatcherQueue境界 |
+| 840-862 | `HandleReviewEvent` | 抽出済み | `ReviewEventProcessingCoordinator` が一覧追跡、Action可否、自動起動の順序を管理し、code-behind は実行ウィンドウと`ReviewNotificationCoordinator`へ結果を渡す |
+| 864-868 | `ShowReviewPopup` | 維持候補 | `ReviewNotificationPopup`への値反映と`TrayIconService`の表示呼び出しだけを行うUIアダプター |
+| 870-877 | `ShowReviewBalloon` | 維持候補 | 文言は`ReviewNotificationFormatter`へ委譲し、ここにはトレイ通知の表示だけを残す |
+| 879-883 | `OnNotificationRequested` | 維持候補 | 通知モデルをトレイ通知へ反映する配線 |
+| 885-893 | `OnDismissEventClick` | 維持候補 | `ReviewEventCollectionCoordinator` の削除と `ReviewEventCleanupCoordinator` の追跡解除を接続する |
 | 918-930 | `OnReviewEventsRemoved` | 維持候補 | cleanup coordinator のイベントID削除結果を `ReviewEventCollectionCoordinator` へ反映する |
 | 1024-1045 | `OnOpenPrClick` | 境界確認 | 安全なGitHub URL判定後の起動を`IUrlOpener`へ委譲。URLの直接I/Oは#286の初回実装で除去した |
 | 1046-1057 | `OnTrayPopupOpenPrRequested` | 境界確認 | ポップアップを閉じ、安全なGitHub URL判定後の起動を`IUrlOpener`へ委譲 |
@@ -197,7 +197,7 @@
 | レートリミットとリマインダー | `RateLimitRefreshCoordinatorTests`、`RateLimitSnapshot*Tests`、`RateLimitReminderServiceTests`、`RateLimitReminderCoordinatorTests`、`RateLimitAgentMonitoringCoordinatorTests` | 通知予約と監視対象変更の判断・永続化は抽出済み。更新結果の UI 反映は維持する |
 | 自動起動と更新 | `AutoStartCoordinatorTests`、`AutoUpdateServiceTests`、`UpdateCheckCoordinatorTests`、更新GUIの実機E2E | 判定は抽出済み。UIはPresentation反映に限定し、以後の変更でも起動時・手動時のE2Eを維持 |
 | Gatewayログイン | `GatewayLoginCoordinatorTests`、`GatewayLoginWorkflowCoordinatorTests`、`McpLoginServiceTests`、`DeviceLoginOutputParserTests` | 開始失敗、成功時の再購読、キャンセル、Opened 前のクローズ保留、進行表示、コピー、再入を workflow の UI port 経由で検証する。Dialog の実体は UI ランタイム境界として GUI 確認を維持 |
-| 購読状態・レビュー登録・起動・通知 | `SubscriptionStateCoordinatorTests`、`ReviewStartCoordinatorTests`、`ReviewEventCleanupCoordinatorTests`、`ReviewEventCollectionCoordinatorTests`、`ReviewEventProcessingCoordinatorTests`、`ReviewNotificationPolicyTests`、`ClipboardServiceTests`、`CopyFeedbackCoordinatorTests` | 購読状態表示の判断・一回通知、イベント一覧の保持規則、終了済みPRの除外と自動起動順序は抽出済み。通知文言、コピーの表示期限・キャンセル、トレイフォールバックは個別の結果・Policy・UI境界で維持 |
+| 購読状態・レビュー登録・起動・通知 | `SubscriptionStateCoordinatorTests`、`ReviewStartCoordinatorTests`、`ReviewEventCleanupCoordinatorTests`、`ReviewEventCollectionCoordinatorTests`、`ReviewEventProcessingCoordinatorTests`、`ReviewNotificationPolicyTests`、`ReviewNotificationCoordinatorTests`、`ClipboardServiceTests`、`CopyFeedbackCoordinatorTests` | 購読状態表示の判断・一回通知、イベント一覧の保持規則、終了済みPRの除外と自動起動順序、ポップアップ接続可否と表示失敗時のバルーンフォールバックは抽出済み。通知文言、コピーの表示期限・キャンセルは個別のFormatter・Coordinatorで検証し、WinUI表示境界はGUIで確認する |
 | ウィンドウ終了 | `WindowLifecycleCoordinatorTests` | 終了要求の冪等性と、イベント解除・リソース破棄・`Close()` の順序をテストする。WinUI Window の生成や実体の破棄は UI ランタイム境界のため直接テストしない |
 | URL、フォルダー、アイコン、Clipboard | `UrlValidatorTests`、`ClipboardServiceTests`、各UIの手動確認 | `Process.Start`、ファイル読み込み、Clipboardは直接I/Oのため、fake可能なServiceを追加して失敗時を単体テストする。Clipboard の OS 境界は #291 で抽出済み |
 
@@ -211,7 +211,7 @@
 | 1 | 外部起動・OS境界 | `CopyToClipboard`（URL 起動は #286 初回実装、フォルダー起動は #289、ウィンドウアイコンは #290、Clipboard は #291 で移行済み） | `IClipboardService`、アイコン Service | fake を使う失敗・引数テスト、URL・フォルダー・アイコン・Clipboard を含む #166 の該当 GUI 確認 |
 | 2 | コピー・通知フィードバック | `CopyLaunchCommand`、`ShowCopyFeedback`、`OnCopyFeedbackExpired` | `CopyFeedbackCoordinator`（コピー通知の文言・表示期限・キャンセルを抽出済み） | `CopyFeedbackCoordinatorTests`で文言・キャンセル・失敗通知を検証し、コピーGUI確認 |
 | 3 | 購読状態・トレイ実行 | `OnTrayRightClickCommandExecuteRequested`、`ExitApplication`（購読状態表示は `SubscriptionStateCoordinator` へ、コマンド振り分けは `TrayCommandCoordinator` へ、終了処理は `WindowLifecycleCoordinator` へ抽出済み） | TrayCommand/Lifecycle Coordinator | コマンド振り分けは `TrayCommandCoordinatorTests`、終了要求は `WindowLifecycleCoordinatorTests` で検証。トレイGUI確認は #295 で完了 |
-| 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewNotification`、`ReviewNotificationFormatter`（処理順序は `ReviewEventProcessingCoordinator` へ抽出済み） | `ReviewEventCollectionCoordinator` / `ReviewEventProcessingCoordinator` / ReviewNotification Coordinator/Presentation | イベント一覧の最新順・上限・削除、終了済みPRの除外、自動起動順序を各Coordinatorのテストで検証。通知文言はFormatter、ポップアップとバルーンのフォールバックはUI境界で確認 |
+| 4 | イベント一覧・レビュー通知 | `HandleReviewEvent`、`OnDismissEventClick`、`ShowReviewPopup`、`ShowReviewBalloon`、`ReviewNotificationFormatter`（処理順序と通知経路の判断はCoordinatorへ抽出済み） | `ReviewEventCollectionCoordinator` / `ReviewEventProcessingCoordinator` / `ReviewNotificationCoordinator` | イベント一覧の最新順・上限・削除、終了済みPRの除外、自動起動順序、ポップアップ接続失敗・表示失敗時のフォールバックを各Coordinatorのテストで検証。通知文言はFormatter、WinUI表示はGUI境界で確認 |
 | 5 | 設定・レビュー登録・レートリミット境界 | `OnSettingChanged`、各設定Toggle、`OnEnqueueReviewClick`（Gateway URL 自動検出と既知／MCP Resource URI の選択結果は `SettingsCoordinator` へ、レビュー登録の入力検証・結果分類は `ReviewRegistrationCoordinator` へ、レートリミット監視対象の変更は `RateLimitAgentMonitoringCoordinator`、通知予約の切替は `RateLimitReminderCoordinator` へ抽出済み） | Settings/ReviewRegistration/RateLimit Coordinator | 初期化中・変更時の設定入力、レビュー登録結果分類、設定GUI確認 |
 | 6 | GatewayログインUI lifecycle | `StartGatewayLoginAsync`、`CreateGatewayLoginDialog` | `GatewayLoginWorkflowCoordinator`（イベント購読、キャンセル、Dialog lifecycle、結果適用を抽出済み） | 成功・失敗・キャンセル・再入のテスト、実機GUI確認 |
 | 7 | 構成ルート整理 | コンストラクター内のCoordinator/Service生成 | `App`またはcomposition root | 依存グラフと起動・終了の回帰確認 |
