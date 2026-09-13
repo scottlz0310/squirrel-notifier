@@ -49,6 +49,45 @@ public class LauncherAgentCatalogTests
         LauncherAgentCatalog.CustomPreset.ProgressEventSupport.Should().Be(ProgressEventSupport.None);
     }
 
+    [Theory]
+    [InlineData("claude", "ClientAssigned", "--session-id {sessionId}")]
+    [InlineData("copilot", "ClientAssigned", "--session-id {sessionId}")]
+    [InlineData("codex", "ParsedFromOutput", "")]
+    [InlineData("agy", "ParsedFromOutput", "")]
+    public void All_ShouldDeclareExpectedSessionIdSupply(
+        string presetId,
+        string expectedSupply,
+        string expectedNewSessionArguments)
+    {
+        LauncherAgentDefinition? definition = LauncherAgentCatalog.Find(presetId);
+
+        definition.Should().NotBeNull();
+        definition!.SessionIdSupply.Should().Be(Enum.Parse<SessionIdSupply>(expectedSupply));
+        definition.NewSessionArgumentsTemplate.Should().Be(expectedNewSessionArguments);
+    }
+
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("copilot")]
+    [InlineData("codex")]
+    [InlineData("agy")]
+    public void ResumeTemplates_ShouldContainSessionId_ForSupportedPreset(string presetId)
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+
+        definition.ReviewerResumeArgumentsTemplate.Should().Contain("{sessionId}");
+        definition.ReviewedResumeArgumentsTemplate.Should().Contain("{sessionId}");
+    }
+
+    [Fact]
+    public void CustomPreset_ShouldNotSupportSessionResume()
+    {
+        LauncherAgentCatalog.CustomPreset.SessionIdSupply.Should().Be(SessionIdSupply.None);
+        LauncherAgentCatalog.CustomPreset.NewSessionArgumentsTemplate.Should().BeEmpty();
+        LauncherAgentCatalog.CustomPreset.ReviewerResumeArgumentsTemplate.Should().BeEmpty();
+        LauncherAgentCatalog.CustomPreset.ReviewedResumeArgumentsTemplate.Should().BeEmpty();
+    }
+
     [Fact]
     public void Find_ShouldReturnNull_ForUnknownId()
     {

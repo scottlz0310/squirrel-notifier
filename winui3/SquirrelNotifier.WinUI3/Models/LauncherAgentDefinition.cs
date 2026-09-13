@@ -19,6 +19,22 @@ internal enum ProgressEventSupport
 }
 
 /// <summary>
+/// launcher が session ID を取得する方法。consumer は CLI 名や出力から推測せず、
+/// この宣言だけで新規 session の採番または出力解析の要否を判断する（#303）.
+/// </summary>
+internal enum SessionIdSupply
+{
+    /// <summary>session resume をサポートしない.</summary>
+    None,
+
+    /// <summary>アプリが新規 session の UUID を採番して CLI へ渡す.</summary>
+    ClientAssigned,
+
+    /// <summary>CLI の構造化出力から session ID を取得する.</summary>
+    ParsedFromOutput,
+}
+
+/// <summary>
 /// reviewer / reviewed launcher スロットへ既定のコマンド・引数テンプレートを提供する
 /// 実行エージェントの定義（#149）。.
 /// </summary>
@@ -27,6 +43,12 @@ internal enum ProgressEventSupport
 /// <param name="Command">既定のコマンド（<c>CommandPath</c>）.</param>
 /// <param name="ReviewerArgumentsTemplate">reviewer スロット用の既定引数テンプレート.</param>
 /// <param name="ReviewedArgumentsTemplate">reviewed スロット用の既定引数テンプレート.</param>
+/// <param name="NewSessionArgumentsTemplate">
+/// client-assigned session の新規起動時に通常引数へ追加する引数テンプレート。
+/// 空文字は追加引数なしを表す.
+/// </param>
+/// <param name="ReviewerResumeArgumentsTemplate">reviewer スロット用の resume 引数テンプレート.</param>
+/// <param name="ReviewedResumeArgumentsTemplate">reviewed スロット用の resume 引数テンプレート.</param>
 /// <param name="RateLimitAgentId">
 /// レートリミット監視エージェント ID（<see cref="RateLimitAgentCatalog"/> の Id）への対応付け。
 /// 取得手段が無いエージェントは <see langword="null"/>.
@@ -35,14 +57,22 @@ internal enum ProgressEventSupport
 /// progress event contract への対応度（#151）。省略時は <see cref="ProgressEventSupport.None"/>
 /// （新規プリセットは安全側の未対応扱い）.
 /// </param>
+/// <param name="SessionIdSupply">
+/// session ID の供給方式（#303）。省略時は <see cref="SessionIdSupply.None"/>
+/// （新規プリセットは安全側の resume 未対応扱い）.
+/// </param>
 internal sealed record LauncherAgentDefinition(
     string Id,
     string DisplayName,
     string Command,
     string ReviewerArgumentsTemplate,
     string ReviewedArgumentsTemplate,
+    string NewSessionArgumentsTemplate,
+    string ReviewerResumeArgumentsTemplate,
+    string ReviewedResumeArgumentsTemplate,
     string? RateLimitAgentId,
-    ProgressEventSupport ProgressEventSupport = ProgressEventSupport.None);
+    ProgressEventSupport ProgressEventSupport = ProgressEventSupport.None,
+    SessionIdSupply SessionIdSupply = SessionIdSupply.None);
 
 /// <summary>
 /// launcher スロットに選択できる実行エージェントのプリセット一覧（#149）.
@@ -60,7 +90,15 @@ internal static class LauncherAgentCatalog
     /// どのプリセットとも一致しない自由編集状態であることを表す（起動には使われない）.
     /// </summary>
     public static readonly LauncherAgentDefinition CustomPreset = new(
-        CustomPresetId, "カスタム", string.Empty, string.Empty, string.Empty, null);
+        CustomPresetId,
+        "カスタム",
+        string.Empty,
+        string.Empty,
+        string.Empty,
+        string.Empty,
+        string.Empty,
+        string.Empty,
+        null);
 
     // claude はスキル定義への progress スニペット組み込み（docs/samples/skill-progress-snippet.md）
     // により @squirrel-progress を出力できる。codex / agy / copilot はスキル機構が無く
@@ -78,8 +116,12 @@ internal static class LauncherAgentCatalog
             "claude",
             "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --verbose --output-format stream-json",
             "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --verbose --output-format stream-json",
+            "--session-id {sessionId}",
+            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --resume {sessionId} --verbose --output-format stream-json",
+            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --resume {sessionId} --verbose --output-format stream-json",
             "claude-code",
-            ProgressEventSupport.Structured),
+            ProgressEventSupport: ProgressEventSupport.Structured,
+            SessionIdSupply: SessionIdSupply.ClientAssigned),
 
         // codex / agy / copilot はスキル呼び出し機構を持たないため、プロンプト全文を
         // テンプレートに埋め込む（MCP サーバー接続設定自体は Mcp-Docker の責務）.
@@ -89,7 +131,11 @@ internal static class LauncherAgentCatalog
             "codex",
             "exec --skip-git-repo-check \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
             "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
-            "codex"),
+            string.Empty,
+            "exec resume --skip-git-repo-check {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "exec resume {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "codex",
+            SessionIdSupply: SessionIdSupply.ParsedFromOutput),
 
         new LauncherAgentDefinition(
             "agy",
@@ -97,7 +143,11 @@ internal static class LauncherAgentCatalog
             "agy",
             "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
             "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
-            "agy"),
+            string.Empty,
+            "--print-timeout 30m --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "--print-timeout 30m --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "agy",
+            SessionIdSupply: SessionIdSupply.ParsedFromOutput),
 
         new LauncherAgentDefinition(
             "copilot",
@@ -105,7 +155,11 @@ internal static class LauncherAgentCatalog
             "copilot",
             "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
             "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
-            null),
+            "--session-id {sessionId}",
+            "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --session-id {sessionId}",
+            "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\" --session-id {sessionId}",
+            null,
+            SessionIdSupply: SessionIdSupply.ClientAssigned),
     ];
 
     /// <summary>
