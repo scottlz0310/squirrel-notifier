@@ -1,6 +1,14 @@
 name: .NET セットアップ
 description: .NET SDK を導入し、NuGet global packages folder をキャッシュから復元する。
 
+outputs:
+  nuget-cache-key:
+    description: NuGet cache を保存するときに再利用する primary key。
+    value: ${{ steps.nuget-cache.outputs.cache-primary-key }}
+  nuget-cache-hit:
+    description: NuGet cache が primary key へ完全一致したかどうか。
+    value: ${{ steps.nuget-cache.outputs.cache-hit }}
+
 inputs:
   dotnet-version:
     description: 導入する .NET SDK のバージョン指定。
@@ -16,7 +24,8 @@ runs:
         dotnet-version: ${{ inputs.dotnet-version }}
 
     - name: Restore NuGet cache
-      uses: actions/cache@v6
+      id: nuget-cache
+      uses: actions/cache/restore@v6
       with:
         path: ~/.nuget/packages
         # 中央パッケージ管理により全依存は Directory.Packages.props で厳密固定されるため、

@@ -32,10 +32,20 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET
+        id: setup_dotnet
         uses: ./.github/actions/dotnet-setup
 
       - name: Install dependencies
         run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+      # NuGet cache は restore 完了後に build-and-test だけが保存する。
+      # lint / security-scan で同じ大容量 cache を並行保存する重複処理を避ける。
+      - name: Save NuGet cache
+        if: success() && steps.setup_dotnet.outputs.nuget-cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ steps.setup_dotnet.outputs.nuget-cache-key }}
 
       # analyzer 設定は csproj 側（EnableNETAnalyzers / AnalysisMode / EnforceCodeStyleInBuild）に
       # あるため、警告をエラー扱いにする指定を本ビルドへ集約し、同一構成の再ビルドは行わない。
@@ -166,6 +176,9 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: csharp
+          # Advanced setup では既定 off。CodeQL の依存解決 cache を有効にするが、
+          # manual build と全 query の実行は維持する。
+          dependency-caching: true
 
       - name: Restore for CodeQL
         run: dotnet restore ${{ env.SOLUTION_PATH }}

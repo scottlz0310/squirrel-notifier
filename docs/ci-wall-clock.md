@@ -43,6 +43,28 @@ markdown 表として出力する。壁時計は run 開始から最後に完了
 critical path は `security-scan` で、`Install Windows SDK` と `Setup .NET` が両 Windows job の
 先頭で合計 3〜5 分を占めていた。
 
+## 現行 baseline の再計測（2026-09-14 / #220 継続）
+
+v0.10.0 リリース前後の成功した `pull_request` CI を、同じ job API と
+`scripts/report-ci-timings.ps1` の算出方法で再集計した。#307 の headless E2E は既存 job と
+並列で追加され、#319 は version bump により NuGet cache key が変わっているため、#226 の
+baseline と同条件ではない。したがって、この表は現行の観測値であり、#220 の 30% 短縮達成判定には
+使用しない。
+
+| PR | Run | 壁時計 | `security-scan` | `headless-e2e` | 備考 |
+|---|---:|---:|---:|---:|---|
+| [#314](https://github.com/scottlz0310/squirrel-notifier/actions/runs/34749739624) | 34749739624 | 427 秒 | 426 秒 | — | warm cache |
+| [#315](https://github.com/scottlz0310/squirrel-notifier/actions/runs/34754627549) | 34754627549 | 413 秒 | 413 秒 | — | warm cache |
+| [#317](https://github.com/scottlz0310/squirrel-notifier/actions/runs/34828979170) | 34828979170 | 400 秒 | 400 秒 | — | warm cache |
+| [#318](https://github.com/scottlz0310/squirrel-notifier/actions/runs/34836773718) | 34836773718 | 442 秒 | 442 秒 | 261 秒 | E2E 導入後 |
+| [#319](https://github.com/scottlz0310/squirrel-notifier/actions/runs/34841026520) | 34841026520 | 653 秒 | 653 秒 | 237 秒 | release version bump / cache key 変更 |
+| **中央値** | | **427 秒** | | | #226 の baseline 518 秒から 17.6% 短縮 |
+
+直近 run では `security-scan` の `Post Setup .NET` が #318 で 62 秒、#319 で 227 秒だった。
+`dotnet-setup` は従来 `actions/cache@v6` の post-save を全 Windows job で持っていたため、
+同じ NuGet cache の保存処理が job ごとに発生し得る。まず cache の restore を共通化し、保存を
+`build-and-test` へ限定して、cold cache と warm cache の双方を再計測する。
+
 ## 実施した削減
 
 | 施策 | 対象 | 根拠 |

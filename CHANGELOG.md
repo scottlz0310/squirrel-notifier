@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- CI の NuGet cache を restore と保存に分離し、`build-and-test` だけが restore 完了後に保存することで、lint / security-scan の重複保存を削減した（#220）
+- CodeQL advanced setup の依存解決 cache を有効化した。manual build、coverage、analyzer、CodeQL の品質ゲートは維持する（#220）
+
 ## [0.10.0] - 2026-09-14
 
 セッション resume の実装と Phase 1 headless E2E の追加により、レビュー起動の継続性と検証可能性を高めたリリースです。
