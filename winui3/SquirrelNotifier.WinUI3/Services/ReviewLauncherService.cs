@@ -148,6 +148,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
         Task<string>? stdoutTask = null;
         Task<string>? stderrTask = null;
+        var parsedSessionId = new ParsedSessionIdCapture();
         LauncherLaunchPlan? plan = null;
         bool processStarted = false;
         AgentExecutionOutcome outcome;
@@ -229,7 +230,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             // 実行中の逐次配信（#143）: 終了後一括の ReadToEndAsync ではなく行単位で読み取り、
             // stdout / stderr の各ストリーム内の順序を維持したままセッションへ流す。
             // WaitForExitAsync と並行して読み進めることでパイプ詰まりによる deadlock も回避する.
-            stdoutTask = PumpStdoutAsync(_activeProcess.StandardOutput, session, combinedToken);
+            stdoutTask = PumpStdoutAsync(
+                _activeProcess.StandardOutput,
+                session,
+                plan.OutputFormat,
+                parsedSessionId,
+                combinedToken);
             stderrTask = PumpStderrAsync(_activeProcess.StandardError, session, combinedToken);
 
             await _activeProcess.WaitForExitAsync(combinedToken).ConfigureAwait(false);
@@ -253,7 +259,15 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 Stdout = stdout,
                 Stderr = stderr,
             };
-            await CompleteSessionAsync(session, reviewEvent, role, plan, outcome, result, processStarted).ConfigureAwait(false);
+            await CompleteSessionAsync(
+                session,
+                reviewEvent,
+                role,
+                plan,
+                parsedSessionId,
+                outcome,
+                result,
+                processStarted).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -277,7 +291,15 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 Success = false,
                 ErrorMessage = $"Review process was {reason}.",
             };
-            await CompleteSessionAsync(session, reviewEvent, role, plan, outcome, result, processStarted).ConfigureAwait(false);
+            await CompleteSessionAsync(
+                session,
+                reviewEvent,
+                role,
+                plan,
+                parsedSessionId,
+                outcome,
+                result,
+                processStarted).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -292,7 +314,15 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 Success = false,
                 ErrorMessage = ex.Message,
             };
-            await CompleteSessionAsync(session, reviewEvent, role, plan, outcome, result, processStarted).ConfigureAwait(false);
+            await CompleteSessionAsync(
+                session,
+                reviewEvent,
+                role,
+                plan,
+                parsedSessionId,
+                outcome,
+                result,
+                processStarted).ConfigureAwait(false);
         }
         finally
         {
@@ -312,16 +342,19 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         ReviewEvent reviewEvent,
         LauncherRole role,
         LauncherLaunchPlan? plan,
+        ParsedSessionIdCapture parsedSessionId,
         AgentExecutionOutcome outcome,
         LauncherResult result,
         bool processStarted)
     {
         try
         {
+            await LogParsedSessionIdFailureAsync(plan, parsedSessionId, processStarted).ConfigureAwait(false);
             bool resumeEntryRemoved = await PersistSessionStateAsync(
                 reviewEvent,
                 role,
                 plan,
+                parsedSessionId,
                 outcome,
                 processStarted).ConfigureAwait(false);
             if (resumeEntryRemoved)
@@ -351,10 +384,23 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         AppSettings settings = _settingsService.Settings;
         (string commandPath, string argumentsTemplate, string resumeArgumentsTemplate, string presetId)
             = ResolveLauncherSlot(settings, role);
+        LauncherOutputFormat outputFormat = LauncherAgentCatalog.ResolveOutputFormat(
+            commandPath,
+            argumentsTemplate,
+            role);
 
         if (!settings.SessionResumeEnabled)
         {
-            return new LauncherLaunchPlan(commandPath, argumentsTemplate, null, null, null, false, null);
+            return new LauncherLaunchPlan(
+                commandPath,
+                argumentsTemplate,
+                null,
+                null,
+                null,
+                SessionIdSupply.None,
+                outputFormat,
+                false,
+                null);
         }
 
         LauncherSessionResumeCapability capability = LauncherSessionResumePolicy.Evaluate(
@@ -371,6 +417,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 null,
                 null,
                 null,
+                SessionIdSupply.None,
+                outputFormat,
                 false,
                 SessionResumeUnavailableReason.UnsupportedPreset);
         }
@@ -393,32 +441,57 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 capability.AgentId,
                 workingDirectory,
                 lookup.Entry.SessionId,
+                capability.SessionIdSupply,
+                capability.OutputFormat,
                 true,
                 null);
         }
 
-        Guid sessionId = Guid.NewGuid();
+        Guid? sessionId = capability.SessionIdSupply == SessionIdSupply.ClientAssigned
+            ? Guid.NewGuid()
+            : null;
         string newSessionTemplate = AppendArgumentTemplates(
             argumentsTemplate,
-            capability.NewSessionArgumentsTemplate);
+            sessionId is not null ? capability.NewSessionArgumentsTemplate : string.Empty);
         return new LauncherLaunchPlan(
             commandPath,
             newSessionTemplate,
             capability.AgentId,
             workingDirectory,
             sessionId,
+            capability.SessionIdSupply,
+            capability.OutputFormat,
             false,
             MapUnavailableReason(lookup.Status));
+    }
+
+    private async Task LogParsedSessionIdFailureAsync(
+        LauncherLaunchPlan? plan,
+        ParsedSessionIdCapture parsedSessionId,
+        bool processStarted)
+    {
+        if (plan is null
+            || !processStarted
+            || plan.IsResume
+            || plan.SessionIdSupply != SessionIdSupply.ParsedFromOutput
+            || parsedSessionId.SessionId is not null)
+        {
+            return;
+        }
+
+        string reason = parsedSessionId.FailureReason ?? "構造化出力に session ID がありません";
+        await LogAsync($"セッション ID を抽出できませんでした（{reason}）。次回は新規セッションで起動します。").ConfigureAwait(false);
     }
 
     private async Task<bool> PersistSessionStateAsync(
         ReviewEvent reviewEvent,
         LauncherRole role,
         LauncherLaunchPlan? plan,
+        ParsedSessionIdCapture parsedSessionId,
         AgentExecutionOutcome outcome,
         bool processStarted)
     {
-        if (plan is null || plan.AgentId is null || plan.SessionId is not Guid sessionId)
+        if (plan is null || plan.AgentId is null)
         {
             return false;
         }
@@ -438,6 +511,17 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             return false;
         }
 
+        Guid? sessionId = plan.SessionId;
+        if (!plan.IsResume && plan.SessionIdSupply == SessionIdSupply.ParsedFromOutput)
+        {
+            sessionId = parsedSessionId.SessionId;
+        }
+
+        if (sessionId is not Guid parsedOrAssignedSessionId)
+        {
+            return false;
+        }
+
         if (!processStarted || plan.WorkingDirectory is null)
         {
             return false;
@@ -452,7 +536,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 role,
                 plan.AgentId,
                 plan.WorkingDirectory,
-                sessionId,
+                parsedOrAssignedSessionId,
                 CancellationToken.None).ConfigureAwait(false);
         }
 
@@ -483,7 +567,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         return $"{baseTemplate} {additionalTemplate}";
     }
 
-    private static async Task<string> PumpStdoutAsync(StreamReader reader, AgentExecutionSession session, CancellationToken cancellationToken)
+    private static async Task<string> PumpStdoutAsync(
+        StreamReader reader,
+        AgentExecutionSession session,
+        LauncherOutputFormat outputFormat,
+        ParsedSessionIdCapture parsedSessionId,
+        CancellationToken cancellationToken)
     {
         var lines = new List<string>();
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
@@ -512,6 +601,16 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                     session.PublishStdout(logLine);
                 }
             }
+            else if (outputFormat == LauncherOutputFormat.CodexJson
+                && CodexJsonEventExtractor.TryExtract(line, out CodexJsonExtraction? codexExtraction))
+            {
+                PublishStructuredOutput(session, parsedSessionId, codexExtraction!.LogLines, codexExtraction.SessionId, codexExtraction.SessionIdFailureReason);
+            }
+            else if (outputFormat == LauncherOutputFormat.AgyStreamJson
+                && AgyStreamJsonEventExtractor.TryExtract(line, out AgyStreamJsonExtraction? agyExtraction))
+            {
+                PublishStructuredOutput(session, parsedSessionId, agyExtraction!.LogLines, agyExtraction.SessionId, agyExtraction.SessionIdFailureReason);
+            }
             else
             {
                 // マーカー不一致・malformed JSON・未知 schemaVersion は通常ログとして流す（#143 AC）
@@ -520,6 +619,20 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
 
         return string.Join('\n', lines);
+    }
+
+    private static void PublishStructuredOutput(
+        AgentExecutionSession session,
+        ParsedSessionIdCapture parsedSessionId,
+        IReadOnlyList<string> logLines,
+        Guid? sessionId,
+        string? sessionIdFailureReason)
+    {
+        parsedSessionId.Accept(sessionId, sessionIdFailureReason);
+        foreach (string logLine in logLines)
+        {
+            session.PublishStdout(logLine);
+        }
     }
 
     private static async Task<string> PumpStderrAsync(StreamReader reader, AgentExecutionSession session, CancellationToken cancellationToken)
@@ -588,8 +701,30 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         string? AgentId,
         string? WorkingDirectory,
         Guid? SessionId,
+        SessionIdSupply SessionIdSupply,
+        LauncherOutputFormat OutputFormat,
         bool IsResume,
         SessionResumeUnavailableReason? ResumeUnavailableReason);
+
+    private sealed class ParsedSessionIdCapture
+    {
+        public Guid? SessionId { get; private set; }
+
+        public string? FailureReason { get; private set; }
+
+        public void Accept(Guid? sessionId, string? failureReason)
+        {
+            if (sessionId is Guid value && value != Guid.Empty)
+            {
+                SessionId ??= value;
+            }
+
+            if (FailureReason is null && !string.IsNullOrWhiteSpace(failureReason))
+            {
+                FailureReason = failureReason;
+            }
+        }
+    }
 
     private void KillActiveProcess()
     {

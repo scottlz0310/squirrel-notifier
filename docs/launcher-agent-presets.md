@@ -13,8 +13,8 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 | プリセット ID | コマンド | 引数の方式 | rateLimitAgentId |
 |---|---|---|---|
 | `claude` | `claude` | `-p "/thread-owl-pr-reviewer ..." --verbose --output-format stream-json` のようなスキル呼び出し。stream-json は progress event の逐次取得用で、`-p` との併用時は CLI 仕様で `--verbose` が必須（[docs/progress-event-contract.md](progress-event-contract.md) 参照） | `claude-code` |
-| `codex` | `codex` | reviewer は `exec --skip-git-repo-check "..."`、reviewed は `exec "..."` にプロンプト全文を埋め込み | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
-| `agy` | `agy` | `--print-timeout 30m -p "..."` にプロンプト全文を埋め込み | `agy` |
+| `codex` | `codex` | reviewer は `exec --skip-git-repo-check --json "..."`、reviewed は `exec --json "..."` にプロンプト全文を埋め込み | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
+| `agy` | `agy` | `--print-timeout 30m --output-format stream-json -p "..."` にプロンプト全文を埋め込み | `agy` |
 | `copilot` | `copilot` | `-p "..."` にプロンプト全文を埋め込み | `null`（レートリミット取得手段が無い） |
 
 codex / agy / copilot はスキル呼び出し機構を持たないため、claude 版スキルが行う指示内容（thread-owl MCP のツールを使ったレビュー・対応フロー）をプロンプト全文としてテンプレートに埋め込んでいる。実際に動作させるには、当該エージェントが thread-owl の MCP ツールを利用できるよう接続設定済みであることが前提（前述の責務境界により、この接続設定自体は squirrel-notifier の対象外）。
@@ -27,6 +27,7 @@ codex / agy / copilot はスキル呼び出し機構を持たないため、clau
 - #180 より前の `agy` 既定引数は CLI 内部の print timeout が 5 分だったため、未変更の既定値だけを `AgyPrintTimeoutMigrated` で `--print-timeout 30m` 付きへ移行する。自由編集された command / arguments は変更しない
 - reviewer は対象 checkout 外の専用ディレクトリから起動するため、#186 より前の Codex reviewer 既定引数だけを `CodexReviewerWorkingDirectoryMigrated` で `--skip-git-repo-check` 付きへ移行する。自由編集された command / arguments と reviewed 側は変更しない
 - #187 より前の `claude` 既定引数は text 出力のため progress event を実行中に取得できなかった。未変更の既定値だけを `ClaudeStreamJsonMigrated` で `--verbose --output-format stream-json` 付きへ移行する。自由編集された command / arguments は変更しない
+- #306 より前の `codex` / `agy` 既定引数は session ID を取得できない出力形式だった。未変更の既定値だけを `CodexJsonOutputMigrated` / `AgyStreamJsonMigrated` で `codex --json` / `agy --output-format stream-json` 付きへ移行する。自由編集された command / arguments は変更しない
 
 ## セッション resume
 
@@ -36,10 +37,12 @@ codex / agy / copilot はスキル呼び出し機構を持たないため、clau
 |---|---|---|---|---|
 | `claude` | `ClientAssigned` | 対応 | `--session-id {sessionId}` | `--resume {sessionId}` |
 | `copilot` | `ClientAssigned` | 対応 | `--session-id {sessionId}` | `--session-id {sessionId}` |
-| `codex` | `ParsedFromOutput` | #306 で対応予定 | 通常起動 | `exec resume {sessionId}` |
-| `agy` | `ParsedFromOutput` | #306 で対応予定 | 通常起動 | `--conversation {sessionId}` |
+| `codex` | `ParsedFromOutput` | 対応 | 通常起動（`thread.started` の `thread_id` を保存） | `exec resume --json {sessionId}` |
+| `agy` | `ParsedFromOutput` | 対応 | 通常起動（`conversation_id` を保存） | `--conversation {sessionId}` |
 
 `{sessionId}` は D 形式 UUID（例: `01234567-89ab-cdef-0123-456789abcdef`）だけを受け付ける。完全な値は実行コマンドと「コマンドをコピー」の出力に必要だが、永続ログとライブログには `resumed session 01234567…` のように先頭 8 文字だけを出す。
+
+`codex --json` の既知 JSONL event と `agy --output-format stream-json` の既知 event は、人間向けの agent response だけをライブログへ展開する。session ID が欠落または D 形式 UUID でない場合は理由をログへ残して保存せず、未知 event は生の stdout 行へフォールバックする。通常引数が既定値と完全一致する場合だけこの構造化出力を有効にする。
 
 プリセット選択時は reviewer / reviewed の resume arguments も既定値へ戻る。resume arguments を編集すると、通常 arguments と同様にプリセット表示は「カスタム」へ変わる。カスタム設定は次を満たす場合だけ `ClientAssigned` として扱う。
 

@@ -847,6 +847,226 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void CodexJsonOutputMigration_ShouldRewriteLegacyDefaultArguments()
+    {
+        const string legacyReviewerArgs = "exec --skip-git-repo-check \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        const string legacyReviewedArgs = "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierCodexJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "codex",
+            ReviewerLauncherArguments = legacyReviewerArgs,
+            ReviewedLauncherCommandPath = "codex",
+            ReviewedLauncherArguments = legacyReviewedArgs,
+            LauncherSlotsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            CodexJsonOutputMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+            LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(codex.ReviewerArgumentsTemplate);
+            service.Settings.ReviewedLauncherArguments.Should().Be(codex.ReviewedArgumentsTemplate);
+            service.Settings.ReviewerLauncherPresetId.Should().Be("codex");
+            service.Settings.ReviewedLauncherPresetId.Should().Be("codex");
+            service.Settings.CodexJsonOutputMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("reviewer")]
+    [InlineData("reviewed")]
+    public void CodexJsonOutputMigration_ShouldNotRewriteCustomizedArguments(string roleName)
+    {
+        const string customArguments = "exec custom-args";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierCodexJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "codex",
+            ReviewerLauncherArguments = roleName == "reviewer" ? customArguments : "unused-reviewer-args",
+            ReviewedLauncherCommandPath = "codex",
+            ReviewedLauncherArguments = roleName == "reviewed" ? customArguments : "unused-reviewed-args",
+            LauncherSlotsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            LauncherPresetsMigrated = true,
+            LauncherResumeTemplatesMigrated = true,
+            CodexJsonOutputMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            string actualArguments = roleName == "reviewer"
+                ? service.Settings.ReviewerLauncherArguments
+                : service.Settings.ReviewedLauncherArguments;
+            actualArguments.Should().Be(customArguments);
+            service.Settings.CodexJsonOutputMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void CodexJsonOutputMigration_ShouldSkipWhenAlreadyMigrated()
+    {
+        const string legacyArgs = "exec --skip-git-repo-check \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierCodexJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "codex",
+            ReviewerLauncherArguments = legacyArgs,
+            LauncherSlotsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            LauncherPresetsMigrated = true,
+            LauncherResumeTemplatesMigrated = true,
+            CodexJsonOutputMigrated = true,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(legacyArgs);
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void AgyStreamJsonMigration_ShouldRewriteLegacyDefaultArguments()
+    {
+        const string legacyReviewerArgs = "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        const string legacyReviewedArgs = "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierAgyStreamJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "agy",
+            ReviewerLauncherArguments = legacyReviewerArgs,
+            ReviewedLauncherCommandPath = "agy",
+            ReviewedLauncherArguments = legacyReviewedArgs,
+            LauncherSlotsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            AgyStreamJsonMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+            LauncherAgentDefinition agy = LauncherAgentCatalog.Find("agy")!;
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(agy.ReviewerArgumentsTemplate);
+            service.Settings.ReviewedLauncherArguments.Should().Be(agy.ReviewedArgumentsTemplate);
+            service.Settings.ReviewerLauncherPresetId.Should().Be("agy");
+            service.Settings.ReviewedLauncherPresetId.Should().Be("agy");
+            service.Settings.AgyStreamJsonMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("reviewer")]
+    [InlineData("reviewed")]
+    public void AgyStreamJsonMigration_ShouldNotRewriteCustomizedArguments(string roleName)
+    {
+        const string customArguments = "--output-format custom";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierAgyStreamJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "agy",
+            ReviewerLauncherArguments = roleName == "reviewer" ? customArguments : "unused-reviewer-args",
+            ReviewedLauncherCommandPath = "agy",
+            ReviewedLauncherArguments = roleName == "reviewed" ? customArguments : "unused-reviewed-args",
+            LauncherSlotsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            LauncherPresetsMigrated = true,
+            LauncherResumeTemplatesMigrated = true,
+            AgyStreamJsonMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            string actualArguments = roleName == "reviewer"
+                ? service.Settings.ReviewerLauncherArguments
+                : service.Settings.ReviewedLauncherArguments;
+            actualArguments.Should().Be(customArguments);
+            service.Settings.AgyStreamJsonMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void AgyStreamJsonMigration_ShouldSkipWhenAlreadyMigrated()
+    {
+        const string legacyArgs = "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierAgyStreamJsonMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "agy",
+            ReviewerLauncherArguments = legacyArgs,
+            LauncherSlotsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            LauncherPresetsMigrated = true,
+            LauncherResumeTemplatesMigrated = true,
+            AgyStreamJsonMigrated = true,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(legacyArgs);
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
     public void CodexReviewerWorkingDirectoryMigration_ShouldRewriteLegacyDefaultArguments()
     {
         const string legacyArgs = "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
