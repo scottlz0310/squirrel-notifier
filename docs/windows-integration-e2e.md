@@ -63,6 +63,27 @@ Phase 1 は `windows-2025` で実行し、対話デスクトップを必要と�
 - 複数 PR / URI のイベント分離
 - settings、ログ、artifact の secret 非露出
 
+### #307 セッション resume の headless scenario
+
+Issue #307 は、WinUI や実際の CLI を起動せず、実 ReviewLauncherService の
+cross-process launcher 境界だけを検証する。各 scenario は一時 settings directory と
+compiled dummy launcher を使い、同じ scenario 内で明示した起動回数だけを実行する。
+失敗時の retry や continue-on-error は行わない。
+
+| Scenario ID | 検証内容 |
+|---|---|
+| session-resume-client-assigned | 新規起動の --session-id、保存、次回の --resume と同一 UUID |
+| session-resume-expired | LastUsedAt を TTL 外へ書き換えた場合の新規起動と理由ログ |
+| session-resume-working-directory-mismatch | checkout mapping の変更による mismatch と新規起動 |
+| session-resume-failed-resume | resume の非ゼロ終了、entry 破棄、次回の新規起動 |
+| session-resume-disabled | resume 導入前の引数との完全一致と sessions.json 未作成 |
+| session-resume-parsed-output | Codex JSONL の thread.started からの UUID 抽出と次回 resume |
+
+session-resume-parsed-output は #306 の ParsedFromOutput 経路も回帰検知する。
+fixture は一時 PATH 上の codex.exe として解決するが、実 Codex CLI やネットワークは使用しない。
+raw の invocation record と sessions.json は専用 root 内だけで assertion に使い、artifact には
+サニタイズ済みのログ・設定・command line だけを出力する。
+
 ### 非対象
 
 - WinUI 要素のクリックや目視判定
@@ -174,6 +195,10 @@ dummy subscriber / launcher は次を満たす。
 - stdout / stderr / exit code / 応答遅延を scenario から指定できる。
 - shell 文字列連結を使用せず、実製品と同じ `ProcessStartInfo.ArgumentList` 境界を通す。
 - 実 GitHub CLI、AI agent、ブラウザを起動しない。
+
+Issue #307 の launcher fixture は上記契約のうち、引数・working directory・標準入力の状態、
+構造化 stdout、終了コードを実装する。MSI、subscriber、fake endpoint を含む広い Phase 1
+fixture は #221〜#223 で追加する。
 
 ## Version pin 契約
 
@@ -305,7 +330,7 @@ pwsh -File .\tests\e2e\scripts\Invoke-E2E.ps1 -Phase Headless
 # 1 scenario の再現
 pwsh -File .\tests\e2e\scripts\Invoke-E2E.ps1 `
   -Phase Headless `
-  -Scenario gateway-auth-required `
+  -Scenario session-resume-client-assigned `
   -ArtifactsDirectory .\artifacts\e2e-local
 
 # 明示的な後始末と残留確認
@@ -313,7 +338,8 @@ pwsh -File .\tests\e2e\scripts\Invoke-E2ECleanup.ps1 `
   -RunRoot <実行時に表示された専用 root>
 ```
 
-これらの script は #221〜#223 で実装する。本書の追加時点ではまだ存在しない。
+Invoke-E2E.ps1 は #307 の resume 境界を対象にした Phase 1 の最小 entrypoint である。
+配布物、subscriber、gateway、認証を跨ぐ広い entrypoint は #221〜#223 で拡張する。
 
 ローカル実行は管理者権限を暗黙要求しない。MSI install 等で権限が必要な scenario は開始前に
 preflight し、不足時は途中まで実行せず明確な failure reason を返す。

@@ -246,7 +246,13 @@ Windows 配布物、外部 CLI、gateway、認証、通知、WinUI を跨ぐ統�
 分けて段階導入します。
 
 現在は Issue [#184](https://github.com/scottlz0310/squirrel-notifier/issues/184) で追跡中です。
-ローカル実行スクリプトは設計に記載した子 Issue で追加します。
+Issue [#307](https://github.com/scottlz0310/squirrel-notifier/issues/307) の launcher resume
+境界については、次のコマンドで Phase 1 の headless E2E を実行できます。
+
+    pwsh -File .\tests\e2e\scripts\Invoke-E2E.ps1 -Phase Headless
+
+この entrypoint は実 CLI、GitHub、gateway、認証、WinUI を使用しません。配布物や外部
+component を跨ぐ E2E は、設計書と #221〜#223 の実装に従って追加します。
 
 ### コード品質
 
