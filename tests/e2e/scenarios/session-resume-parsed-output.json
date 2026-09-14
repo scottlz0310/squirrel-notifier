@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "session-resume-parsed-output",
+  "phase": "headless",
+  "timeoutSeconds": 120,
+  "components": {
+    "squirrel-notifier": "0.9.0"
+  },
+  "fixture": "launcher/session-resume/codex-structured-output",
+  "expectedOutcome": "PARSED_NEW_THEN_RESUME",
+  "scenarioKind": "parsed-output"
+}
