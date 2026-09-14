@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-14
+
+セッション resume の実装と Phase 1 headless E2E の追加により、レビュー起動の継続性と検証可能性を高めたリリースです。
+
 ### Added
 
 - ReviewLauncherService の ClientAssigned / ParsedFromOutput session resume 境界を、実 dummy process と一時 settings で検証する Phase 1 headless E2E と、cleanup・artifact secret scan の entrypoint を追加した（#307）
@@ -404,7 +408,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.6.0...v0.7.0
