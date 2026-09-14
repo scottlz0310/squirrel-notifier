@@ -35,6 +35,25 @@ internal enum SessionIdSupply
 }
 
 /// <summary>
+/// launcher が stdout へ出力する構造化イベントの形式。consumer は command 名を推測せず、
+/// この宣言に対応する extractor を選択する（#306）.
+/// </summary>
+internal enum LauncherOutputFormat
+{
+    /// <summary>通常の text 出力、または構造化出力を使用しない.</summary>
+    Text,
+
+    /// <summary>Claude Code CLI の stream-json.</summary>
+    ClaudeStreamJson,
+
+    /// <summary>Codex CLI の exec --json JSONL.</summary>
+    CodexJson,
+
+    /// <summary>Antigravity CLI の --output-format stream-json.</summary>
+    AgyStreamJson,
+}
+
+/// <summary>
 /// reviewer / reviewed launcher スロットへ既定のコマンド・引数テンプレートを提供する
 /// 実行エージェントの定義（#149）。.
 /// </summary>
@@ -61,6 +80,9 @@ internal enum SessionIdSupply
 /// session ID の供給方式（#303）。省略時は <see cref="SessionIdSupply.None"/>
 /// （新規プリセットは安全側の resume 未対応扱い）.
 /// </param>
+/// <param name="OutputFormat">
+/// stdout の構造化出力形式（#306）。省略時は <see cref="LauncherOutputFormat.Text"/>.
+/// </param>
 internal sealed record LauncherAgentDefinition(
     string Id,
     string DisplayName,
@@ -72,7 +94,8 @@ internal sealed record LauncherAgentDefinition(
     string ReviewedResumeArgumentsTemplate,
     string? RateLimitAgentId,
     ProgressEventSupport ProgressEventSupport = ProgressEventSupport.None,
-    SessionIdSupply SessionIdSupply = SessionIdSupply.None);
+    SessionIdSupply SessionIdSupply = SessionIdSupply.None,
+    LauncherOutputFormat OutputFormat = LauncherOutputFormat.Text);
 
 /// <summary>
 /// launcher スロットに選択できる実行エージェントのプリセット一覧（#149）.
@@ -121,7 +144,8 @@ internal static class LauncherAgentCatalog
             "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --resume {sessionId} --verbose --output-format stream-json",
             "claude-code",
             ProgressEventSupport: ProgressEventSupport.Structured,
-            SessionIdSupply: SessionIdSupply.ClientAssigned),
+            SessionIdSupply: SessionIdSupply.ClientAssigned,
+            OutputFormat: LauncherOutputFormat.ClaudeStreamJson),
 
         // codex / agy / copilot はスキル呼び出し機構を持たないため、プロンプト全文を
         // テンプレートに埋め込む（MCP サーバー接続設定自体は Mcp-Docker の責務）.
@@ -129,25 +153,27 @@ internal static class LauncherAgentCatalog
             "codex",
             "codex",
             "codex",
-            "exec --skip-git-repo-check \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "exec --skip-git-repo-check --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "exec --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
             string.Empty,
-            "exec resume --skip-git-repo-check {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "exec resume {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "exec resume --skip-git-repo-check --json {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "exec resume --json {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
             "codex",
-            SessionIdSupply: SessionIdSupply.ParsedFromOutput),
+            SessionIdSupply: SessionIdSupply.ParsedFromOutput,
+            OutputFormat: LauncherOutputFormat.CodexJson),
 
         new LauncherAgentDefinition(
             "agy",
             "agy (Antigravity CLI)",
             "agy",
-            "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
             string.Empty,
-            "--print-timeout 30m --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "--print-timeout 30m --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "--print-timeout 30m --output-format stream-json --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "--print-timeout 30m --output-format stream-json --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
             "agy",
-            SessionIdSupply: SessionIdSupply.ParsedFromOutput),
+            SessionIdSupply: SessionIdSupply.ParsedFromOutput,
+            OutputFormat: LauncherOutputFormat.AgyStreamJson),
 
         new LauncherAgentDefinition(
             "copilot",
@@ -197,6 +223,28 @@ internal static class LauncherAgentCatalog
     /// <returns>command が一致したプリセット。見つからない場合は <see langword="null"/>.</returns>
     public static LauncherAgentDefinition? FindByCommand(string command)
         => All.FirstOrDefault(d => d.Command == command);
+
+    /// <summary>
+    /// 現在の command / 通常 arguments に一致するプリセットの stdout 形式を解決する。
+    /// 自由編集された設定は通常の text として扱い、構造化出力を推測しない（#306）.
+    /// </summary>
+    /// <param name="command">現在の command 値.</param>
+    /// <param name="arguments">現在の通常起動 arguments 値.</param>
+    /// <param name="role">判定対象の launcher スロット.</param>
+    /// <returns>一致したプリセットの出力形式。一致しない場合は <see cref="LauncherOutputFormat.Text"/>.</returns>
+    public static LauncherOutputFormat ResolveOutputFormat(
+        string command,
+        string arguments,
+        LauncherRole role)
+    {
+        LauncherAgentDefinition? definition = All.FirstOrDefault(candidate =>
+            candidate.Command == command
+            && (role == LauncherRole.Reviewer
+                ? candidate.ReviewerArgumentsTemplate == arguments
+                : candidate.ReviewedArgumentsTemplate == arguments));
+
+        return definition?.OutputFormat ?? LauncherOutputFormat.Text;
+    }
 
     /// <summary>
     /// 現在の command / arguments / resume arguments 値がどのプリセットと一致するかを判定する。

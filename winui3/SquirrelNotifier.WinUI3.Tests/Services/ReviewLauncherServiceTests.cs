@@ -640,23 +640,10 @@ public class ReviewLauncherServiceTests : IDisposable
         store.RemoveCalls.Should().Be(0);
     }
 
-    [Theory]
-    [InlineData("custom")]
-    [InlineData("codex")]
-    public async Task LaunchAsync_ShouldKeepExistingCommandForUnsupportedResumePreset(string presetId)
+    [Fact]
+    public async Task LaunchAsync_ShouldKeepExistingCommandForUnsupportedResumePreset()
     {
-        if (presetId == "codex")
-        {
-            LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
-            ConfigureSettings(
-                reviewerCmd: codex.Command,
-                reviewerArgs: codex.ReviewerArgumentsTemplate,
-                reviewerPresetId: codex.Id);
-        }
-        else
-        {
-            ConfigureSettings();
-        }
+        ConfigureSettings();
 
         _settingsService.Settings.SessionResumeEnabled = true;
         var store = new RecordingSessionResumeStore();
@@ -669,7 +656,7 @@ public class ReviewLauncherServiceTests : IDisposable
 
         var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
 
-        ReviewEvent reviewEvent = CreateReviewEvent($"unsupported-{presetId}");
+        ReviewEvent reviewEvent = CreateReviewEvent("unsupported-custom");
         List<string> expectedArguments = LauncherArgumentBuilder.BuildArguments(
             _settingsService.Settings.ReviewerLauncherArguments,
             reviewEvent);
@@ -685,6 +672,132 @@ public class ReviewLauncherServiceTests : IDisposable
         store.SavedSessionIds.Should().BeEmpty();
         string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
         log.Should().Contain("現在の launcher 設定は resume に対応していません");
+    }
+
+    [Theory]
+    [InlineData("codex", "resume")]
+    [InlineData("agy", "--conversation")]
+    public async Task LaunchAsync_ShouldPersistParsedSessionIdThenResume(string presetId, string resumeOption)
+    {
+        ConfigureParsedOutputSettings(presetId);
+        Guid sessionId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        string output = presetId == "codex"
+            ? "{\"type\":\"thread.started\",\"thread_id\":\"" + sessionId.ToString("D") + "\"}\n"
+                + "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"レビュー本文\"}}"
+            : "{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"" + sessionId.ToString("D")
+                + "\",\"step_type\":\"agent_response\",\"text_delta\":\"レビュー本文\"}}\n"
+                + "{\"event\":\"result\",\"result\":{\"conversation_id\":\"" + sessionId.ToString("D") + "\",\"status\":\"SUCCESS\"}}";
+        var processes = new Queue<IProcessInstance>(new[]
+        {
+            CreateMockProcess(0, output, string.Empty).Object,
+            CreateMockProcess(0, output, string.Empty).Object,
+        });
+        var capturedArguments = new List<IReadOnlyList<string>>();
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedArguments.Add(GetLauncherArguments(psi)))
+            .Returns(() => processes.Dequeue());
+        var store = new RecordingSessionResumeStore();
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewEvent reviewEvent = CreateReviewEvent($"parsed-session-{presetId}");
+
+        LauncherResult first = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+        LauncherResult second = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        first.Success.Should().BeTrue();
+        second.Success.Should().BeTrue();
+        capturedArguments.Should().HaveCount(2);
+        capturedArguments[0].Should().NotContain(resumeOption);
+        capturedArguments[1].Should().ContainInOrder(resumeOption, sessionId.ToString("D"));
+        store.SavedSessionIds.Should().Equal(sessionId, sessionId);
+        (first.Stdout.Contains("thread.started", StringComparison.Ordinal)
+            || first.Stdout.Contains("step_update", StringComparison.Ordinal)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task StartSession_ShouldPublishCodexAgentMessageAsHumanReadableLog()
+    {
+        ConfigureParsedOutputSettings("codex");
+        Guid sessionId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        string output = "{\"type\":\"thread.started\",\"thread_id\":\"" + sessionId.ToString("D") + "\"}\n"
+            + "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"レビュー本文\"}}";
+        Mock<IProcessInstance> process = CreateMockProcess(0, output, string.Empty);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        var service = new ReviewLauncherService(
+            _settingsService,
+            _loggingService,
+            runner.Object,
+            sessionResumeStore: new RecordingSessionResumeStore());
+
+        AgentExecutionSession session = service.StartSession(
+            CreateReviewEvent("codex-human-log"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent executionEvent in session.ReadEventsAsync())
+        {
+            events.Add(executionEvent);
+        }
+
+        events.Should().Contain(e => e.Kind == AgentExecutionEventKind.Stdout && e.Text == "レビュー本文");
+        events.Should().NotContain(e => e.Text != null
+            && e.Text.Contains("item.completed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldNotReadOrWriteStoreWhenParsedOutputResumeIsDisabled()
+    {
+        ConfigureParsedOutputSettings("codex");
+        _settingsService.Settings.SessionResumeEnabled = false;
+        Guid sessionId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        string output = "{\"type\":\"thread.started\",\"thread_id\":\"" + sessionId.ToString("D") + "\"}";
+        var store = new RecordingSessionResumeStore
+        {
+            Entry = new SessionResumeEntry(
+                sessionId,
+                "codex",
+                Path.Combine(_tempDir, "launcher-workspace", "reviewer"),
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow),
+        };
+        Mock<IProcessInstance> process = CreateMockProcess(0, output, string.Empty);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+
+        LauncherResult result = await service.LaunchAsync(
+            CreateReviewEvent("parsed-resume-disabled"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        store.TryGetCalls.Should().Be(0);
+        store.SavedSessionIds.Should().BeEmpty();
+        store.RemoveCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldLogFailureAndAvoidSavingWhenParsedSessionIdIsInvalid()
+    {
+        ConfigureParsedOutputSettings("codex");
+        const string output = "{\"type\":\"thread.started\",\"thread_id\":\"not-a-uuid\"}";
+        var store = new RecordingSessionResumeStore();
+        Mock<IProcessInstance> process = CreateMockProcess(0, output, string.Empty);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+
+        LauncherResult result = await service.LaunchAsync(
+            CreateReviewEvent("parsed-session-invalid"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+        string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+
+        result.Success.Should().BeTrue();
+        store.SavedSessionIds.Should().BeEmpty();
+        log.Should().Contain("セッション ID を抽出できませんでした");
+        log.Should().Contain("D 形式 UUID");
     }
 
     [Fact]
@@ -762,6 +875,22 @@ public class ReviewLauncherServiceTests : IDisposable
     private void ConfigureClientAssignedSettings(string presetId = "claude")
     {
         LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+        ConfigureSettings(
+            reviewerCmd: definition.Command,
+            reviewerArgs: definition.ReviewerArgumentsTemplate,
+            reviewerResumeArgs: definition.ReviewerResumeArgumentsTemplate,
+            reviewedCmd: definition.Command,
+            reviewedArgs: definition.ReviewedArgumentsTemplate,
+            reviewedResumeArgs: definition.ReviewedResumeArgumentsTemplate,
+            sessionResumeEnabled: true,
+            reviewerPresetId: definition.Id,
+            reviewedPresetId: definition.Id);
+    }
+
+    private void ConfigureParsedOutputSettings(string presetId)
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+        definition.SessionIdSupply.Should().Be(SessionIdSupply.ParsedFromOutput);
         ConfigureSettings(
             reviewerCmd: definition.Command,
             reviewerArgs: definition.ReviewerArgumentsTemplate,

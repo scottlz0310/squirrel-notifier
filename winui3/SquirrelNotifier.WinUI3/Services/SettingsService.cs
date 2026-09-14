@@ -145,6 +145,50 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // codex の JSONL 出力から session ID を取得できるようにする（#306）。
+        // 既定テンプレートと完全一致する未変更の設定だけを移行し、自由編集された値は保持する。
+        if (!_settings.CodexJsonOutputMigrated)
+        {
+            const string legacyReviewerArguments = "exec --skip-git-repo-check \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+            const string legacyReviewedArguments = "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"";
+            LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
+
+            if (_settings.ReviewerLauncherCommandPath == codex.Command && _settings.ReviewerLauncherArguments == legacyReviewerArguments)
+            {
+                _settings.ReviewerLauncherArguments = codex.ReviewerArgumentsTemplate;
+            }
+
+            if (_settings.ReviewedLauncherCommandPath == codex.Command && _settings.ReviewedLauncherArguments == legacyReviewedArguments)
+            {
+                _settings.ReviewedLauncherArguments = codex.ReviewedArgumentsTemplate;
+            }
+
+            _settings.CodexJsonOutputMigrated = true;
+            SaveSettings();
+        }
+
+        // agy の構造化出力から conversation ID を取得できるようにする（#306）。
+        // #180 の print timeout migration 後の既定値だけを更新し、自由編集された値は保持する。
+        if (!_settings.AgyStreamJsonMigrated)
+        {
+            const string legacyReviewerArguments = "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+            const string legacyReviewedArguments = "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"";
+            LauncherAgentDefinition agy = LauncherAgentCatalog.Find("agy")!;
+
+            if (_settings.ReviewerLauncherCommandPath == agy.Command && _settings.ReviewerLauncherArguments == legacyReviewerArguments)
+            {
+                _settings.ReviewerLauncherArguments = agy.ReviewerArgumentsTemplate;
+            }
+
+            if (_settings.ReviewedLauncherCommandPath == agy.Command && _settings.ReviewedLauncherArguments == legacyReviewedArguments)
+            {
+                _settings.ReviewedLauncherArguments = agy.ReviewedArgumentsTemplate;
+            }
+
+            _settings.AgyStreamJsonMigrated = true;
+            SaveSettings();
+        }
+
         // #305 より前の settings.json には resume テンプレートが無い。command / 通常引数が
         // 現行プリセットと完全一致するスロットだけを補完し、自由編集された設定は空のまま保つ。
         if (!_settings.LauncherResumeTemplatesMigrated)
@@ -517,6 +561,12 @@ internal sealed class AppSettings
 
     // claude の progress event 逐次取得対応（#187、stream-json 化）を既存の未変更プリセットへ適用する migration
     public bool ClaudeStreamJsonMigrated { get; set; }
+
+    // codex の session ID 抽出対応（#306、exec --json 化）を既存の未変更プリセットへ適用する migration
+    public bool CodexJsonOutputMigrated { get; set; }
+
+    // agy の session ID 抽出対応（#306、stream-json 化）を既存の未変更プリセットへ適用する migration
+    public bool AgyStreamJsonMigrated { get; set; }
 
     // launcher スロットに選択されているエージェントプリセット ID（LauncherAgentCatalog 参照）。
     // 自由編集でどのプリセットとも一致しなくなった場合は LauncherAgentCatalog.CustomPresetId になる.

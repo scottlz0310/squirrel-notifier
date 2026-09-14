@@ -14,7 +14,7 @@ internal enum SessionResumeUnavailableReason
     /// <summary>保存済み entry の TTL が切れている.</summary>
     Expired,
 
-    /// <summary>launcher 設定が ClientAssigned resume に対応していない.</summary>
+    /// <summary>launcher 設定が session resume に対応していない.</summary>
     UnsupportedPreset,
 
     /// <summary>保存時と現在の working directory が一致しない.</summary>
@@ -24,13 +24,14 @@ internal enum SessionResumeUnavailableReason
 internal sealed record LauncherSessionResumeCapability(
     SessionIdSupply SessionIdSupply,
     string? AgentId,
-    string NewSessionArgumentsTemplate)
+    string NewSessionArgumentsTemplate,
+    LauncherOutputFormat OutputFormat = LauncherOutputFormat.Text)
 {
-    public bool IsSupported => SessionIdSupply == SessionIdSupply.ClientAssigned && AgentId is not null;
+    public bool IsSupported => SessionIdSupply != SessionIdSupply.None && AgentId is not null;
 }
 
 /// <summary>
-/// launcher の実値から ClientAssigned resume の可否と新規 session 引数を決定する。
+/// launcher の実値から session resume の可否と新規起動に必要な情報を決定する。
 /// Settings UI と実行経路が同じ判定を共有するための stateless policy.
 /// </summary>
 internal static class LauncherSessionResumePolicy
@@ -48,20 +49,22 @@ internal static class LauncherSessionResumePolicy
         {
             LauncherAgentDefinition? definition = LauncherAgentCatalog.Find(presetId);
             if (definition is null
-                || definition.SessionIdSupply != SessionIdSupply.ClientAssigned
+                || definition.SessionIdSupply == SessionIdSupply.None
                 || definition.Command != command
                 || ResolveArguments(definition, role) != arguments
                 || ResolveResumeArguments(definition, role) != resumeArguments
-                || !ContainsSessionId(definition.NewSessionArgumentsTemplate)
+                || (definition.SessionIdSupply == SessionIdSupply.ClientAssigned
+                    && !ContainsSessionId(definition.NewSessionArgumentsTemplate))
                 || !ContainsSessionId(resumeArguments))
             {
                 return Unsupported();
             }
 
             return new LauncherSessionResumeCapability(
-                SessionIdSupply.ClientAssigned,
+                definition.SessionIdSupply,
                 definition.Id,
-                definition.NewSessionArgumentsTemplate);
+                definition.NewSessionArgumentsTemplate,
+                definition.OutputFormat);
         }
 
         if (!ContainsSessionId(resumeArguments))
@@ -76,7 +79,8 @@ internal static class LauncherSessionResumePolicy
             return new LauncherSessionResumeCapability(
                 SessionIdSupply.ClientAssigned,
                 commandMatch.Id,
-                commandMatch.NewSessionArgumentsTemplate);
+                commandMatch.NewSessionArgumentsTemplate,
+                commandMatch.OutputFormat);
         }
 
         // 任意 CLI の新規 session ID 指定方法は推測できない。通常引数にも placeholder が
@@ -147,7 +151,9 @@ internal static class SessionResumeMessageFormatter
     {
         ArgumentNullException.ThrowIfNull(capability);
         return capability.IsSupported
-            ? "resume 対応（ClientAssigned）"
+            ? capability.SessionIdSupply == SessionIdSupply.ParsedFromOutput
+                ? "resume 対応（ParsedFromOutput）"
+                : "resume 対応（ClientAssigned）"
             : "resume 非対応（resume と新規起動の両方で {sessionId} を指定できる設定が必要です）";
     }
 }

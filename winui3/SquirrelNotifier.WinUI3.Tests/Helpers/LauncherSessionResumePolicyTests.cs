@@ -15,8 +15,8 @@ public sealed class LauncherSessionResumePolicyTests
     [InlineData("claude", "Reviewed", true)]
     [InlineData("copilot", "Reviewer", true)]
     [InlineData("copilot", "Reviewed", true)]
-    [InlineData("codex", "Reviewer", false)]
-    [InlineData("agy", "Reviewed", false)]
+    [InlineData("codex", "Reviewer", true)]
+    [InlineData("agy", "Reviewed", true)]
     public void Evaluate_ShouldFollowPresetCapability(string presetId, string roleName, bool expected)
     {
         LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
@@ -36,6 +36,11 @@ public sealed class LauncherSessionResumePolicyTests
             role);
 
         result.IsSupported.Should().Be(expected);
+        if (expected)
+        {
+            result.SessionIdSupply.Should().Be(definition.SessionIdSupply);
+            result.OutputFormat.Should().Be(definition.OutputFormat);
+        }
     }
 
     [Theory]
@@ -94,5 +99,18 @@ public sealed class LauncherSessionResumePolicyTests
             : new LauncherSessionResumeCapability(SessionIdSupply.None, null, string.Empty);
 
         SessionResumeMessageFormatter.BuildCapabilityLabel(capability).Should().StartWith(expected);
+    }
+
+    [Fact]
+    public void BuildCapabilityLabel_ShouldDescribeParsedSessionIdSupply()
+    {
+        var capability = new LauncherSessionResumeCapability(
+            SessionIdSupply.ParsedFromOutput,
+            "codex",
+            string.Empty,
+            LauncherOutputFormat.CodexJson);
+
+        SessionResumeMessageFormatter.BuildCapabilityLabel(capability)
+            .Should().StartWith("resume 対応（ParsedFromOutput）");
     }
 }

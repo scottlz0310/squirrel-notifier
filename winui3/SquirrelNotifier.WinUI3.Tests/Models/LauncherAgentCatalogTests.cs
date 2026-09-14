@@ -43,6 +43,19 @@ public class LauncherAgentCatalogTests
         definition!.ProgressEventSupport.Should().Be(Enum.Parse<ProgressEventSupport>(expectedSupport));
     }
 
+    [Theory]
+    [InlineData("claude", "ClaudeStreamJson")]
+    [InlineData("codex", "CodexJson")]
+    [InlineData("agy", "AgyStreamJson")]
+    [InlineData("copilot", "Text")]
+    public void All_ShouldMapExpectedOutputFormat(string presetId, string expectedFormat)
+    {
+        LauncherAgentDefinition? definition = LauncherAgentCatalog.Find(presetId);
+
+        definition.Should().NotBeNull();
+        definition!.OutputFormat.Should().Be(Enum.Parse<LauncherOutputFormat>(expectedFormat));
+    }
+
     [Fact]
     public void CustomPreset_ShouldNotSupportProgressEvents()
     {
@@ -114,10 +127,10 @@ public class LauncherAgentCatalogTests
     [InlineData("claude", "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --verbose --output-format stream-json", "reviewer", "claude")]
     [InlineData("claude", "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --verbose --output-format stream-json", "reviewed", "claude")]
     [InlineData("claude", "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", LauncherAgentCatalog.CustomPresetId)]
-    [InlineData("agy", "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "agy")]
-    [InlineData("agy", "--print-timeout 30m -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"", "reviewed", "agy")]
-    [InlineData("codex", "exec --skip-git-repo-check \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "codex")]
-    [InlineData("codex", "exec \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"", "reviewed", "codex")]
+    [InlineData("agy", "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "agy")]
+    [InlineData("agy", "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"", "reviewed", "agy")]
+    [InlineData("codex", "exec --skip-git-repo-check --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "codex")]
+    [InlineData("codex", "exec --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"", "reviewed", "codex")]
     [InlineData("claude", "--something-else", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     [InlineData("unknown-cmd", "unknown-args", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     public void ResolvePresetId_ShouldMatchExactCommandAndArguments(string command, string arguments, string roleName, string expectedPresetId)
@@ -160,6 +173,32 @@ public class LauncherAgentCatalogTests
             LauncherRole.Reviewer)
             .Should().Be(LauncherAgentCatalog.CustomPresetId);
         LauncherAgentCatalog.FindByCommand("claude")!.Id.Should().Be("claude");
+    }
+
+    [Theory]
+    [InlineData("codex", "CodexJson")]
+    [InlineData("agy", "AgyStreamJson")]
+    public void ResolveOutputFormat_ShouldReturnStructuredFormat_ForExactPresetArguments(string presetId, string expectedFormat)
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+
+        LauncherAgentCatalog.ResolveOutputFormat(
+            definition.Command,
+            definition.ReviewerArgumentsTemplate,
+            LauncherRole.Reviewer)
+            .Should().Be(Enum.Parse<LauncherOutputFormat>(expectedFormat));
+    }
+
+    [Fact]
+    public void ResolveOutputFormat_ShouldReturnText_ForEditedArguments()
+    {
+        LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
+
+        LauncherAgentCatalog.ResolveOutputFormat(
+            codex.Command,
+            codex.ReviewerArgumentsTemplate + " --custom",
+            LauncherRole.Reviewer)
+            .Should().Be(LauncherOutputFormat.Text);
     }
 
     [Fact]
