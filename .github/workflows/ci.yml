@@ -176,9 +176,6 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: csharp
-          # Advanced setup では既定 off。CodeQL の依存解決 cache を有効にするが、
-          # manual build と全 query の実行は維持する。
-          dependency-caching: true
 
       - name: Restore for CodeQL
         run: dotnet restore ${{ env.SOLUTION_PATH }}

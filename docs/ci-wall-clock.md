@@ -65,6 +65,11 @@ baseline と同条件ではない。したがって、この表は現行の観�
 同じ NuGet cache の保存処理が job ごとに発生し得る。まず cache の restore を共通化し、保存を
 `build-and-test` へ限定して、cold cache と warm cache の双方を再計測する。
 
+#320 の検証では CodeQL advanced setup の `dependency-caching: true` も試したが、C# の
+cache key を算出できず `Skipping download of dependency cache for csharp as we cannot calculate
+a hash for the cache key.` となった。依存キャッシュを実際には取得できないため、この候補は不採用として
+設定を削除した。CodeQL の manual build、全 query、解析結果の品質ゲートは変更していない。
+
 ## 実施した削減
 
 | 施策 | 対象 | 根拠 |
