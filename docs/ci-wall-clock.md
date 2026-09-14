@@ -70,6 +70,16 @@ cache key を算出できず `Skipping download of dependency cache for csharp a
 a hash for the cache key.` となった。依存キャッシュを実際には取得できないため、この候補は不採用として
 設定を削除した。CodeQL の manual build、全 query、解析結果の品質ゲートは変更していない。
 
+撤回後の #320 の再検証（commit `89eaf916`、run `34847348830`）は次のとおりだった。
+
+| Run | 壁時計 | `security-scan` | `headless-e2e` | 備考 |
+|---|---:|---:|---:|---|
+| [#320](https://github.com/scottlz0310/squirrel-notifier/actions/runs/34847348830) | 366 秒 | 363 秒 | 206 秒 | NuGet cache exact hit、保存 step は skipped |
+
+`security-scan` は Setup .NET 72 秒、CodeQL init 60 秒、build 125 秒、analysis 85 秒だった。
+この 1 run は #226 の baseline 518 秒に対して 29.3% 短いが、#220 の「直近5回」達成判定には
+使用せず、引き続き CodeQL toolchain と runner 変動を含む複数 run の観測対象とする。
+
 ## 実施した削減
 
 | 施策 | 対象 | 根拠 |
