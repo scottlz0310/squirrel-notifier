@@ -2,6 +2,9 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using SquirrelNotifier.WinUI3.Helpers;
@@ -25,6 +28,22 @@ internal interface IPullRequestStatusClient
     Task<PullRequestLifecycleState> GetStateAsync(string repository, int prNumber, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// GitHub API のレート制限に達し、<see cref="ResetAt"/> まで照会を控えるべきことを表す.
+/// </summary>
+[SuppressMessage("Design", "CA1032", Justification = "再開時刻を必須とする例外のため、再開時刻を持たない標準コンストラクターは提供しない")]
+[SuppressMessage("Roslynator", "RCS1194", Justification = "再開時刻を必須とする例外のため、再開時刻を持たない標準コンストラクターは提供しない")]
+internal sealed class GitHubRateLimitException : HttpRequestException
+{
+    public GitHubRateLimitException(string message, DateTimeOffset resetAt)
+        : base(message)
+    {
+        ResetAt = resetAt;
+    }
+
+    public DateTimeOffset ResetAt { get; }
+}
+
 internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, IDisposable
 {
     private const string _apiBaseUrl = "https://api.github.com/";
@@ -32,8 +51,12 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
     private readonly TimeSpan _requestTimeout;
+    private readonly TimeProvider _timeProvider;
 
-    public GitHubPullRequestStatusClient(HttpClient? httpClient = null, TimeSpan? requestTimeout = null)
+    public GitHubPullRequestStatusClient(
+        HttpClient? httpClient = null,
+        TimeSpan? requestTimeout = null,
+        TimeProvider? timeProvider = null)
     {
         TimeSpan timeout = requestTimeout ?? _defaultRequestTimeout;
         if (timeout <= TimeSpan.Zero)
@@ -44,6 +67,7 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
         _httpClient = httpClient ?? new HttpClient();
         _ownsHttpClient = httpClient is null;
         _requestTimeout = timeout;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         if (_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
         {
             _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Squirrel-Notifier-WinUI3", "0.8"));
@@ -69,6 +93,13 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
+            if (TryGetRateLimitResetTime(response, out DateTimeOffset resetAt))
+            {
+                throw new GitHubRateLimitException(
+                    $"GitHub API rate limit exceeded for {repository}#{prNumber}: HTTP {(int)response.StatusCode} ({response.StatusCode}).",
+                    resetAt);
+            }
+
             throw new HttpRequestException(
                 $"GitHub PR status request failed for {repository}#{prNumber}: HTTP {(int)response.StatusCode} ({response.StatusCode}).");
         }
@@ -107,6 +138,46 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
             _httpClient.Dispose();
         }
     }
+
+    // GitHub の案内に従い retry-after を優先し、無ければ残数 0 のときの x-ratelimit-reset を使う。
+    // 再開時刻を決められない 403 / 429 は権限エラー等と区別できないため、通常の失敗として扱う。
+    private bool TryGetRateLimitResetTime(HttpResponseMessage response, out DateTimeOffset resetAt)
+    {
+        resetAt = default;
+        if (response.StatusCode is not (HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests))
+        {
+            return false;
+        }
+
+        RetryConditionHeaderValue? retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is TimeSpan delta)
+        {
+            resetAt = _timeProvider.GetUtcNow() + delta;
+            return true;
+        }
+
+        if (retryAfter?.Date is DateTimeOffset date)
+        {
+            resetAt = date;
+            return true;
+        }
+
+        if (GetSingleHeaderValue(response, "x-ratelimit-remaining") == "0"
+            && long.TryParse(
+                GetSingleHeaderValue(response, "x-ratelimit-reset"),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out long resetEpochSeconds))
+        {
+            resetAt = DateTimeOffset.FromUnixTimeSeconds(resetEpochSeconds);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? GetSingleHeaderValue(HttpResponseMessage response, string name)
+        => response.Headers.TryGetValues(name, out IEnumerable<string>? values) ? values.FirstOrDefault() : null;
 
     private static (string Owner, string Repo) ParseRepository(string repository, int prNumber)
     {

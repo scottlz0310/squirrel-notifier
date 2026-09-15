@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI の NuGet cache を restore と保存に分離し、`build-and-test` だけが restore 完了後に保存することで、lint / security-scan の重複保存を削減した（#220）
 
+### Fixed
+
+- マージ・クローズ済み PR のレビューイベント自動片付けが、イベント数に比例して未認証 GitHub API（IP あたり 60 req/h）を消費し、状態取得と更新チェックを失敗させ得る問題を修正した（#322）。v0.9.0 の既知の問題として挙げていたもの。照会を PR 単位にまとめ、定期巡回とウィンドウ表示時の照会を任意の 1 時間で最大 30 回に抑え、最後に照会した時刻が古い PR から順に確認する。403 / 429 で再開時刻（`retry-after` または `x-ratelimit-reset`）を受け取った場合はその時刻まで照会を止め、レビュー起動直前の確認は照会せずに許可してログに残す
+
 ## [0.10.0] - 2026-09-14
 
 セッション resume の実装と Phase 1 headless E2E の追加により、レビュー起動の継続性と検証可能性を高めたリリースです。
