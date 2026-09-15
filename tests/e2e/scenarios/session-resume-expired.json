@@ -3,9 +3,7 @@
   "id": "session-resume-expired",
   "phase": "headless",
   "timeoutSeconds": 120,
-  "components": {
-    "squirrel-notifier": "0.9.0"
-  },
+  "components": {},
   "fixture": "launcher/session-resume/expired",
   "expectedOutcome": "EXPIRED_THEN_NEW",
   "scenarioKind": "expired"

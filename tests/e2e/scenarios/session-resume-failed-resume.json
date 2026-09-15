@@ -3,9 +3,7 @@
   "id": "session-resume-failed-resume",
   "phase": "headless",
   "timeoutSeconds": 120,
-  "components": {
-    "squirrel-notifier": "0.9.0"
-  },
+  "components": {},
   "fixture": "launcher/session-resume/failed-resume",
   "expectedOutcome": "FAILED_RESUME_THEN_NEW",
   "scenarioKind": "failed-resume"

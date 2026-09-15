@@ -176,6 +176,11 @@ tests/e2e/
 }
 ```
 
+- `components` には、fixture が再生する外部コンポーネント（例: mcp-resource-subscriber）の
+  契約 version だけを記録する。テスト対象の Squirrel Notifier 自身の version はビルド成果物から
+  決まり、runner が artifact の `versions.json`（`productAssembly`）に記録するため、manifest には
+  記録しない。外部コンポーネントを使わない scenario は空の object
+  （`{}`）にする。
 - `id` は artifact と failure record でも同じ値を使用する。
 - fixture のファイル名や本文に実 token、実 user code、実 repository を含めない。
 - 時刻、port、一時パスは harness が注入し、fixture に固定しない。

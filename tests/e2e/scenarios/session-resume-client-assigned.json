@@ -3,9 +3,7 @@
   "id": "session-resume-client-assigned",
   "phase": "headless",
   "timeoutSeconds": 120,
-  "components": {
-    "squirrel-notifier": "0.9.0"
-  },
+  "components": {},
   "fixture": "launcher/session-resume/client-assigned",
   "expectedOutcome": "NEW_THEN_RESUME",
   "scenarioKind": "client-assigned"
