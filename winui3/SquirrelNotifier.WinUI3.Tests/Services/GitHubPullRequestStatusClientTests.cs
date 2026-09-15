@@ -13,6 +13,8 @@ namespace SquirrelNotifier.WinUI3.Tests.Services;
 
 public class GitHubPullRequestStatusClientTests
 {
+    private static readonly DateTimeOffset _now = new(2026, 9, 15, 0, 0, 0, TimeSpan.Zero);
+
     [Fact]
     public async Task GetStateAsync_ShouldReturnOpenAndBuildSafeApiRequest()
     {
@@ -53,6 +55,50 @@ public class GitHubPullRequestStatusClientTests
         Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
 
         await act.Should().ThrowAsync<HttpRequestException>().WithMessage("*HTTP 404*");
+    }
+
+    public static TheoryData<HttpStatusCode, string?, string?, string?, DateTimeOffset> RateLimitResponses => new()
+    {
+        { HttpStatusCode.TooManyRequests, "60", null, null, _now.AddSeconds(60) },
+        { HttpStatusCode.Forbidden, "Tue, 15 Sep 2026 01:00:00 GMT", "0", "1789430400", new DateTimeOffset(2026, 9, 15, 1, 0, 0, TimeSpan.Zero) },
+        { HttpStatusCode.Forbidden, null, "0", "1789434000", DateTimeOffset.FromUnixTimeSeconds(1789434000) },
+        { HttpStatusCode.TooManyRequests, null, "0", "1789434000", DateTimeOffset.FromUnixTimeSeconds(1789434000) },
+    };
+
+    [Theory]
+    [MemberData(nameof(RateLimitResponses))]
+    public async Task GetStateAsync_ShouldThrowRateLimitException_WhenResetTimeIsProvided(
+        HttpStatusCode statusCode,
+        string? retryAfter,
+        string? remaining,
+        string? reset,
+        DateTimeOffset expectedResetAt)
+    {
+        using GitHubPullRequestStatusClient client = CreateErrorClient(statusCode, retryAfter, remaining, reset);
+
+        Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<GitHubRateLimitException>())
+            .Which.ResetAt.Should().Be(expectedResetAt);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, null, null, null)]
+    [InlineData(HttpStatusCode.Forbidden, null, "10", "1789434000")]
+    [InlineData(HttpStatusCode.TooManyRequests, null, "0", null)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "60", "0", "1789434000")]
+    public async Task GetStateAsync_ShouldThrowGeneralHttpError_WhenResetTimeIsUnavailable(
+        HttpStatusCode statusCode,
+        string? retryAfter,
+        string? remaining,
+        string? reset)
+    {
+        using GitHubPullRequestStatusClient client = CreateErrorClient(statusCode, retryAfter, remaining, reset);
+
+        Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<HttpRequestException>())
+            .Which.Should().NotBeOfType<GitHubRateLimitException>();
     }
 
     [Theory]
@@ -119,6 +165,31 @@ public class GitHubPullRequestStatusClientTests
     private static GitHubPullRequestStatusClient CreateClient(string content)
         => new(new HttpClient(new RecordingHandler(_ => JsonResponse(content))));
 
+    private static GitHubPullRequestStatusClient CreateErrorClient(
+        HttpStatusCode statusCode,
+        string? retryAfter,
+        string? remaining,
+        string? reset)
+    {
+        var handler = new RecordingHandler(_ =>
+        {
+            var response = new HttpResponseMessage(statusCode);
+            AddHeaderIfPresent(response, "Retry-After", retryAfter);
+            AddHeaderIfPresent(response, "x-ratelimit-remaining", remaining);
+            AddHeaderIfPresent(response, "x-ratelimit-reset", reset);
+            return response;
+        });
+        return new GitHubPullRequestStatusClient(new HttpClient(handler), timeProvider: new FixedTimeProvider(_now));
+    }
+
+    private static void AddHeaderIfPresent(HttpResponseMessage response, string name, string? value)
+    {
+        if (value is not null)
+        {
+            response.Headers.TryAddWithoutValidation(name, value);
+        }
+    }
+
     private static HttpResponseMessage JsonResponse(string content)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK)
@@ -127,6 +198,11 @@ public class GitHubPullRequestStatusClientTests
         };
         response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         return response;
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class RecordingHandler : HttpMessageHandler

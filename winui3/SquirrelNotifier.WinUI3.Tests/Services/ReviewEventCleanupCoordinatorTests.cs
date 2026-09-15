@@ -214,21 +214,264 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
         await Task.Delay(50);
     }
 
+    [Fact]
+    public async Task RefreshAsync_ShouldQueryOncePerPullRequestAndRemoveAllItsEvents()
+    {
+        var statusClient = new RecordingStatusClient((_, prNumber) =>
+            prNumber == 42 ? PullRequestLifecycleState.Merged : PullRequestLifecycleState.Open);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient);
+        List<string> removedIds = new();
+        coordinator.EventsRemoved += (_, args) => removedIds.AddRange(args.EventIds);
+        coordinator.Track(CreateReviewEvent("opened"));
+        coordinator.Track(CreateReviewEvent("synchronized"));
+        coordinator.Track(CreateReviewEvent("re-review", repository: "Owner/Repo"));
+        coordinator.Track(CreateReviewEvent("other", 43));
+
+        await coordinator.RefreshAsync();
+
+        statusClient.Calls.Select(call => call.PrNumber).Should().BeEquivalentTo([42, 43]);
+        removedIds.Should().BeEquivalentTo(["opened", "synchronized", "re-review"]);
+        coordinator.TrackedEventCount.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(5, 1)]
+    [InlineData(20, 1)]
+    [InlineData(20, 5)]
+    public async Task RefreshAsync_ShouldNotExceedHourlyBudget_AndCheckEveryPullRequest(
+        int pullRequestCount,
+        int windowShowIntervalMinutes)
+    {
+        var timeProvider = new ManualTimeProvider();
+        var statusClient = new RecordingStatusClient((_, _) => PullRequestLifecycleState.Open, timeProvider);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient, timeProvider: timeProvider);
+        for (int prNumber = 1; prNumber <= pullRequestCount; prNumber++)
+        {
+            coordinator.Track(CreateReviewEvent($"evt_{prNumber}", prNumber));
+        }
+
+        // 巡回（5 分ごと）とウィンドウ表示時の refresh を 3 時間分再現する
+        for (int minute = 0; minute < 180; minute++)
+        {
+            if (minute % 5 == 0 || minute % windowShowIntervalMinutes == 0)
+            {
+                await coordinator.RefreshAsync();
+            }
+
+            timeProvider.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        DateTimeOffset[] callTimes = statusClient.Calls.Select(call => call.At).ToArray();
+        callTimes.Max(start => callTimes.Count(at => at >= start && at < start.AddHours(1))).Should().BeLessThanOrEqualTo(30);
+        DateTimeOffset lastHour = timeProvider.GetUtcNow().AddHours(-1);
+        statusClient.Calls.Where(call => call.At >= lastHour).Select(call => call.PrNumber).Distinct()
+            .Should().HaveCount(pullRequestCount);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ShouldPauseUntilResetTime_WhenRateLimited()
+    {
+        var timeProvider = new ManualTimeProvider();
+        DateTimeOffset resetAt = timeProvider.GetUtcNow().AddMinutes(30);
+        var statusClient = new RecordingStatusClient(
+            (_, _) => PullRequestLifecycleState.Open,
+            timeProvider,
+            failFirstCallWith: new GitHubRateLimitException("rate limit exceeded", resetAt));
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient, timeProvider: timeProvider);
+        coordinator.Track(CreateReviewEvent("evt_1", 1));
+        coordinator.Track(CreateReviewEvent("evt_2", 2));
+
+        await coordinator.RefreshAsync();
+        timeProvider.Advance(TimeSpan.FromMinutes(29));
+        await coordinator.RefreshAsync();
+
+        statusClient.Calls.Should().ContainSingle();
+        coordinator.TrackedEventCount.Should().Be(2);
+        string log = await File.ReadAllTextAsync(Path.Combine(_logDirectory, "winui3.log"));
+        log.Should().Contain("PR 状態の確認を停止します").And.Contain("rate limit exceeded");
+
+        timeProvider.Advance(TimeSpan.FromMinutes(1));
+        await coordinator.RefreshAsync();
+
+        statusClient.Calls.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task IsActionAllowedAsync_ShouldAllowWithoutLookup_WhileRateLimited()
+    {
+        var timeProvider = new ManualTimeProvider();
+        var statusClient = new RecordingStatusClient(
+            (_, _) => PullRequestLifecycleState.Merged,
+            timeProvider,
+            failFirstCallWith: new GitHubRateLimitException("rate limit exceeded", timeProvider.GetUtcNow().AddMinutes(30)));
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient, timeProvider: timeProvider);
+
+        bool firstAllowed = await coordinator.IsActionAllowedAsync(CreateReviewEvent(), CancellationToken.None);
+        bool secondAllowed = await coordinator.IsActionAllowedAsync(CreateReviewEvent(), CancellationToken.None);
+
+        firstAllowed.Should().BeTrue();
+        secondAllowed.Should().BeTrue();
+        statusClient.Calls.Should().ContainSingle();
+        coordinator.TrackedEventCount.Should().Be(1);
+        string log = await File.ReadAllTextAsync(Path.Combine(_logDirectory, "winui3.log"));
+        log.Should().Contain("PR 状態を確認せずに操作を許可します");
+    }
+
+    [Fact]
+    public async Task IsActionAllowedAsync_ShouldKeepLaterResetTime_WhenShorterResetFollowsLongerResetInFlight()
+    {
+        var timeProvider = new ManualTimeProvider();
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        DateTimeOffset longResetAt = now.AddMinutes(60);
+        DateTimeOffset shortResetAt = now.AddMinutes(10);
+
+        var firstCallStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondCallStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstCall = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecondCall = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        int callCount = 0;
+        var statusClient = new RecordingStatusClient(
+            async (_, _) =>
+            {
+                int currentCall = Interlocked.Increment(ref callCount);
+                if (currentCall == 1)
+                {
+                    firstCallStarted.SetResult(true);
+                    await releaseFirstCall.Task;
+                    throw new GitHubRateLimitException("rate limit 60m", longResetAt);
+                }
+
+                if (currentCall == 2)
+                {
+                    secondCallStarted.SetResult(true);
+                    await releaseSecondCall.Task;
+                    throw new GitHubRateLimitException("rate limit 10m", shortResetAt);
+                }
+
+                return PullRequestLifecycleState.Open;
+            },
+            timeProvider);
+
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient, timeProvider: timeProvider);
+
+        Task<bool> task1 = coordinator.IsActionAllowedAsync(CreateReviewEvent("evt_1", 1), CancellationToken.None);
+        await firstCallStarted.Task;
+
+        Task<bool> task2 = coordinator.IsActionAllowedAsync(CreateReviewEvent("evt_2", 2), CancellationToken.None);
+        await secondCallStarted.Task;
+
+        releaseFirstCall.SetResult(true);
+        bool result1 = await task1;
+        result1.Should().BeTrue();
+
+        releaseSecondCall.SetResult(true);
+        bool result2 = await task2;
+        result2.Should().BeTrue();
+
+        timeProvider.Advance(TimeSpan.FromMinutes(29));
+
+        bool allowedDuringLongPause = await coordinator.IsActionAllowedAsync(CreateReviewEvent("evt_3", 3), CancellationToken.None);
+        allowedDuringLongPause.Should().BeTrue();
+        statusClient.Calls.Should().HaveCount(2);
+
+        timeProvider.Advance(TimeSpan.FromMinutes(32));
+
+        await coordinator.RefreshAsync();
+        statusClient.Calls.Should().HaveCount(5);
+    }
+
+    [Fact]
+    public async Task IsActionAllowedAsync_ShouldLookUpEvenWhenRefreshBudgetIsExhausted()
+    {
+        var timeProvider = new ManualTimeProvider();
+        var statusClient = new RecordingStatusClient((_, _) => PullRequestLifecycleState.Merged, timeProvider);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient, timeProvider: timeProvider);
+        for (int prNumber = 1; prNumber <= 6; prNumber++)
+        {
+            coordinator.Track(CreateReviewEvent($"evt_{prNumber}", prNumber));
+        }
+
+        await coordinator.RefreshAsync();
+        statusClient.Calls.Should().HaveCount(5);
+
+        bool allowed = await coordinator.IsActionAllowedAsync(CreateReviewEvent("evt_6", 6), CancellationToken.None);
+
+        allowed.Should().BeFalse();
+        statusClient.Calls.Should().HaveCount(6);
+    }
+
     private ReviewEventCleanupCoordinator CreateCoordinator(
         IPullRequestStatusClient statusClient,
-        TimeSpan? pollInterval = null)
-        => new(statusClient, _loggingService, pollInterval);
+        TimeSpan? pollInterval = null,
+        TimeProvider? timeProvider = null)
+        => new(statusClient, _loggingService, pollInterval, timeProvider);
 
-    private static ReviewEvent CreateReviewEvent(string eventId = "evt_1", int prNumber = 42)
+    private static ReviewEvent CreateReviewEvent(string eventId = "evt_1", int prNumber = 42, string repository = "owner/repo")
         => new()
         {
             EventId = eventId,
-            Repository = "owner/repo",
+            Repository = repository,
             PrNumber = prNumber,
-            PrUrl = $"https://github.com/owner/repo/pull/{prNumber}",
+            PrUrl = $"https://github.com/{repository}/pull/{prNumber}",
             Reason = "opened",
             Message = "Review requested",
         };
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 9, 15, 0, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan duration) => _now += duration;
+    }
+
+    private sealed class RecordingStatusClient : IPullRequestStatusClient
+    {
+        private readonly Func<string, int, PullRequestLifecycleState>? _resolveState;
+        private readonly Func<string, int, Task<PullRequestLifecycleState>>? _resolveStateAsync;
+        private readonly TimeProvider _timeProvider;
+        private Exception? _failFirstCallWith;
+
+        public RecordingStatusClient(
+            Func<string, int, PullRequestLifecycleState> resolveState,
+            TimeProvider? timeProvider = null,
+            Exception? failFirstCallWith = null)
+        {
+            _resolveState = resolveState;
+            _timeProvider = timeProvider ?? TimeProvider.System;
+            _failFirstCallWith = failFirstCallWith;
+        }
+
+        public RecordingStatusClient(
+            Func<string, int, Task<PullRequestLifecycleState>> resolveStateAsync,
+            TimeProvider? timeProvider = null)
+        {
+            _resolveStateAsync = resolveStateAsync;
+            _timeProvider = timeProvider ?? TimeProvider.System;
+        }
+
+        public List<(int PrNumber, DateTimeOffset At)> Calls { get; } = new();
+
+        public async Task<PullRequestLifecycleState> GetStateAsync(string repository, int prNumber, CancellationToken cancellationToken)
+        {
+            Calls.Add((prNumber, _timeProvider.GetUtcNow()));
+            if (_failFirstCallWith is Exception exception)
+            {
+                _failFirstCallWith = null;
+                throw exception;
+            }
+
+            if (_resolveStateAsync is not null)
+            {
+                return await _resolveStateAsync(repository, prNumber).ConfigureAwait(false);
+            }
+
+            return _resolveState!(repository, prNumber);
+        }
+    }
 
     private sealed class StubStatusClient : IPullRequestStatusClient
     {
