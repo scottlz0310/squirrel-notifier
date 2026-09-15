@@ -83,6 +83,58 @@ public sealed class WindowIconServiceTests
         nativeMethods.SetCalls.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(101L, 202L, 1, new long[] { 101L, 202L })]
+    [InlineData(101L, 0L, 1, new long[] { 101L })]
+    [InlineData(0L, 202L, 1, new long[] { 202L })]
+    [InlineData(0L, 0L, 1, new long[0])]
+    [InlineData(101L, 202L, 2, new long[] { 101L, 202L })]
+    public void ReleaseIcons_ShouldDestroyEachLoadedIconOnce(
+        long smallIconHandle,
+        long largeIconHandle,
+        int releaseCount,
+        long[] expectedDestroyedHandles)
+    {
+        var nativeMethods = new FakeWindowIconNativeMethods(smallIconHandle, largeIconHandle);
+        var service = new WindowIconService("C:\\app", _ => true, nativeMethods);
+        _ = service.TrySetIcon(new nint(10));
+
+        for (int i = 0; i < releaseCount; i++)
+        {
+            service.ReleaseIcons();
+        }
+
+        nativeMethods.DestroyCalls.Should().Equal(expectedDestroyedHandles.Select(value => new nint(value)));
+    }
+
+    [Fact]
+    public void ReleaseIcons_ShouldDestroyLoadedIcon_WhenSetIconThrows()
+    {
+        var nativeMethods = new FakeWindowIconNativeMethods(101L, 202L)
+        {
+            SetIconExceptionToThrow = new InvalidOperationException("icon setting failed"),
+        };
+        var service = new WindowIconService("C:\\app", _ => true, nativeMethods);
+
+        bool result = service.TrySetIcon(new nint(10));
+        service.ReleaseIcons();
+
+        result.Should().BeFalse();
+        nativeMethods.DestroyCalls.Should().Equal(new nint(101));
+    }
+
+    [Fact]
+    public void ReleaseIcons_ShouldSkipNativeCalls_WhenIconFileDoesNotExist()
+    {
+        var nativeMethods = new FakeWindowIconNativeMethods();
+        var service = new WindowIconService("C:\\app", _ => false, nativeMethods);
+        _ = service.TrySetIcon(new nint(10));
+
+        service.ReleaseIcons();
+
+        nativeMethods.DestroyCalls.Should().BeEmpty();
+    }
+
     private sealed class FakeWindowIconNativeMethods : IWindowIconNativeMethods
     {
         private readonly Queue<nint> _loadResults;
@@ -96,7 +148,11 @@ public sealed class WindowIconServiceTests
 
         public List<(nint WindowHandle, WindowIconSize IconSize, nint IconHandle)> SetCalls { get; } = new();
 
+        public List<nint> DestroyCalls { get; } = new();
+
         public Exception? ExceptionToThrow { get; init; }
+
+        public Exception? SetIconExceptionToThrow { get; init; }
 
         public nint LoadIcon(string iconPath, int pixelSize)
         {
@@ -111,7 +167,17 @@ public sealed class WindowIconServiceTests
 
         public void SetIcon(nint windowHandle, WindowIconSize iconSize, nint iconHandle)
         {
+            if (SetIconExceptionToThrow != null)
+            {
+                throw SetIconExceptionToThrow;
+            }
+
             SetCalls.Add((windowHandle, iconSize, iconHandle));
+        }
+
+        public void DestroyIcon(nint iconHandle)
+        {
+            DestroyCalls.Add(iconHandle);
         }
     }
 }

@@ -29,6 +29,9 @@ internal sealed class WindowIconNativeMethods : IWindowIconNativeMethods
     [DllImport("user32.dll")]
     private static extern nint SendMessage(nint hWnd, uint msg, nint wParam, nint lParam);
 
+    [DllImport("user32.dll", EntryPoint = "DestroyIcon")]
+    private static extern bool NativeDestroyIcon(nint hIcon);
+
     public nint LoadIcon(string iconPath, int pixelSize)
     {
         return LoadImage(nint.Zero, iconPath, _imageIcon, pixelSize, pixelSize, _loadFromFile);
@@ -37,5 +40,11 @@ internal sealed class WindowIconNativeMethods : IWindowIconNativeMethods
     public void SetIcon(nint windowHandle, WindowIconSize iconSize, nint iconHandle)
     {
         _ = SendMessage(windowHandle, _windowMessageSetIcon, new nint((int)iconSize), iconHandle);
+    }
+
+    public void DestroyIcon(nint iconHandle)
+    {
+        // ウィンドウ close 後の後処理で呼ばれ、失敗しても回復手段がないため結果は使わない
+        _ = NativeDestroyIcon(iconHandle);
     }
 }

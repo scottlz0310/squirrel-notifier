@@ -240,7 +240,7 @@ internal sealed partial class MainWindow : Window
         // 登録済みのため後から登録するこちらが後に走る（#229）
         TrayIcon.Loaded += OnTrayIconLoaded;
 
-        _windowLifecycleCoordinator = new(UnsubscribeEventHandlers, DisposeOwnedResources, Close);
+        _windowLifecycleCoordinator = new(UnsubscribeEventHandlers, DisposeOwnedResources, Close, _windowIconService.ReleaseIcons);
         _trayCommandCoordinator = new TrayCommandCoordinator(
             ShowWindowFromTray,
             _service.Start,

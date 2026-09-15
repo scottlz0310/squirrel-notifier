@@ -45,7 +45,7 @@
 | 39 | `_urlOpener` | 維持候補 | URL起動のサービス依存 |
 | 40 | `_fileOpener` | 維持候補 | ファイル・フォルダー起動のサービス依存 |
 | 41 | `_clipboardService` | 維持候補 | クリップボード設定のサービス依存 |
-| 42 | `_windowIconService` | 維持候補 | ウィンドウアイコン設定のサービス依存 |
+| 42 | `_windowIconService` | 維持候補 | ウィンドウアイコンの設定と、close 後のアイコン解放を委譲するサービス依存 |
 | 43 | `_taskSchedulerService` | 境界確認 | `AutoStartCoordinator` の構築に使用。構成ルートを`App`へ寄せるか後続で判断 |
 | 44 | `_reviewRegistrationCoordinator` | 維持候補 | PR入力の検証と登録結果の表示分類を管理するCoordinator。登録サービスは構成時に注入する |
 | 45 | `_reviewEventCleanupCoordinator` | 維持候補 | イベントの終了確認・自動削除のCoordinator依存 |
@@ -74,11 +74,10 @@
 
 | 行 | 項目 | 判定 | 現状と後続方針 |
 | ---: | --- | --- | --- |
-| 67 | `ShowWindow` | 維持候補 | Windowの表示・非表示というUI境界。必要ならWindowPresenterへ委譲 |
-| 70 | `LoadImage` | 抽出候補 | ファイルからアイコンを読むI/O。`WindowIconService` 等へ移し、失敗方針をテストする |
-| 73 | `SendMessage` | 維持候補 | Windowアイコン設定のWin32境界。アイコンService側で所有する |
-| 76-82 | `_swHide`、`_swShow`、`_wmSetIcon`、`_iconSmall`、`_iconBig`、`_imageIcon`、`_lrLoadFromFile` | 抽出候補 | アイコンServiceへ移す定数。表示・非表示の定数とは分離する |
-| 83-223 | `MainWindow` | 境界確認 | UI初期化に加え、複数のService/Coordinatorを生成しイベントを配線している。構成ルートを`App`へ寄せる案を後続で検討する |
+| 71 | `ShowWindow` | 維持候補 | Windowの表示・非表示というUI境界。必要ならWindowPresenterへ委譲 |
+| 73-74 | `_swHide`、`_swShow` | 維持候補 | `ShowWindow` に渡す表示・非表示の定数。`ShowWindow` と同じUI境界に残す |
+| 76-263 | `MainWindow` | 境界確認 | UI初期化に加え、複数のService/Coordinatorを生成しイベントを配線している。構成ルートを`App`へ寄せる案を後続で検討する |
+| — | `LoadImage`、`SendMessage`、`DestroyIcon`、アイコン関連定数 | 抽出済み | #290 で `WindowIconNativeMethods` へ移した。読み込んだ HICON は `WindowIconService` が所有し、ウィンドウ close 後に `WindowLifecycleCoordinator` 経由で解放する（#324） |
 
 ## 3. メソッド棚卸し
 
@@ -198,8 +197,8 @@
 | 自動起動と更新 | `AutoStartCoordinatorTests`、`AutoUpdateServiceTests`、`UpdateCheckCoordinatorTests`、更新GUIの実機E2E | 判定は抽出済み。UIはPresentation反映に限定し、以後の変更でも起動時・手動時のE2Eを維持 |
 | Gatewayログイン | `GatewayLoginCoordinatorTests`、`GatewayLoginWorkflowCoordinatorTests`、`McpLoginServiceTests`、`DeviceLoginOutputParserTests` | 開始失敗、成功時の再購読、キャンセル、Opened 前のクローズ保留、進行表示、コピー、再入を workflow の UI port 経由で検証する。Dialog の実体は UI ランタイム境界として GUI 確認を維持 |
 | 購読状態・レビュー登録・起動・通知 | `SubscriptionStateCoordinatorTests`、`ReviewStartCoordinatorTests`、`ReviewEventCleanupCoordinatorTests`、`ReviewEventCollectionCoordinatorTests`、`ReviewEventProcessingCoordinatorTests`、`ReviewNotificationPolicyTests`、`ReviewNotificationCoordinatorTests`、`ClipboardServiceTests`、`CopyFeedbackCoordinatorTests` | 購読状態表示の判断・一回通知、イベント一覧の保持規則、終了済みPRの除外と自動起動順序、ポップアップ接続可否と表示失敗時のバルーンフォールバックは抽出済み。通知文言、コピーの表示期限・キャンセルは個別のFormatter・Coordinatorで検証し、WinUI表示境界はGUIで確認する |
-| ウィンドウ終了 | `WindowLifecycleCoordinatorTests` | 終了要求の冪等性と、イベント解除・リソース破棄・`Close()` の順序をテストする。WinUI Window の生成や実体の破棄は UI ランタイム境界のため直接テストしない |
-| URL、フォルダー、アイコン、Clipboard | `UrlValidatorTests`、`ClipboardServiceTests`、各UIの手動確認 | `Process.Start`、ファイル読み込み、Clipboardは直接I/Oのため、fake可能なServiceを追加して失敗時を単体テストする。Clipboard の OS 境界は #291 で抽出済み |
+| ウィンドウ終了 | `WindowLifecycleCoordinatorTests` | 終了要求の冪等性と、イベント解除・リソース破棄・`Close()`・close 後のリソース解放の順序をテストする。WinUI Window の生成や実体の破棄は UI ランタイム境界のため直接テストしない |
+| URL、フォルダー、アイコン、Clipboard | `UrlValidatorTests`、`ClipboardServiceTests`、`WindowIconServiceTests`、各UIの手動確認 | `Process.Start`、ファイル読み込み、Clipboardは直接I/Oのため、fake可能なServiceを追加して失敗時を単体テストする。Clipboard の OS 境界は #291 で抽出済み |
 
 ## 5. 抽出計画
 
