@@ -36,7 +36,7 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
 
         await coordinator.StartAsync(
             "not-a-gateway-url",
-            SubscriptionState.Stopped,
+            () => SubscriptionState.Stopped,
             _ =>
             {
                 dialogCalls++;
@@ -52,32 +52,48 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
         ui.Alerts.Single().Title.Should().Be("設定エラー");
     }
 
-    [Fact]
-    public async Task StartAsync_ShouldApplySuccessAndRestartStoppedSubscription()
+    [Theory]
+    [InlineData("Stopped", "Stopped", true)]
+    [InlineData("Stopped", "Running", false)]
+    [InlineData("Running", "Error", true)]
+    public async Task StartAsync_ShouldApplySuccessUsingSubscriptionStateAtLoginCompletion(
+        string stateAtStart,
+        string stateAtCompletion,
+        bool expectedRestart)
     {
         var loginService = new FakeGatewayLoginService();
         var dialog = new FakeGatewayLoginDialog();
         var ui = new UiRecorder();
         GatewayLoginWorkflowCoordinator coordinator = Create(loginService);
+        SubscriptionState currentState = Enum.Parse<SubscriptionState>(stateAtStart);
+        var loginCompletedAtStateReads = new List<bool>();
 
         Task operation = coordinator.StartAsync(
             "https://gateway.example.com/mcp",
-            SubscriptionState.Stopped,
+            () =>
+            {
+                loginCompletedAtStateReads.Add(loginService.ResultTask.IsCompleted);
+                return currentState;
+            },
             dialog.CreatePort,
             ui.Actions);
         await dialog.ShowStarted.WaitAsync(TimeSpan.FromSeconds(5));
 
         dialog.Open();
+        currentState = Enum.Parse<SubscriptionState>(stateAtCompletion);
         loginService.Complete(McpLoginOutcome.Succeeded);
         await operation.WaitAsync(TimeSpan.FromSeconds(5));
 
+        loginCompletedAtStateReads.Should().Equal(true);
         loginService.LoginCalls.Should().Be(1);
         dialog.HideCalls.Should().Be(1);
         ui.ButtonStates.Should().Equal(false, true);
         ui.AuthRequiredInfoBarCloseCalls.Should().Be(1);
-        ui.RestartSubscriptionCalls.Should().Be(1);
+        ui.RestartSubscriptionCalls.Should().Be(expectedRestart ? 1 : 0);
         ui.Alerts.Should().ContainSingle();
         ui.Alerts.Single().Title.Should().Be("ログイン成功");
+        ui.Alerts.Single().Message.Contains("購読を再開しました。", StringComparison.Ordinal)
+            .Should().Be(expectedRestart);
     }
 
     [Fact]
@@ -95,7 +111,7 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
 
         Task operation = coordinator.StartAsync(
             "https://gateway.example.com/mcp",
-            SubscriptionState.Running,
+            () => SubscriptionState.Running,
             dialog.CreatePort,
             ui.Actions);
         await dialog.ShowStarted.WaitAsync(TimeSpan.FromSeconds(5));
@@ -122,7 +138,7 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
 
         Task operation = coordinator.StartAsync(
             "https://gateway.example.com/mcp",
-            SubscriptionState.Running,
+            () => SubscriptionState.Running,
             dialog.CreatePort,
             ui.Actions);
         await dialog.ShowStarted.WaitAsync(TimeSpan.FromSeconds(5));
@@ -148,7 +164,7 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
 
         Task operation = coordinator.StartAsync(
             "https://gateway.example.com/mcp",
-            SubscriptionState.Running,
+            () => SubscriptionState.Running,
             dialog.CreatePort,
             ui.Actions);
         await dialog.ShowStarted.WaitAsync(TimeSpan.FromSeconds(5));
@@ -201,14 +217,14 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
 
         Task first = coordinator.StartAsync(
             "https://gateway.example.com/mcp",
-            SubscriptionState.Running,
+            () => SubscriptionState.Running,
             firstDialog.CreatePort,
             ui.Actions);
         await firstDialog.ShowStarted.WaitAsync(TimeSpan.FromSeconds(5));
 
         await coordinator.StartAsync(
             "https://gateway.example.com/mcp",
-            SubscriptionState.Running,
+            () => SubscriptionState.Running,
             _ =>
             {
                 secondDialogCalls++;

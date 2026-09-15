@@ -1193,7 +1193,7 @@ internal sealed partial class MainWindow : Window
     {
         await _gatewayLoginWorkflowCoordinator.StartAsync(
             GatewayUrlBox.Text,
-            _service.State,
+            () => _service.State,
             CreateGatewayLoginDialog,
             new GatewayLoginUiActions(
                 isEnabled => GatewayLoginButton.IsEnabled = isEnabled,
