@@ -306,13 +306,19 @@ internal sealed class ReviewEventCleanupCoordinator : IAsyncDisposable
 
     private async Task PauseForRateLimitAsync(GitHubRateLimitException exception)
     {
+        DateTimeOffset resetAt;
         lock (_lock)
         {
-            _rateLimitedUntil = exception.ResetAt;
+            DateTimeOffset now = _timeProvider.GetUtcNow();
+            DateTimeOffset current = _rateLimitedUntil is DateTimeOffset until && until > now
+                ? until
+                : DateTimeOffset.MinValue;
+            resetAt = exception.ResetAt > current ? exception.ResetAt : current;
+            _rateLimitedUntil = resetAt;
         }
 
         await _loggingService.WriteAsync(
-            $"GitHub API のレート制限に達したため、{FormatLocalTime(exception.ResetAt)} まで PR 状態の確認を停止します。イベントは保持します: {exception.Message}").ConfigureAwait(false);
+            $"GitHub API のレート制限に達したため、{FormatLocalTime(resetAt)} まで PR 状態の確認を停止します。イベントは保持します: {exception.Message}").ConfigureAwait(false);
     }
 
     private bool RemovePullRequestEvents(string pullRequestKey)

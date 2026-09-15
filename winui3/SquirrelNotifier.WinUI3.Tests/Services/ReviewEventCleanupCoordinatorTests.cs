@@ -319,6 +319,70 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task IsActionAllowedAsync_ShouldKeepLaterResetTime_WhenShorterResetFollowsLongerResetInFlight()
+    {
+        var timeProvider = new ManualTimeProvider();
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        DateTimeOffset longResetAt = now.AddMinutes(60);
+        DateTimeOffset shortResetAt = now.AddMinutes(10);
+
+        var firstCallStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondCallStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstCall = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecondCall = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        int callCount = 0;
+        var statusClient = new RecordingStatusClient(
+            async (_, _) =>
+            {
+                int currentCall = Interlocked.Increment(ref callCount);
+                if (currentCall == 1)
+                {
+                    firstCallStarted.SetResult(true);
+                    await releaseFirstCall.Task;
+                    throw new GitHubRateLimitException("rate limit 60m", longResetAt);
+                }
+
+                if (currentCall == 2)
+                {
+                    secondCallStarted.SetResult(true);
+                    await releaseSecondCall.Task;
+                    throw new GitHubRateLimitException("rate limit 10m", shortResetAt);
+                }
+
+                return PullRequestLifecycleState.Open;
+            },
+            timeProvider);
+
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(statusClient, timeProvider: timeProvider);
+
+        Task<bool> task1 = coordinator.IsActionAllowedAsync(CreateReviewEvent("evt_1", 1), CancellationToken.None);
+        await firstCallStarted.Task;
+
+        Task<bool> task2 = coordinator.IsActionAllowedAsync(CreateReviewEvent("evt_2", 2), CancellationToken.None);
+        await secondCallStarted.Task;
+
+        releaseFirstCall.SetResult(true);
+        bool result1 = await task1;
+        result1.Should().BeTrue();
+
+        releaseSecondCall.SetResult(true);
+        bool result2 = await task2;
+        result2.Should().BeTrue();
+
+        timeProvider.Advance(TimeSpan.FromMinutes(29));
+
+        bool allowedDuringLongPause = await coordinator.IsActionAllowedAsync(CreateReviewEvent("evt_3", 3), CancellationToken.None);
+        allowedDuringLongPause.Should().BeTrue();
+        statusClient.Calls.Should().HaveCount(2);
+
+        timeProvider.Advance(TimeSpan.FromMinutes(32));
+
+        await coordinator.RefreshAsync();
+        statusClient.Calls.Should().HaveCount(5);
+    }
+
+    [Fact]
     public async Task IsActionAllowedAsync_ShouldLookUpEvenWhenRefreshBudgetIsExhausted()
     {
         var timeProvider = new ManualTimeProvider();
@@ -366,7 +430,8 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
 
     private sealed class RecordingStatusClient : IPullRequestStatusClient
     {
-        private readonly Func<string, int, PullRequestLifecycleState> _resolveState;
+        private readonly Func<string, int, PullRequestLifecycleState>? _resolveState;
+        private readonly Func<string, int, Task<PullRequestLifecycleState>>? _resolveStateAsync;
         private readonly TimeProvider _timeProvider;
         private Exception? _failFirstCallWith;
 
@@ -380,9 +445,17 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
             _failFirstCallWith = failFirstCallWith;
         }
 
+        public RecordingStatusClient(
+            Func<string, int, Task<PullRequestLifecycleState>> resolveStateAsync,
+            TimeProvider? timeProvider = null)
+        {
+            _resolveStateAsync = resolveStateAsync;
+            _timeProvider = timeProvider ?? TimeProvider.System;
+        }
+
         public List<(int PrNumber, DateTimeOffset At)> Calls { get; } = new();
 
-        public Task<PullRequestLifecycleState> GetStateAsync(string repository, int prNumber, CancellationToken cancellationToken)
+        public async Task<PullRequestLifecycleState> GetStateAsync(string repository, int prNumber, CancellationToken cancellationToken)
         {
             Calls.Add((prNumber, _timeProvider.GetUtcNow()));
             if (_failFirstCallWith is Exception exception)
@@ -391,7 +464,12 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
                 throw exception;
             }
 
-            return Task.FromResult(_resolveState(repository, prNumber));
+            if (_resolveStateAsync is not null)
+            {
+                return await _resolveStateAsync(repository, prNumber).ConfigureAwait(false);
+            }
+
+            return _resolveState!(repository, prNumber);
         }
     }
 
