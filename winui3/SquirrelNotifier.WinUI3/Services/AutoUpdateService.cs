@@ -1,6 +1,6 @@
-using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text.Json;
+using SquirrelNotifier.WinUI3.Helpers;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
@@ -17,10 +17,7 @@ internal sealed class AutoUpdateService : IDisposable
         _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
         _httpClient = httpClient ?? new HttpClient();
         _ownsHttpClient = httpClient is null;
-        if (_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
-        {
-            _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Squirrel-Notifier-WinUI3", "3.0"));
-        }
+        ApplicationUserAgent.AddDefaultIfMissing(_httpClient);
 
         _currentVersion = currentVersionOverride ?? Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
     }

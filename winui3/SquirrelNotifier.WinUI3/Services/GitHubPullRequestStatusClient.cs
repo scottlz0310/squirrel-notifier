@@ -68,10 +68,7 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
         _ownsHttpClient = httpClient is null;
         _requestTimeout = timeout;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        if (_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
-        {
-            _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Squirrel-Notifier-WinUI3", "0.8"));
-        }
+        ApplicationUserAgent.AddDefaultIfMissing(_httpClient);
 
         if (_httpClient.DefaultRequestHeaders.Accept.Count == 0)
         {
