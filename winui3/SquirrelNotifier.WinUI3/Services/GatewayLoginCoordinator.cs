@@ -88,7 +88,7 @@ internal sealed class GatewayLoginCoordinator
     /// ログイン結果を、UI が行うことへ変換する.
     /// </summary>
     /// <param name="result">login の最終結果.</param>
-    /// <param name="subscriptionState">現在の購読状態。成功時の再購読要否の判定に使う.</param>
+    /// <param name="subscriptionState">ログイン完了時点の購読状態。成功時の再購読要否の判定に使う.</param>
     /// <returns>InfoBar・購読・ダイアログに対する指示.</returns>
     public static GatewayLoginPresentation DescribeResult(McpLoginResult result, SubscriptionState subscriptionState)
     {

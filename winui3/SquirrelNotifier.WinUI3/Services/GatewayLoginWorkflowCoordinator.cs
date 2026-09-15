@@ -62,16 +62,19 @@ internal sealed class GatewayLoginWorkflowCoordinator(
 {
     /// <summary>ログインを開始し、完了結果を UI へ適用する.</summary>
     /// <param name="gatewayUrl">設定欄に入力された Gateway URL.</param>
-    /// <param name="subscriptionState">ログイン完了時の購読状態.</param>
+    /// <param name="getSubscriptionState">
+    /// 購読状態を返す関数。device flow は数分かかり、その間に購読状態が変わり得るため、ログイン完了後に 1 回だけ評価する.
+    /// </param>
     /// <param name="createDialog">進行ダイアログを生成する UI 境界.</param>
     /// <param name="uiActions">ボタン、InfoBar、購読、通知ダイアログを反映する UI 境界.</param>
     /// <returns>非同期操作を表すタスク.</returns>
     public async Task StartAsync(
         string? gatewayUrl,
-        SubscriptionState subscriptionState,
+        Func<SubscriptionState> getSubscriptionState,
         GatewayLoginDialogFactory createDialog,
         GatewayLoginUiActions uiActions)
     {
+        ArgumentNullException.ThrowIfNull(getSubscriptionState);
         ArgumentNullException.ThrowIfNull(createDialog);
         ArgumentNullException.ThrowIfNull(uiActions);
 
@@ -92,7 +95,7 @@ internal sealed class GatewayLoginWorkflowCoordinator(
             var session = new GatewayLoginDialogSession(loginServiceFactory(), loggingService);
             GatewayLoginDialogPort dialog = createDialog(session);
             McpLoginResult result = await session.RunAsync(dialog).ConfigureAwait(true);
-            GatewayLoginPresentation presentation = GatewayLoginCoordinator.DescribeResult(result, subscriptionState);
+            GatewayLoginPresentation presentation = GatewayLoginCoordinator.DescribeResult(result, getSubscriptionState());
 
             if (presentation.CloseAuthRequiredInfoBar)
             {
