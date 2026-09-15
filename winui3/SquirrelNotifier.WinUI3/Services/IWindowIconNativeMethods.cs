@@ -24,6 +24,12 @@ internal interface IWindowIconNativeMethods
     /// <param name="iconSize">設定するアイコンのサイズ種別。.</param>
     /// <param name="iconHandle">設定するアイコンハンドル。.</param>
     void SetIcon(nint windowHandle, WindowIconSize iconSize, nint iconHandle);
+
+    /// <summary>
+    /// 読み込んだアイコンハンドルを解放する。.
+    /// </summary>
+    /// <param name="iconHandle">解放するアイコンハンドル。.</param>
+    void DestroyIcon(nint iconHandle);
 }
 
 /// <summary>

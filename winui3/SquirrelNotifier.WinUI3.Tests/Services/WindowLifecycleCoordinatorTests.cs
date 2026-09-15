@@ -12,7 +12,7 @@ namespace SquirrelNotifier.WinUI3.Tests.Services;
 public sealed class WindowLifecycleCoordinatorTests
 {
     [Fact]
-    public void RequestExit_ShouldRunCleanupBeforeClosing()
+    public void RequestExit_ShouldRunCleanupBeforeClosingAndReleaseResourcesAfterClosing()
     {
         List<string> actions = [];
         WindowLifecycleCoordinator coordinator = CreateCoordinator(actions);
@@ -22,7 +22,7 @@ public sealed class WindowLifecycleCoordinatorTests
         coordinator.RequestExit();
 
         coordinator.IsExitRequested.Should().BeTrue();
-        actions.Should().Equal("unsubscribe", "dispose", "close");
+        actions.Should().Equal("unsubscribe", "dispose", "close", "release");
     }
 
     [Fact]
@@ -34,7 +34,7 @@ public sealed class WindowLifecycleCoordinatorTests
         coordinator.RequestExit();
         coordinator.RequestExit();
 
-        actions.Should().Equal("unsubscribe", "dispose", "close");
+        actions.Should().Equal("unsubscribe", "dispose", "close", "release");
     }
 
     private static WindowLifecycleCoordinator CreateCoordinator(List<string> actions)
@@ -42,6 +42,7 @@ public sealed class WindowLifecycleCoordinatorTests
         return new WindowLifecycleCoordinator(
             () => actions.Add("unsubscribe"),
             () => actions.Add("dispose"),
-            () => actions.Add("close"));
+            () => actions.Add("close"),
+            () => actions.Add("release"));
     }
 }

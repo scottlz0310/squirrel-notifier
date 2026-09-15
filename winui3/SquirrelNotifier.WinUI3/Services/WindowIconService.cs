@@ -13,6 +13,7 @@ internal sealed class WindowIconService : IWindowIconService
     private readonly string _baseDirectory;
     private readonly Func<string, bool> _fileExists;
     private readonly IWindowIconNativeMethods _nativeMethods;
+    private readonly List<nint> _loadedIconHandles = new();
 
     public WindowIconService()
         : this(AppContext.BaseDirectory, File.Exists, new WindowIconNativeMethods())
@@ -53,6 +54,16 @@ internal sealed class WindowIconService : IWindowIconService
         }
     }
 
+    public void ReleaseIcons()
+    {
+        foreach (nint iconHandle in _loadedIconHandles)
+        {
+            _nativeMethods.DestroyIcon(iconHandle);
+        }
+
+        _loadedIconHandles.Clear();
+    }
+
     private bool ApplyIcon(nint windowHandle, string iconPath, WindowIconSize iconSize, int pixelSize)
     {
         nint iconHandle = _nativeMethods.LoadIcon(iconPath, pixelSize);
@@ -61,6 +72,8 @@ internal sealed class WindowIconService : IWindowIconService
             return false;
         }
 
+        // SetIcon が失敗しても読み込んだハンドルは解放対象に残す
+        _loadedIconHandles.Add(iconHandle);
         _nativeMethods.SetIcon(windowHandle, iconSize, iconHandle);
         return true;
     }
