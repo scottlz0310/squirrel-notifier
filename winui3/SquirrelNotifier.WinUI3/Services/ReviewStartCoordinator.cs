@@ -152,7 +152,11 @@ internal sealed class ReviewStartCoordinator
     /// <param name="confirmAutoPauseOverrideAsync">
     /// Auto-Pause 中に手動起動を強行してよいかの確認。<see cref="ReviewStartTrigger.Manual"/> では必須.
     /// </param>
-    /// <param name="cancellationToken">snapshot 取得を中断するためのトークン.</param>
+    /// <param name="cancellationToken">
+    /// snapshot 取得を中断するためのトークン。キャンセルされた場合は起動失敗
+    /// （<see cref="ReviewStartStatus.Failed"/>）に変えず <see cref="OperationCanceledException"/>
+    /// を送出する（再入抑止は解除される、#333）.
+    /// </param>
     /// <returns>起動結果.</returns>
     public async Task<ReviewStartResult> StartAsync(
         ReviewEvent reviewEvent,
@@ -230,6 +234,10 @@ internal sealed class ReviewStartCoordinator
             AgentExecutionSession session = _launcherService.StartSession(reviewEvent, role, CancellationToken.None);
             return ReviewStartResult.Launched(
                 new ReviewStartLaunch(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

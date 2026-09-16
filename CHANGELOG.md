@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - マージ・クローズ済み PR のレビューイベント自動片付けが、イベント数に比例して未認証 GitHub API（IP あたり 60 req/h）を消費し、状態取得と更新チェックを失敗させ得る問題を修正した（#322）。v0.9.0 の既知の問題として挙げていたもの。照会を PR 単位にまとめ、定期巡回とウィンドウ表示時の照会を任意の 1 時間で最大 30 回に抑え、最後に照会した時刻が古い PR から順に確認する。403 / 429 で再開時刻（`retry-after` または `x-ratelimit-reset`）を受け取った場合はその時刻まで照会を止め、レビュー起動直前の確認は照会せずに許可してログに残す
 - mcp-gateway へのログイン成功後の再購読要否を、ログイン開始時ではなく完了時点の購読状態で判定するように修正した（#323）。device flow の途中で購読が Running へ復帰した場合に不要な再購読と「購読を再開しました」表示が出る問題と、途中で Error / Stopped になった場合に再購読されず手動レビュー開始を再試行できない問題を解消する
 - ウィンドウアイコンとして読み込んだ非共有 HICON を解放していなかった問題を修正した（#324）。`WindowIconService` が読み込みに成功したハンドルを所有し、ウィンドウ close 後に `DestroyIcon` で 1 回ずつ解放する。あわせて、`docs/mainwindow-responsibility-inventory.md` の Win32 境界表から #290 で移動済みの項目を除き、行番号を現行ソースへ同期した
+- `RateLimitRefreshCoordinator` と `ReviewStartCoordinator` が、呼出元のキャンセルを取得エラーの警告・起動失敗に変換していた問題を修正した（#333）。`CancellationToken` がキャンセルされた場合は残りのエージェント・URI の取得を打ち切って `OperationCanceledException` を伝播させ、`ReviewStartCoordinator` は再入抑止を解除して次の起動を受け付ける。HTTP のタイムアウト等、呼出元がキャンセルしていない `OperationCanceledException` は従来どおり取得エラー・起動失敗として扱う。現在の呼出元（`MainWindow`）は `CancellationToken.None` を渡しているため表示上の挙動は変わらない
 - GitHub API へ送る User-Agent の version が、PR 状態の照会では `0.8`、更新チェックでは `3.0` に固定されていた問題を修正した（#325）。どちらも実行中アセンブリの version（例: `Squirrel-Notifier-WinUI3/0.10.0`）を送る。呼出元が User-Agent を設定済みの場合は上書きしない
 
 ## [0.10.0] - 2026-09-14

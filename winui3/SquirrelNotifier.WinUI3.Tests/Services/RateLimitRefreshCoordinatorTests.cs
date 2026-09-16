@@ -207,6 +207,81 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
         alert.Message.Should().Be(McpResourceProbe.GetUserMessage(failure));
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task RefreshAsync_ShouldPropagateCancellation_WhenCallerCancelled(bool hasAgent, bool hasMcpUri)
+    {
+        // 呼出元のキャンセルは「取得エラー」の alert ではなく例外として伝播させる（#333）
+        await WriteSnapshotAsync(_claudeCode, usedPercentage: 42);
+        int readerCalls = 0;
+        RateLimitRefreshCoordinator coordinator = CreateCoordinator(
+            mcpResourceReader: (_, _, uri, ct) =>
+            {
+                readerCalls++;
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult(BuildLegacyPayload(uri));
+            });
+        using CancellationTokenSource cts = new();
+        await cts.CancelAsync();
+
+        Func<Task> act = () => coordinator.RefreshAsync(
+            new RateLimitRefreshRequest(
+                hasAgent ? [CreateAgent(_claudeCode)] : [],
+                hasMcpUri ? _rateLimitUri : string.Empty,
+                _gatewayUrl),
+            cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        // エージェント取得でキャンセルした場合は MCP 取得まで進まない
+        readerCalls.Should().Be(hasAgent ? 0 : 1);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ShouldStopRemainingUris_WhenCancelledDuringMcpFetch()
+    {
+        using CancellationTokenSource cts = new();
+        List<string> requestedUris = [];
+        RateLimitRefreshCoordinator coordinator = CreateCoordinator(
+            mcpResourceReader: async (_, _, uri, ct) =>
+            {
+                requestedUris.Add(uri);
+                await cts.CancelAsync();
+                ct.ThrowIfCancellationRequested();
+                return BuildLegacyPayload(uri);
+            });
+
+        Func<Task> act = () => coordinator.RefreshAsync(
+            new RateLimitRefreshRequest([], $"{_rateLimitUri}\r\nratelimit://queue/weekly", _gatewayUrl),
+            cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        requestedUris.Should().ContainSingle().Which.Should().Be(_rateLimitUri);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshAsync_ShouldAlertFetchError_WhenCancellationIsNotRequestedByCaller(bool isTaskCanceled)
+    {
+        // HTTP タイムアウト等、呼出元がキャンセルしていない OperationCanceledException は従来どおり取得エラー
+        Exception failure = isTaskCanceled
+            ? new TaskCanceledException("要求がタイムアウトしました")
+            : new OperationCanceledException("取得を中断しました");
+        RateLimitRefreshCoordinator coordinator = CreateCoordinator(
+            mcpResourceReader: (_, _, _, _) => throw failure);
+
+        RateLimitRefreshResult result = await coordinator.RefreshAsync(
+            new RateLimitRefreshRequest([], _rateLimitUri, _gatewayUrl));
+
+        result.Status.Should().Be(RateLimitRefreshStatus.Completed);
+        RateLimitRefreshAlert alert = result.Alerts.Should().ContainSingle().Subject;
+        alert.Title.Should().Be("取得エラー");
+        alert.Message.Should().Be(McpResourceProbe.GetUserMessage(failure));
+    }
+
     [Fact]
     public async Task RefreshAsync_ShouldAlertCodexFailure_WhenCommandIsNotFound()
     {

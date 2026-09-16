@@ -79,6 +79,10 @@ internal delegate Task<string> McpResourceTextReader(
 /// 取得失敗は正常系として扱い、途中で打ち切らない。ローカルファイル経由で取得済みの結果は
 /// MCP 側が失敗しても破棄せず、部分成功として表示する（#139 レビュー対応）.
 /// </para>
+/// <para>
+/// ただし呼び出し元によるキャンセルは失敗として扱わず、残りの取得を打ち切って
+/// <see cref="OperationCanceledException"/> を伝播させる（#333）.
+/// </para>
 /// </remarks>
 internal sealed class RateLimitRefreshCoordinator
 {
@@ -126,7 +130,10 @@ internal sealed class RateLimitRefreshCoordinator
     /// 取得しても 95% 未満への解除が反映されなかった）.
     /// </summary>
     /// <param name="request">画面から渡す入力.</param>
-    /// <param name="cancellationToken">キャンセル用トークン.</param>
+    /// <param name="cancellationToken">
+    /// キャンセル用トークン。キャンセルされた場合は取得エラーの alert に変えず
+    /// <see cref="OperationCanceledException"/> を送出する.
+    /// </param>
     /// <returns>表示に必要な結果一式.</returns>
     public async Task<RateLimitRefreshResult> RefreshAsync(
         RateLimitRefreshRequest request,
@@ -251,6 +258,10 @@ internal sealed class RateLimitRefreshCoordinator
             fetchedLimits.AddRange(
                 RateLimitStatusParser.Parse(json, RateLimitFileService.BuildSourceIdentifier(agent.Id)));
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             alerts.Add(new RateLimitRefreshAlert(
@@ -281,6 +292,10 @@ internal sealed class RateLimitRefreshCoordinator
             {
                 string json = await _mcpResourceReader(endpoint, token, uri, cancellationToken);
                 fetchedLimits.AddRange(RateLimitStatusParser.Parse(json, uri));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
