@@ -214,6 +214,84 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         coordinator.IsBusy.Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("Manual")]
+    [InlineData("Automatic")]
+    public async Task StartAsync_ShouldPropagateCancellation_WhenCallerCancelled(string trigger)
+    {
+        // 呼出元のキャンセルは起動失敗（Failed・自動起動失敗ログ）に変えず例外として伝播させる（#333）
+        await WriteSnapshotAsync(_pausedAgentId, usedPercentage: 42);
+        FakeLauncherService launcher = new();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
+        using CancellationTokenSource cts = new();
+        await cts.CancelAsync();
+
+        Func<Task> act = () => coordinator.StartAsync(
+            CreateReviewEvent(),
+            LauncherRole.Reviewer,
+            Enum.Parse<ReviewStartTrigger>(trigger),
+            _ => Task.FromResult(true),
+            cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        launcher.StartSessionCalls.Should().BeEmpty();
+        _logLines.Should().BeEmpty();
+        coordinator.IsBusy.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldAcceptNextStart_AfterCancellation()
+    {
+        await WriteSnapshotAsync(_pausedAgentId, usedPercentage: 42);
+        FakeLauncherService launcher = new();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
+        using CancellationTokenSource cts = new();
+        await cts.CancelAsync();
+        Func<Task> cancelled = () => coordinator.StartAsync(
+            CreateReviewEvent(),
+            LauncherRole.Reviewer,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true),
+            cts.Token);
+        await cancelled.Should().ThrowAsync<OperationCanceledException>();
+
+        ReviewStartResult result = await coordinator.StartAsync(
+            CreateReviewEvent(),
+            LauncherRole.Reviewer,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        launcher.StartSessionCalls.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(false, "Manual")]
+    [InlineData(true, "Manual")]
+    [InlineData(true, "Automatic")]
+    public async Task StartAsync_ShouldReturnFailure_WhenCancellationIsNotRequestedByCaller(
+        bool isTaskCanceled,
+        string trigger)
+    {
+        // 起動処理内のタイムアウト等は呼出元のキャンセルではないため、従来どおり起動失敗として扱う
+        FakeLauncherService launcher = new()
+        {
+            StartSessionException = isTaskCanceled
+                ? new TaskCanceledException("起動がタイムアウトしました")
+                : new OperationCanceledException("起動を中断しました"),
+        };
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
+
+        ReviewStartResult result = await coordinator.StartAsync(
+            CreateReviewEvent(),
+            LauncherRole.Reviewer,
+            Enum.Parse<ReviewStartTrigger>(trigger),
+            _ => Task.FromResult(true));
+
+        result.Status.Should().Be(ReviewStartStatus.Failed);
+        coordinator.IsBusy.Should().BeFalse();
+    }
+
     [Fact]
     public async Task StartAsync_ShouldThrow_WhenManualHasNoOverridePrompt()
     {
