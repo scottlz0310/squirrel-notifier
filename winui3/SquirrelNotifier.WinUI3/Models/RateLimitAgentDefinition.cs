@@ -13,16 +13,18 @@ internal sealed record RateLimitAgentDefinition(string Id, string DisplayName, b
 /// <summary>
 /// レートリミット監視対象の候補エージェント一覧（#139）.
 /// 新しいエージェントを追加・削除する場合はこのリストのみを変更する.
+/// 表示名はサービス名として読める形に揃える（#335）。<see cref="RateLimitAgentDefinition.Id"/> は
+/// settings.json の永続値のため変更しない.
 /// </summary>
 internal static class RateLimitAgentCatalog
 {
     public static readonly IReadOnlyList<RateLimitAgentDefinition> All =
     [
-        new RateLimitAgentDefinition("claude-code", "claude-code", IsAvailable: true),
-        new RateLimitAgentDefinition("agy", "agy (Antigravity CLI)", IsAvailable: true),
+        new RateLimitAgentDefinition("claude-code", "Claude Code", IsAvailable: true),
+        new RateLimitAgentDefinition("agy", "Antigravity (agy)", IsAvailable: true),
 
         // codex は statusline フックが外部コマンドに JSON を渡さないためローカルファイル経由は
         // 不可能だが、App Server（account/rateLimits/read）経由で取得できる（spike #157 / #163）.
-        new RateLimitAgentDefinition("codex", "codex", IsAvailable: true),
+        new RateLimitAgentDefinition("codex", "Codex", IsAvailable: true),
     ];
 }

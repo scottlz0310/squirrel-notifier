@@ -32,6 +32,53 @@ public class RateLimitGaugeViewModelTests
         vm.UsageText.Should().Contain("80%");
     }
 
+    [Fact]
+    public void Update_ShouldPreferAutoPauseEligibleLimitOverReservedLimit()
+    {
+        // 対象外の予約枠（Luna Reserve Weekly）が満杯でも起動は止まらないため、
+        // 使用率が低くても判定対象の枠を既定選択にする（#335）
+        RateLimitGaugeViewModel vm = CreateViewModel();
+
+        vm.Update(
+            ["codex"],
+            [
+                CreateSnapshot(
+                    "codex",
+                    CreateLimit("codex:primary", "5時間制限（全モデル）", 20),
+                    CreateLimit("base_model_inference:primary", "Luna Reserve Weekly制限（Luna専用・Auto-Pause対象外）", 100, isAutoPauseEligible: false)),
+            ],
+            "codex",
+            []);
+
+        vm.SelectedOption!.LimitId.Should().Be("codex:primary");
+        vm.SelectedOption.DisplayName.Should().Be("Codex — 5時間制限（全モデル）");
+    }
+
+    [Fact]
+    public void Update_ShouldDistinguishReservedLimitInDisplayName()
+    {
+        RateLimitGaugeViewModel vm = CreateViewModel();
+
+        vm.Update(
+            ["codex"],
+            [
+                CreateSnapshot(
+                    "codex",
+                    CreateLimit("codex:secondary", "Weekly制限（全モデル）", 30),
+                    CreateLimit("base_model_inference:primary", "Luna Reserve Weekly制限（Luna専用・Auto-Pause対象外）", 100, isAutoPauseEligible: false)),
+            ],
+            "codex",
+            []);
+
+        vm.Options.Select(option => option.DisplayName).Should().BeEquivalentTo(
+            [
+                "Codex — Weekly制限（全モデル）",
+                "Codex — Luna Reserve Weekly制限（Luna専用・Auto-Pause対象外）",
+            ]);
+        vm.Options.Should().ContainSingle(option => !option.IsAutoPauseEligible)
+            .Which.LimitId.Should().Be("base_model_inference:primary");
+    }
+
     [Theory]
     [InlineData(69.9, "Normal", "状態: 正常")]
     [InlineData(70, "Warning", "状態: 注意")]
@@ -152,13 +199,14 @@ public class RateLimitGaugeViewModelTests
     private static RateLimitSnapshot CreateSnapshot(string agentId, params RateLimitInfo[] limits)
         => new(agentId, _now, limits);
 
-    private static RateLimitInfo CreateLimit(string id, string label, double usedPercentage)
+    private static RateLimitInfo CreateLimit(string id, string label, double usedPercentage, bool isAutoPauseEligible = true)
         => new()
         {
             Id = id,
             Label = label,
             UsedPercentage = usedPercentage,
             ResetAt = _now.AddHours(5),
+            IsAutoPauseEligible = isAutoPauseEligible,
         };
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider

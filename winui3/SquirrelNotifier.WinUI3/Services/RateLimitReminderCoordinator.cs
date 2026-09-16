@@ -31,7 +31,7 @@ internal sealed class RateLimitReminderCoordinator
             return;
         }
 
-        _reminderService.Schedule(info.ReminderKey, info.Label, info.ResetAt);
+        _reminderService.Schedule(info.ReminderKey, info.DisplayLabel, info.ResetAt);
         info.IsReminderScheduled = true;
     }
 }

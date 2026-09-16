@@ -29,6 +29,12 @@ internal sealed class RateLimitInfo : INotifyPropertyChanged
     [JsonIgnore]
     public string SourceUri { get; set; } = string.Empty;
 
+    // Auto-Pause（#147）の判断材料にしてよい枠か。Codex の Luna Reserve Weekly のような
+    // 自律実行に使われない予約枠は取得層で false にする（#335）。statusline 由来の snapshot は
+    // 枠の区別を持たないため既定 true.
+    [JsonIgnore]
+    public bool IsAutoPauseEligible { get; set; } = true;
+
     // 複数の ratelimit:// URI を同時に扱う場合、異なるリソース間で Id が衝突すると
     // リマインダー予約が相互に上書きされるため、URI を含めたキーで一意化する。
     [JsonIgnore]
@@ -48,6 +54,11 @@ internal sealed class RateLimitInfo : INotifyPropertyChanged
             }
         }
     }
+
+    // 一覧・通知では枠のラベルだけではどのサービスの枠か分からないため、
+    // エージェント由来の枠にサービス名を前置した表示名を使う（#335）.
+    [JsonIgnore]
+    public string DisplayLabel => Helpers.RateLimitDisplayName.BuildFromSourceUri(SourceUri, Label);
 
     [JsonIgnore]
     public string ResetAtDisplay => ResetAt.ToLocalTime().ToString("yyyy/MM/dd HH:mm", System.Globalization.CultureInfo.CurrentCulture);
