@@ -173,7 +173,7 @@ internal sealed class CodexAppServerRateLimitClient
             Label = CodexRateLimitBucketPolicy.BuildLabel(limitId, slot, window.WindowDurationMins),
             UsedPercentage = Math.Clamp(usedPercent, 0, 100),
             ResetAt = DateTimeOffset.FromUnixTimeSeconds(resetsAt),
-            IsAutoPauseEligible = CodexRateLimitBucketPolicy.IsAutoPauseEligible(limitId),
+            IsAutoPauseEligible = CodexRateLimitBucketPolicy.IsAutoPauseEligible(limitId, slot),
         });
     }
 

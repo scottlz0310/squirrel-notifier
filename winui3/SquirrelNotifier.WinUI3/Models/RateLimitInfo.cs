@@ -55,6 +55,11 @@ internal sealed class RateLimitInfo : INotifyPropertyChanged
         }
     }
 
+    // 一覧・通知では枠のラベルだけではどのサービスの枠か分からないため、
+    // エージェント由来の枠にサービス名を前置した表示名を使う（#335）.
+    [JsonIgnore]
+    public string DisplayLabel => Helpers.RateLimitDisplayName.BuildFromSourceUri(SourceUri, Label);
+
     [JsonIgnore]
     public string ResetAtDisplay => ResetAt.ToLocalTime().ToString("yyyy/MM/dd HH:mm", System.Globalization.CultureInfo.CurrentCulture);
 

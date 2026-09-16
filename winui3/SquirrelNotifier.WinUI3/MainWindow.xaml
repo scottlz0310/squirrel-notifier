@@ -284,7 +284,7 @@
                                     <DataTemplate x:DataType="models:RateLimitInfo">
                                         <Grid ColumnDefinitions="*,Auto" Margin="0,2,0,2">
                                             <StackPanel Grid.Column="0" Spacing="2">
-                                                <TextBlock Text="{x:Bind Label}" FontWeight="Medium"/>
+                                                <TextBlock Text="{x:Bind DisplayLabel}" FontWeight="Medium"/>
                                                 <TextBlock Text="{x:Bind ResetAtDisplay}" FontSize="11" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
                                             </StackPanel>
                                             <Button Grid.Column="1"

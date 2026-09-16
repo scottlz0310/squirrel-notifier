@@ -22,17 +22,21 @@ internal static class CodexRateLimitBucketPolicy
     private const string _excludedSuffix = "（Auto-Pause対象外）";
 
     /// <summary>
-    /// Auto-Pause（#147）の判断材料にしてよい枠かどうかを返す。通常枠（<see cref="GeneralBucketId"/>）
-    /// だけを対象とし、Luna Reserve Weekly や将来追加される予約枠は対象外にする.
+    /// Auto-Pause（#147）の判断材料にしてよい枠かどうかを返す。通常枠（<see cref="GeneralBucketId"/>）の
+    /// primary / secondary だけを対象とし、Luna Reserve Weekly・将来追加される予約枠・
+    /// 通常枠に増えた未知の slot は、用途を確認できるまで対象外にする.
     /// </summary>
     /// <param name="bucketId">App Server の <c>limitId</c>（bucket ID）.</param>
+    /// <param name="slot">window slot（<c>primary</c> / <c>secondary</c>）.</param>
     /// <returns>Auto-Pause の判断材料にしてよい場合は <see langword="true"/>.</returns>
-    public static bool IsAutoPauseEligible(string? bucketId)
-        => string.Equals(bucketId, GeneralBucketId, StringComparison.Ordinal);
+    public static bool IsAutoPauseEligible(string? bucketId, string? slot)
+        => string.Equals(bucketId, GeneralBucketId, StringComparison.Ordinal)
+            && slot is _primarySlot or _secondarySlot;
 
     /// <summary>
     /// 枠の表示ラベルを組み立てる。既知の bucket / slot はサービス上の枠名と用途を含む固定文言、
-    /// 未知の組み合わせは <paramref name="windowDurationMins"/> から作る従来の期間表記へフォールバックする.
+    /// 未知の組み合わせは <paramref name="windowDurationMins"/> から作る従来の期間表記へフォールバックし、
+    /// Auto-Pause の対象外である事実を表示に残す.
     /// </summary>
     /// <param name="bucketId">App Server の <c>limitId</c>（bucket ID）.</param>
     /// <param name="slot">window slot（<c>primary</c> / <c>secondary</c>）.</param>
@@ -40,14 +44,9 @@ internal static class CodexRateLimitBucketPolicy
     /// <returns>表示ラベル.</returns>
     public static string BuildLabel(string? bucketId, string slot, long? windowDurationMins)
     {
-        if (IsAutoPauseEligible(bucketId))
+        if (IsAutoPauseEligible(bucketId, slot))
         {
-            return slot switch
-            {
-                _primarySlot => "5時間制限（全モデル）",
-                _secondarySlot => "Weekly制限（全モデル）",
-                _ => BuildWindowText(windowDurationMins, slot),
-            };
+            return slot == _primarySlot ? "5時間制限（全モデル）" : "Weekly制限（全モデル）";
         }
 
         if (string.Equals(bucketId, LunaReserveBucketId, StringComparison.Ordinal) && slot == _primarySlot)

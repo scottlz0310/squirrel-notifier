@@ -33,7 +33,8 @@ Codex は App Server（`account/rateLimits/read`）から複数の bucket を返
 - 通常枠が閾値未満なら、Luna Reserve Weekly が 100% でも起動する
 - 予約枠は情報表示とリマインダー予約にのみ使う。自動モデル切替・フォールバック・consume 系 API の
   呼び出しには使わない（アプリは読み取り 2 要求 `initialize` / `account/rateLimits/read` しか送らない）
-- 将来 bucket が追加された場合、その枠は用途を確認できるまで対象外として扱う（誤って起動を止めない）
+- 将来 **bucket または slot が追加**された場合、その枠は用途を確認できるまで対象外として扱う
+  （誤って起動を止めない）。通常枠に `tertiary` などの slot が増えた場合も同様に対象外になる
 - 旧形式の単一 bucket payload（`rateLimits`）は通常枠として扱う
 - statusline 由来の snapshot（claude-code / agy）は枠の区別を持たないため、すべて対象
 

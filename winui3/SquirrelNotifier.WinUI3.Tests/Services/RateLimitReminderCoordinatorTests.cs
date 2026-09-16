@@ -22,8 +22,10 @@ public sealed class RateLimitReminderCoordinatorTests
         coordinator.Toggle(info);
 
         info.IsReminderScheduled.Should().BeTrue();
+
+        // 通知文言にもサービス名を含める（#335。枠のラベルだけではどのサービスの枠か分からない）
         reminderService.Verify(
-            service => service.Schedule(info.ReminderKey, info.Label, info.ResetAt),
+            service => service.Schedule(info.ReminderKey, "Codex — 5時間制限", info.ResetAt),
             Times.Once);
         reminderService.Verify(service => service.Cancel(It.IsAny<string>()), Times.Never);
     }

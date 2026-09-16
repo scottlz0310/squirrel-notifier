@@ -41,7 +41,7 @@ internal sealed record RateLimitGaugeOption(
     RateLimitDeltaResult? Delta,
     bool IsAutoPauseEligible = true)
 {
-    public string DisplayName => $"{AgentDisplayName} — {LimitLabel}";
+    public string DisplayName => RateLimitDisplayName.Combine(AgentDisplayName, LimitLabel);
 }
 
 /// <summary>
@@ -241,8 +241,7 @@ internal sealed class RateLimitGaugeViewModel : INotifyPropertyChanged
         return usedPercentage >= _warningThreshold ? RateLimitGaugeSeverity.Warning : RateLimitGaugeSeverity.Normal;
     }
 
-    private static string GetAgentDisplayName(string agentId)
-        => RateLimitAgentCatalog.All.FirstOrDefault(agent => agent.Id == agentId)?.DisplayName ?? agentId;
+    private static string GetAgentDisplayName(string agentId) => RateLimitDisplayName.ResolveAgentDisplayName(agentId);
 
     private static string GetUnavailableReasonText(RateLimitDeltaUnavailableReason reason)
     {
