@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI の NuGet cache を restore と保存に分離し、`build-and-test` だけが restore 完了後に保存することで、lint / security-scan の重複保存を削減した（#220）
 - headless E2E の scenario manifest から、使われていない `components.squirrel-notifier`（`0.9.0` のまま更新されていなかった）を削除した（#325）。`docs/windows-integration-e2e.md` に、`components` は fixture が再生する外部コンポーネントの契約 version 専用であることを明記した
+- `McpSubscriptionService` の依存サービス待ちについて、経過時間の計測と待機の遅延を `TimeProvider` 経由にした（#332）。既定は `TimeProvider.System` のままで挙動は変わらない。これにより、mcp-gateway の起動待ちから購読が復帰する経路（復帰後に待機予算とリトライ回数が数え直されることを含む）を、実時間の 5 秒待機に依存しないテストで固定した
 
 ### Fixed
 
