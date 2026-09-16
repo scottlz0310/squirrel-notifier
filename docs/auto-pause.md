@@ -16,6 +16,26 @@ Issue #147 で導入された、レートリミット危険水域での新規 la
 - rateLimitAgentId を持たないプリセット（copilot など取得手段が無いエージェント）
 - 「カスタム」設定のスロット
 - Paused でない agent の snapshot が stale / missing の場合（推測制御をしない）
+- 自律実行に使われない予約枠（下記「判定対象の枠」、#335）
+
+## 判定対象の枠
+
+Codex は App Server（`account/rateLimits/read`）から複数の bucket を返す。Auto-Pause は
+**通常枠（bucket ID `codex`）の primary / secondary だけ**を判断材料にする。
+
+| 枠 | bucket ID : slot | 表示 | Auto-Pause |
+| --- | --- | --- | --- |
+| 5 時間制限（全モデル） | `codex:primary` | `Codex — 5時間制限（全モデル）` | 対象 |
+| Weekly 制限（全モデル） | `codex:secondary` | `Codex — Weekly制限（全モデル）` | 対象 |
+| Luna Reserve Weekly 制限 | `base_model_inference:primary` | `Codex — Luna Reserve Weekly制限（Luna専用・Auto-Pause対象外）` | 対象外 |
+
+- 判定は bucket ID と window slot の組み合わせで行う。表示名や `windowDurationMins` には依存しない
+- 通常枠が閾値未満なら、Luna Reserve Weekly が 100% でも起動する
+- 予約枠は情報表示とリマインダー予約にのみ使う。自動モデル切替・フォールバック・consume 系 API の
+  呼び出しには使わない（アプリは読み取り 2 要求 `initialize` / `account/rateLimits/read` しか送らない）
+- 将来 bucket が追加された場合、その枠は用途を確認できるまで対象外として扱う（誤って起動を止めない）
+- 旧形式の単一 bucket payload（`rateLimits`）は通常枠として扱う
+- statusline 由来の snapshot（claude-code / agy）は枠の区別を持たないため、すべて対象
 
 ## 解除条件
 

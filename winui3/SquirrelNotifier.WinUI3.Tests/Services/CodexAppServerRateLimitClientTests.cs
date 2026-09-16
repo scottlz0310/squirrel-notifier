@@ -4,6 +4,7 @@
 
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Moq;
 using SquirrelNotifier.WinUI3.Models;
@@ -38,13 +39,15 @@ public class CodexAppServerRateLimitClientTests
         snapshot.ObservedAt.Should().Be(_now);
         snapshot.Limits.Should().HaveCount(2);
         snapshot.Limits[0].Id.Should().Be("codex:primary");
-        snapshot.Limits[0].Label.Should().Be("5時間枠");
+        snapshot.Limits[0].Label.Should().Be("5時間制限（全モデル）");
         snapshot.Limits[0].UsedPercentage.Should().Be(100);
         snapshot.Limits[0].ResetAt.Should().Be(DateTimeOffset.FromUnixTimeSeconds(_resetsAtPrimary));
+        snapshot.Limits[0].IsAutoPauseEligible.Should().BeTrue();
         snapshot.Limits[1].Id.Should().Be("codex:secondary");
-        snapshot.Limits[1].Label.Should().Be("7日枠");
+        snapshot.Limits[1].Label.Should().Be("Weekly制限（全モデル）");
         snapshot.Limits[1].UsedPercentage.Should().Be(16);
         snapshot.Limits[1].ResetAt.Should().Be(DateTimeOffset.FromUnixTimeSeconds(_resetsAtSecondary));
+        snapshot.Limits[1].IsAutoPauseEligible.Should().BeTrue();
     }
 
     [Fact]
@@ -58,6 +61,10 @@ public class CodexAppServerRateLimitClientTests
         snapshot!.Limits.Should().ContainSingle();
         snapshot.Limits[0].Id.Should().Be("codex:primary");
         snapshot.Limits[0].UsedPercentage.Should().Be(42);
+
+        // 旧形式は通常枠として後方互換に扱う（#335）
+        snapshot.Limits[0].Label.Should().Be("5時間制限（全モデル）");
+        snapshot.Limits[0].IsAutoPauseEligible.Should().BeTrue();
     }
 
     [Fact]
@@ -69,6 +76,7 @@ public class CodexAppServerRateLimitClientTests
         RateLimitSnapshot? snapshot = CodexAppServerRateLimitClient.Normalize("codex", result, _now);
 
         snapshot!.Limits[0].Id.Should().Be("codex:primary");
+        snapshot.Limits[0].IsAutoPauseEligible.Should().BeTrue();
     }
 
     [Fact]
@@ -104,21 +112,45 @@ public class CodexAppServerRateLimitClientTests
     }
 
     [Theory]
-    [InlineData(300, "5時間枠")]
-    [InlineData(10080, "7日枠")]
-    [InlineData(2880, "2日枠")]
-    [InlineData(90, "90分枠")]
-    [InlineData(null, "primary 枠")]
-    public void Normalize_ShouldDeriveLabelFromWindowDuration(int? windowDurationMins, string expectedLabel)
+    [InlineData(300, "5時間枠（Auto-Pause対象外）")]
+    [InlineData(10080, "7日枠（Auto-Pause対象外）")]
+    [InlineData(2880, "2日枠（Auto-Pause対象外）")]
+    [InlineData(90, "90分枠（Auto-Pause対象外）")]
+    [InlineData(null, "primary 枠（Auto-Pause対象外）")]
+    public void Normalize_ShouldDeriveLabelFromWindowDurationForUnknownBucket(int? windowDurationMins, string expectedLabel)
     {
+        // 既知でない bucket は用途を断定できないため、期間表記へフォールバックしたうえで
+        // Auto-Pause 対象外であることを表示に残す（#335）
         string duration = windowDurationMins is int mins ? mins.ToString(System.Globalization.CultureInfo.InvariantCulture) : "null";
         CodexRateLimitsReadResult result = Deserialize(
-            "{\"rateLimits\":{\"limitId\":\"codex\",\"primary\":{\"usedPercent\":10,\"windowDurationMins\":" + duration + ",\"resetsAt\":1783768226}}}");
+            "{\"rateLimits\":{\"limitId\":\"future_bucket\",\"primary\":{\"usedPercent\":10,\"windowDurationMins\":" + duration + ",\"resetsAt\":1783768226}}}");
 
         RateLimitSnapshot? snapshot = CodexAppServerRateLimitClient.Normalize("codex", result, _now);
 
         snapshot!.Limits[0].Label.Should().Be(expectedLabel);
+        snapshot.Limits[0].IsAutoPauseEligible.Should().BeFalse();
     }
+
+    [Fact]
+    public void Normalize_ShouldExcludeLunaReserveWeeklyFromAutoPause()
+    {
+        // Luna 専用の予約枠は自律実行に使わないため、Auto-Pause の判断材料から外す（#335）
+        CodexRateLimitsReadResult result = Deserialize(
+            """
+            {"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":20,"windowDurationMins":300,"resetsAt":1783768226},"secondary":{"usedPercent":30,"windowDurationMins":10080,"resetsAt":1784355026}},"base_model_inference":{"limitId":"base_model_inference","primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1784355026}}}}
+            """);
+
+        RateLimitSnapshot? snapshot = CodexAppServerRateLimitClient.Normalize("codex", result, _now);
+
+        snapshot!.Limits.Should().HaveCount(3);
+        RateLimitInfo luna = snapshot.Limits.Should().ContainSingle(limit => limit.Id == "base_model_inference:primary").Subject;
+        luna.Label.Should().Be("Luna Reserve Weekly制限（Luna専用・Auto-Pause対象外）");
+        luna.UsedPercentage.Should().Be(100);
+        luna.IsAutoPauseEligible.Should().BeFalse();
+        snapshot.Limits.Where(limit => limit.Id.StartsWith("codex:", StringComparison.Ordinal))
+            .Should().OnlyContain(limit => limit.IsAutoPauseEligible);
+    }
+
 
     // ---- CaptureAsync（JSON-RPC round-trip）----
 
@@ -140,6 +172,27 @@ public class CodexAppServerRateLimitClientTests
         sentPayload.Should().Contain("\"method\":\"account/rateLimits/read\"");
         runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p => p.FileName == _fakeExePath && p.ArgumentList.Count == 1 && p.ArgumentList[0] == "app-server")), Times.Once);
         process.Verify(p => p.Kill(true), Times.Once);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_ShouldOnlySendReadRequests_WhenLunaReserveBucketIsPresent()
+    {
+        // Luna Reserve Weekly を受け取っても、モデル切替・フォールバック・consume 系の要求は送らない（#335）
+        string readResultJson =
+            """
+            {"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":20,"windowDurationMins":300,"resetsAt":1783768226}},"base_model_inference":{"limitId":"base_model_inference","primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1784355026}}}}
+            """;
+        (Mock<IProcessInstance> process, MemoryStream stdin) = CreateMockProcess(
+            BuildStdout(_initializeResponseLine, $$"""{"id":2,"result":{{readResultJson.Trim()}}}"""));
+        CodexAppServerRateLimitClient client = CreateClient(process, out _);
+
+        RateLimitSnapshot? snapshot = await client.CaptureAsync("codex", CancellationToken.None);
+
+        snapshot!.Limits.Should().HaveCount(2);
+        string sentPayload = Encoding.UTF8.GetString(stdin.ToArray());
+        Regex.Matches(sentPayload, "\"method\":\"(?<method>[^\"]+)\"")
+            .Select(match => match.Groups["method"].Value)
+            .Should().Equal("initialize", "account/rateLimits/read");
     }
 
     [Fact]

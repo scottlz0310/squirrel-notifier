@@ -113,7 +113,7 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
         result.Limits.Should().ContainSingle().Which.SourceUri.Should().Be("agent://agy");
         RateLimitRefreshAlert alert = result.Alerts.Should().ContainSingle().Subject;
         alert.Title.Should().Be("取得エラー");
-        alert.Message.Should().StartWith("claude-code のレートリミット状態の読み取りに失敗しました: ");
+        alert.Message.Should().StartWith("Claude Code のレートリミット状態の読み取りに失敗しました: ");
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
         result.Limits.Should().HaveCount(2);
         result.Alerts.Should().BeEmpty();
         result.LegacySchemaMessage.Should().NotBeNull();
-        result.LegacySchemaMessage.Should().StartWith("agy (Antigravity CLI) の statusline snapshot が旧形式");
+        result.LegacySchemaMessage.Should().StartWith("Antigravity (agy) の statusline snapshot が旧形式");
     }
 
     [Fact]

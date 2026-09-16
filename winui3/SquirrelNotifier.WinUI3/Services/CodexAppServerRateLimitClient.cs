@@ -170,25 +170,11 @@ internal sealed class CodexAppServerRateLimitClient
             // window slot ベースの安定識別子。Delta 計算（RateLimitDeltaCalculator）が
             // limit Id でマッチングするため、duration 変更で切れる値を使わない
             Id = $"{limitId}:{slot}",
-            Label = BuildLabel(window.WindowDurationMins, slot),
+            Label = CodexRateLimitBucketPolicy.BuildLabel(limitId, slot, window.WindowDurationMins),
             UsedPercentage = Math.Clamp(usedPercent, 0, 100),
             ResetAt = DateTimeOffset.FromUnixTimeSeconds(resetsAt),
+            IsAutoPauseEligible = CodexRateLimitBucketPolicy.IsAutoPauseEligible(limitId),
         });
-    }
-
-    private static string BuildLabel(long? windowDurationMins, string slot)
-    {
-        if (windowDurationMins is not long mins || mins <= 0)
-        {
-            return $"{slot} 枠";
-        }
-
-        if (mins % 1440 == 0)
-        {
-            return $"{mins / 1440}日枠";
-        }
-
-        return mins % 60 == 0 ? $"{mins / 60}時間枠" : $"{mins}分枠";
     }
 
     private async Task<RateLimitSnapshot?> CaptureCoreAsync(string agentId, CancellationToken cancellationToken)

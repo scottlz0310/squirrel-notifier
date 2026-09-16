@@ -38,7 +38,8 @@ internal sealed record RateLimitGaugeOption(
     DateTimeOffset? ObservedAt,
     bool IsFresh,
     RateLimitGaugeSeverity Severity,
-    RateLimitDeltaResult? Delta)
+    RateLimitDeltaResult? Delta,
+    bool IsAutoPauseEligible = true)
 {
     public string DisplayName => $"{AgentDisplayName} — {LimitLabel}";
 }
@@ -177,7 +178,8 @@ internal sealed class RateLimitGaugeViewModel : INotifyPropertyChanged
                     snapshot.ObservedAt,
                     isFresh,
                     severity,
-                    delta));
+                    delta,
+                    limit.IsAutoPauseEligible));
             }
         }
 
@@ -214,15 +216,17 @@ internal sealed class RateLimitGaugeViewModel : INotifyPropertyChanged
         }
 
         IEnumerable<RateLimitGaugeOption> activeOptions = Options.Where(option => option.AgentId == activeAgentId);
-        return activeOptions
-            .OrderByDescending(option => option.Severity != RateLimitGaugeSeverity.Unknown)
-            .ThenByDescending(option => option.UsedPercentage)
-            .FirstOrDefault()
-            ?? Options
-                .OrderByDescending(option => option.Severity != RateLimitGaugeSeverity.Unknown)
-                .ThenByDescending(option => option.UsedPercentage)
-                .FirstOrDefault();
+        return SelectMostRelevant(activeOptions) ?? SelectMostRelevant(Options);
     }
+
+    // Auto-Pause の判定対象になる枠を先に見せる。対象外の予約枠（Codex の Luna Reserve Weekly）が
+    // 満杯でも起動は止まらないため、既定選択にすると止まらない危険表示だけが目に入る（#335）.
+    private static RateLimitGaugeOption? SelectMostRelevant(IEnumerable<RateLimitGaugeOption> options)
+        => options
+            .OrderByDescending(option => option.IsAutoPauseEligible)
+            .ThenByDescending(option => option.Severity != RateLimitGaugeSeverity.Unknown)
+            .ThenByDescending(option => option.UsedPercentage)
+            .FirstOrDefault();
 
     private static RateLimitGaugeOption CreateUnavailableOption(string agentId, string message)
         => new(agentId, GetAgentDisplayName(agentId), null, message, null, null, null, IsFresh: false, RateLimitGaugeSeverity.Unknown, null);

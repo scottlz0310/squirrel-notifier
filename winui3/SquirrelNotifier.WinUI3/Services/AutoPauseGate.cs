@@ -59,6 +59,12 @@ internal sealed record AutoPauseDecision(AutoPauseStatus Status, AutoPausedLimit
 /// stale / missing data や resetAt 通過だけでは解除しない（snapshot は判定に使う値がすべて
 /// 揃っているときのみ信頼する）。UI スレッドからの利用を前提とし、スレッドセーフではない.
 /// </summary>
+/// <remarks>
+/// 判定対象は <see cref="RateLimitInfo.IsAutoPauseEligible"/> が立っている枠だけである（#335）。
+/// Codex の Luna Reserve Weekly のように自律実行へ使わない予約枠は、枯渇していても
+/// 起動を止めない。対象枠の使用率を確認できない snapshot は「95% 未満」を確認できて
+/// いないものとして扱い、既存の Paused を解除しない.
+/// </remarks>
 internal sealed class AutoPauseGate
 {
     private const double _pauseThresholdPercentage = 95;
@@ -105,12 +111,12 @@ internal sealed class AutoPauseGate
         }
 
         RateLimitInfo? worst = snapshot!.Limits
-            .Where(limit => limit.UsedPercentage is not null)
+            .Where(limit => limit.IsAutoPauseEligible && limit.UsedPercentage is not null)
             .OrderByDescending(limit => limit.UsedPercentage)
             .FirstOrDefault();
         if (worst?.UsedPercentage is not double usedPercentage)
         {
-            // fresh でも usedPercentage を持つ limit が無い場合は「95% 未満」を確認できて
+            // fresh でも判定対象の枠に usedPercentage が無い場合は「95% 未満」を確認できて
             // いないため、既存の Paused を解除しない
             return KeepCurrentState(agentId);
         }
