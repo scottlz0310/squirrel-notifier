@@ -58,6 +58,10 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
     private readonly IProcessRunner _processRunner;
     private readonly ICacheService? _cacheService;
     private readonly SecretMasker _secretMasker;
+
+    // 依存サービス待ち（固定 5 秒間隔・最大 5 分）の経過時間と待機そのものをテストから
+    // 制御するために注入する。実時間に依存すると復帰経路をテストで固定できない（#332）
+    private readonly TimeProvider _timeProvider;
     private readonly int _maxRetries;
     private readonly int _dependencyWaitBudgetMs;
     private readonly int _startTimeoutMs;
@@ -118,7 +122,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         ICacheService? cacheService = null,
         SecretMasker? secretMasker = null,
         int startTimeoutMs = _defaultStartTimeoutMs,
-        int dependencyWaitBudgetMs = SubscriptionRetryPolicy.DefaultDependencyWaitBudgetMs)
+        int dependencyWaitBudgetMs = SubscriptionRetryPolicy.DefaultDependencyWaitBudgetMs,
+        TimeProvider? timeProvider = null)
     {
         _settingsService = settingsService;
         _notificationService = notificationService;
@@ -129,6 +134,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
         _startTimeoutMs = startTimeoutMs;
         _dependencyWaitBudgetMs = dependencyWaitBudgetMs;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public void Start()
@@ -579,7 +585,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
     private async Task RunSingleUriLoopAsync(string resourceUri, CancellationToken token)
     {
         int retryCount = 0;
-        long? firstFailureTick = null;
+        long? firstFailureTimestamp = null;
 
         while (!token.IsCancellationRequested)
         {
@@ -718,7 +724,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 }
 
                 retryCount = 0;
-                firstFailureTick = null;
+                firstFailureTimestamp = null;
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -728,8 +734,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
             catch (Exception ex)
             {
                 retryCount++;
-                firstFailureTick ??= Environment.TickCount64;
-                long failureElapsedMs = Environment.TickCount64 - firstFailureTick.Value;
+                firstFailureTimestamp ??= _timeProvider.GetTimestamp();
+                long failureElapsedMs = (long)_timeProvider.GetElapsedTime(firstFailureTimestamp.Value).TotalMilliseconds;
                 string? structuredErrorCode = (ex as SubscriberProcessException)?.ErrorCode;
                 string? diagnosticText = (ex as SubscriberProcessException)?.DiagnosticText;
                 (string friendlyMessage, string tag) = GetErrorInfo(ex.Message, structuredErrorCode, diagnosticText);
@@ -772,7 +778,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
 
                 try
                 {
-                    await Task.Delay(decision.DelayMs, token).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(decision.DelayMs), _timeProvider, token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {

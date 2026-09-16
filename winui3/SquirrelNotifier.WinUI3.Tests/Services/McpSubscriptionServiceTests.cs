@@ -20,6 +20,8 @@ namespace SquirrelNotifier.WinUI3.Tests.Services;
 
 public class McpSubscriptionServiceTests : IDisposable
 {
+    private const string _waitingForGatewayLog = "Waiting for mcp-gateway to become ready";
+
     private readonly string _settingsDirectory;
     private readonly SettingsService _settingsService;
     private readonly Mock<INotificationService> _mockNotificationService;
@@ -60,6 +62,50 @@ public class McpSubscriptionServiceTests : IDisposable
         mock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         return mock.Object;
+    }
+
+    private static IProcessInstance CreateConnectionRefusedProcess()
+        => CreateMockProcess(1, string.Empty, "connect ECONNREFUSED 127.0.0.1:3000");
+
+    // 検証したい経路を通り終えたあとループを畳むための subscriber。購読ループの停止と
+    // 同じ経路（トークンのキャンセル）で終わるため、余分な失敗ログや待機が記録されない
+    private static IProcessInstance CreateLoopStoppingProcess(CancellationTokenSource loopCts)
+    {
+        loopCts.Cancel();
+
+        var mock = new Mock<IProcessInstance>();
+        mock.SetupGet(p => p.ExitCode).Returns(0);
+        mock.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream()));
+        mock.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+        mock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+            .Returns<CancellationToken>(token => Task.FromCanceled(token));
+
+        return mock.Object;
+    }
+
+    // preflight（--help）と購読の起動を区別し、購読側だけを呼び出し回数で切り替える
+    private static Mock<IProcessRunner> CreateScriptedRunner(
+        IProcessInstance preflightProcess,
+        Func<int, IProcessInstance> respondToSubscriptionCall)
+    {
+        int subscriptionCallCount = 0;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help")
+                ? preflightProcess
+                : respondToSubscriptionCall(Interlocked.Increment(ref subscriptionCallCount)));
+
+        return mockRunner;
+    }
+
+    private static Task InvokeSubscriptionLoopAsync(McpSubscriptionService service, CancellationToken token)
+    {
+        var runMethod = typeof(McpSubscriptionService).GetMethod(
+            "RunSubscriptionLoopAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        runMethod.Should().NotBeNull();
+
+        return (Task)runMethod!.Invoke(service, new object[] { token })!;
     }
 
     [Fact]
@@ -1130,6 +1176,153 @@ public class McpSubscriptionServiceTests : IDisposable
         captured.Should().Contain(line => line.Contains("dependency wait budget exceeded", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(5)]
+    public async Task Start_WithGatewayNotReady_ShouldRecoverWhenGatewayBecomesReady(int waitCount)
+    {
+        // Arrange: 待機のあと mcp-gateway が Ready になり、同じ購読ループが購読に成功する経路（#332）。
+        // PR #260 が固定していたのは待機に入るところまでで、復帰そのものは検証されていなかった
+        string successJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = false,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", string.Empty);
+        var testCts = new CancellationTokenSource();
+        var mockRunner = CreateScriptedRunner(preflightProcess, call =>
+        {
+            if (call <= waitCount)
+            {
+                return CreateConnectionRefusedProcess();
+            }
+
+            if (call == waitCount + 1)
+            {
+                return CreateMockProcess(0, successJson, string.Empty);
+            }
+
+            return CreateLoopStoppingProcess(testCts);
+        });
+
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            maxRetries: 0,
+            timeProvider: new InstantWaitTimeProvider());
+
+        using var logCapture = new LogCapture(_loggingService);
+
+        // Act
+        await InvokeSubscriptionLoopAsync(service, testCts.Token);
+
+        // Assert
+        IReadOnlyList<string> captured = logCapture.Lines;
+        captured.Count(line => line.Contains(_waitingForGatewayLog, StringComparison.Ordinal)).Should().Be(waitCount);
+        captured.Should().ContainSingle(line => line.Contains("Subscriber finished execution. Route=subscription", StringComparison.Ordinal));
+        captured.Should().NotContain(line => line.Contains("dependency wait budget exceeded", StringComparison.Ordinal));
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Start_WithGatewayNotReady_ShouldRestartWaitBudgetAfterRecovery()
+    {
+        // Arrange: 待機予算は直近の成功以降の最初の失敗から数え直す（#332）。
+        // 予算 12 秒・待機間隔 5 秒のため、数え直されなければ復帰後の最初の失敗
+        // （経過 15 秒）で確定エラーになる
+        string successJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = false,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", string.Empty);
+        var testCts = new CancellationTokenSource();
+        var mockRunner = CreateScriptedRunner(preflightProcess, call => call switch
+        {
+            1 or 2 or 3 or 5 => CreateConnectionRefusedProcess(),
+            4 => CreateMockProcess(0, successJson, string.Empty),
+            _ => CreateLoopStoppingProcess(testCts),
+        });
+
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            maxRetries: 0,
+            dependencyWaitBudgetMs: 12000,
+            timeProvider: new InstantWaitTimeProvider());
+
+        using var logCapture = new LogCapture(_loggingService);
+
+        // Act
+        await InvokeSubscriptionLoopAsync(service, testCts.Token);
+
+        // Assert
+        IReadOnlyList<string> captured = logCapture.Lines;
+        List<string> waitLogs = captured
+            .Where(line => line.Contains(_waitingForGatewayLog, StringComparison.Ordinal))
+            .ToList();
+
+        waitLogs.Should().HaveCount(4);
+        waitLogs[0].Should().Contain("(0s / 12s)");
+        waitLogs[1].Should().Contain("(5s / 12s)");
+        waitLogs[2].Should().Contain("(10s / 12s)");
+        waitLogs[3].Should().Contain("(0s / 12s)");
+        captured.Should().NotContain(line => line.Contains("dependency wait budget exceeded", StringComparison.Ordinal));
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Start_AfterRecoveryFromWait_ShouldRestartRetryCount()
+    {
+        // Arrange: 待機を経由して復帰したあとの通常エラーは、待機中の失敗を引き継がず
+        // retry 1 から数え直す（#332）
+        string successJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = false,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", string.Empty);
+        var testCts = new CancellationTokenSource();
+        var mockRunner = CreateScriptedRunner(preflightProcess, call => call switch
+        {
+            1 => CreateConnectionRefusedProcess(),
+            2 => CreateMockProcess(0, successJson, string.Empty),
+            3 => CreateMockProcess(1, string.Empty, "transient error"),
+            _ => CreateLoopStoppingProcess(testCts),
+        });
+
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            maxRetries: 2,
+            timeProvider: new InstantWaitTimeProvider());
+
+        using var logCapture = new LogCapture(_loggingService);
+
+        // Act
+        await InvokeSubscriptionLoopAsync(service, testCts.Token);
+
+        // Assert
+        IReadOnlyList<string> captured = logCapture.Lines;
+        captured.Should().ContainSingle(line => line.Contains("(retry 1/2)", StringComparison.Ordinal));
+        captured.Should().NotContain(line => line.Contains("(retry 2/2)", StringComparison.Ordinal));
+        captured.Should().NotContain(line => line.Contains("max retries exceeded", StringComparison.Ordinal));
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task StopAsync_ShouldCancelBackoffDelayPromptly()
     {
@@ -2092,5 +2285,106 @@ public class McpSubscriptionServiceTests : IDisposable
         // Assert
         friendlyResult.Should().Be($"予期しないエラーが発生しました: {rawError}");
         tagResult.Should().Be("[GENERAL_ERROR]");
+    }
+
+    private sealed class LogCapture : IDisposable
+    {
+        private readonly LoggingService _loggingService;
+        private readonly List<string> _lines = new();
+
+        public LogCapture(LoggingService loggingService)
+        {
+            _loggingService = loggingService;
+            _loggingService.LogAppended += OnLogAppended;
+        }
+
+        public IReadOnlyList<string> Lines
+        {
+            get
+            {
+                lock (_lines)
+                {
+                    return new List<string>(_lines);
+                }
+            }
+        }
+
+        public void Dispose() => _loggingService.LogAppended -= OnLogAppended;
+
+        private void OnLogAppended(object? sender, string line)
+        {
+            lock (_lines)
+            {
+                _lines.Add(line);
+            }
+        }
+    }
+
+    // 待機を要求された分だけ仮想時刻を進め、待機自体は即座に満了させる TimeProvider。
+    // 経過時間の計算は実装のままなので、待機予算の判定は実時間を待たずに検証できる（#332）
+    private sealed class InstantWaitTimeProvider : TimeProvider
+    {
+        private long _ticks = new DateTimeOffset(2026, 9, 16, 0, 0, 0, TimeSpan.Zero).Ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+
+        public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (dueTime > TimeSpan.Zero)
+            {
+                Interlocked.Add(ref _ticks, dueTime.Ticks);
+            }
+
+            return new ImmediateTimer(callback, state, dueTime);
+        }
+
+        private sealed class ImmediateTimer : ITimer
+        {
+            private readonly TimerCallback _callback;
+            private readonly object? _state;
+            private int _disposed;
+
+            public ImmediateTimer(TimerCallback callback, object? state, TimeSpan dueTime)
+            {
+                _callback = callback;
+                _state = state;
+                Fire(dueTime);
+            }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    return false;
+                }
+
+                Fire(dueTime);
+                return true;
+            }
+
+            public void Dispose() => Volatile.Write(ref _disposed, 1);
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+
+            private void Fire(TimeSpan dueTime)
+            {
+                if (dueTime == Timeout.InfiniteTimeSpan)
+                {
+                    return;
+                }
+
+                // 呼び出し元（Task.Delay）が ITimer を受け取る前に完了させないため、
+                // コールバックは同期実行せず ThreadPool へ回す
+                ThreadPool.QueueUserWorkItem(_ => _callback(_state));
+            }
+        }
     }
 }
