@@ -61,6 +61,61 @@ public sealed class AgentExecutionWindowCoordinatorTests
         secondWindow.ActivateCount.Should().Be(1);
     }
 
+    // 前の実行のウィンドウが残っている間に起動したセッションは捨てず、閉じた順に開く（#339）
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Show_ShouldOpenDeferredWindowsInOrder_WhenCurrentWindowCloses(int deferredCount)
+    {
+        List<FakeAgentExecutionWindow> windows = new();
+        List<ReviewStartLaunch> openedLaunches = new();
+        AgentExecutionWindowCoordinator coordinator = new(launch =>
+        {
+            openedLaunches.Add(launch);
+            FakeAgentExecutionWindow window = new();
+            windows.Add(window);
+            return window;
+        });
+        List<ReviewStartResult> results = Enumerable.Range(0, deferredCount + 1)
+            .Select(_ => ReviewStartResult.Launched(new ReviewStartLaunch(new AgentExecutionSession(TimeProvider.System), null!, null!, null!)))
+            .ToList();
+
+        foreach (ReviewStartResult result in results)
+        {
+            coordinator.Show(result);
+        }
+
+        windows.Should().ContainSingle();
+        coordinator.DeferredCount.Should().Be(deferredCount);
+
+        for (int index = 0; index < deferredCount; index++)
+        {
+            windows[index].RaiseClosed();
+        }
+
+        openedLaunches.Should().Equal(results.Select(result => result.Launch!));
+        windows.Should().OnlyContain(window => window.ActivateCount == 1);
+        coordinator.DeferredCount.Should().Be(0);
+        coordinator.HasActiveWindow.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Show_ShouldIgnoreClosedEventFromInactiveWindow()
+    {
+        FakeAgentExecutionWindow firstWindow = new();
+        FakeAgentExecutionWindow secondWindow = new();
+        Queue<IAgentExecutionWindow> windows = new([firstWindow, secondWindow]);
+        AgentExecutionWindowCoordinator coordinator = new(_ => windows.Dequeue());
+
+        coordinator.Show(CreateStartedResult());
+        coordinator.Show(CreateStartedResult());
+        firstWindow.RaiseClosed();
+        firstWindow.RaiseClosed();
+
+        secondWindow.ActivateCount.Should().Be(1);
+        coordinator.HasActiveWindow.Should().BeTrue();
+    }
+
     private static ReviewStartResult CreateStartedResult()
         => ReviewStartResult.Launched(new ReviewStartLaunch(null!, null!, null!, null!));
 

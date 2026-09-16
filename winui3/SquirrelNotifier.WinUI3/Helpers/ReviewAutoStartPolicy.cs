@@ -82,7 +82,8 @@ internal static class ReviewAutoStartPolicy
     /// <summary>
     /// 自動起動を見送った理由の表示文言を返す。<see cref="ReviewAutoStartOutcome.Start"/> と
     /// <see cref="ReviewAutoStartOutcome.SkippedDisabled"/> は記録の対象外のため <see langword="null"/> を返す
-    /// （設定 off のときに毎イベント行を残すと、off の挙動が現行と変わってしまう）.
+    /// （設定 off のときに毎イベント行を残すと、off の挙動が現行と変わってしまう）。
+    /// <see cref="ReviewAutoStartOutcome.SkippedBusy"/> は見送りではなく保留として記録するため対象外（#339）.
     /// </summary>
     /// <param name="outcome">判定結果.</param>
     /// <returns>記録する理由。記録しない場合は <see langword="null"/>.</returns>
@@ -90,7 +91,6 @@ internal static class ReviewAutoStartPolicy
         => outcome switch
         {
             ReviewAutoStartOutcome.SkippedUnsupportedReason => _unsupportedReasonText,
-            ReviewAutoStartOutcome.SkippedBusy => BusyReasonText,
             _ => null,
         };
 }

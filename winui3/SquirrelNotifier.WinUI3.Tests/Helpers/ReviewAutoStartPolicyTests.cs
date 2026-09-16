@@ -39,19 +39,19 @@ public sealed class ReviewAutoStartPolicyTests
         result.Should().Be(expected);
     }
 
-    [Theory]
-    [InlineData("SkippedUnsupportedReason")]
-    [InlineData("SkippedBusy")]
-    public void DescribeSkipReason_ShouldReturnReason_WhenSkippedWhileEnabled(string outcome)
+    [Fact]
+    public void DescribeSkipReason_ShouldReturnReason_WhenReasonIsUnsupported()
     {
-        ReviewAutoStartPolicy.DescribeSkipReason(Enum.Parse<ReviewAutoStartOutcome>(outcome))
+        ReviewAutoStartPolicy.DescribeSkipReason(ReviewAutoStartOutcome.SkippedUnsupportedReason)
             .Should().NotBeNullOrWhiteSpace();
     }
 
-    // 設定 off のときに行を残すと、off の挙動が現行と変わってしまうため記録しない
+    // 設定 off のときに行を残すと、off の挙動が現行と変わってしまうため記録しない。
+    // 実行中による見送りは保留として別に記録する（#339）
     [Theory]
     [InlineData("Start")]
     [InlineData("SkippedDisabled")]
+    [InlineData("SkippedBusy")]
     public void DescribeSkipReason_ShouldReturnNull_WhenNothingToRecord(string outcome)
     {
         ReviewAutoStartPolicy.DescribeSkipReason(Enum.Parse<ReviewAutoStartOutcome>(outcome))

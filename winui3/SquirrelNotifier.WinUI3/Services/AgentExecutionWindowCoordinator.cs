@@ -12,6 +12,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 internal sealed class AgentExecutionWindowCoordinator
 {
     private readonly Func<ReviewStartLaunch, IAgentExecutionWindow> _windowFactory;
+    private readonly Queue<ReviewStartLaunch> _deferredLaunches = new();
     private IAgentExecutionWindow? _window;
 
     public AgentExecutionWindowCoordinator(Func<ReviewStartLaunch, IAgentExecutionWindow> windowFactory)
@@ -22,19 +23,37 @@ internal sealed class AgentExecutionWindowCoordinator
 
     internal bool HasActiveWindow => _window is not null;
 
+    internal int DeferredCount => _deferredLaunches.Count;
+
     /// <summary>
-    /// 起動結果に含まれるセッションの表示ウィンドウを開く。同時に一つだけ保持する.
+    /// 起動結果に含まれるセッションの表示ウィンドウを開く。同時に一つだけ保持し、
+    /// 表示中のウィンドウがある場合は、それが閉じた時点で起動順に開く（#339）.
     /// </summary>
+    /// <remarks>
+    /// 前の実行が終わった直後に起動したセッションは、成功時の自動クローズの猶予中や、失敗時に診断のため
+    /// 残したウィンドウと重なる。セッションのイベントは容量無制限のチャンネルに残るため、後から開いても出力を失わない.
+    /// </remarks>
     /// <param name="result">レビュー起動の結果.</param>
     public void Show(ReviewStartResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        if (result.Launch is not { } launch || _window is not null)
+        if (result.Launch is not { } launch)
         {
             return;
         }
 
+        if (_window is not null)
+        {
+            _deferredLaunches.Enqueue(launch);
+            return;
+        }
+
+        Open(launch);
+    }
+
+    private void Open(ReviewStartLaunch launch)
+    {
         IAgentExecutionWindow window = _windowFactory(launch);
         _window = window;
         window.Closed += OnWindowClosed;
@@ -43,9 +62,15 @@ internal sealed class AgentExecutionWindowCoordinator
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
-        if (ReferenceEquals(_window, sender))
+        if (!ReferenceEquals(_window, sender))
         {
-            _window = null;
+            return;
+        }
+
+        _window = null;
+        if (_deferredLaunches.TryDequeue(out ReviewStartLaunch? launch))
+        {
+            Open(launch);
         }
     }
 }

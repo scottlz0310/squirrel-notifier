@@ -30,6 +30,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private IProcessInstance? _activeProcess;
     private CancellationTokenSource? _activeCts;
 
+    public event EventHandler? RunCompleted;
+
     public bool IsRunning
     {
         get
@@ -334,6 +336,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 _activeCts = null;
                 _isRunning = false;
             }
+
+            RunCompleted?.Invoke(this, EventArgs.Empty);
         }
     }
 

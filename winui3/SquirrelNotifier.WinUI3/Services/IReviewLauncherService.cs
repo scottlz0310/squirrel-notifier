@@ -10,6 +10,13 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal interface IReviewLauncherService
 {
+    /// <summary>
+    /// 実行が終了し、<see cref="IsRunning"/> が <see langword="false"/> に戻った後に発生する（#339）。
+    /// セッションの Completion は <see cref="IsRunning"/> を戻す前に確定するため、次の起動の判定にはこちらを使う。
+    /// 呼び出し元のスレッドは保証しない.
+    /// </summary>
+    event EventHandler? RunCompleted;
+
     bool IsRunning { get; }
 
     Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken);

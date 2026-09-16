@@ -112,6 +112,177 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessPendingAsync_ShouldStartFirstPendingEventAndKeepRest()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent first = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent second = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, first, second);
+        List<string> startedEventIds = new();
+        List<string> logLines = CaptureLogLines();
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            reviewEvent =>
+            {
+                startedEventIds.Add(reviewEvent.EventId);
+                return Task.FromResult(CreateStartedResult());
+            },
+            pendingQueue);
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result.Should().NotBeNull();
+        result!.ReviewEvent.Should().BeSameAs(first);
+        result.StartResult.IsStarted.Should().BeTrue();
+        startedEventIds.Should().Equal("evt_1");
+        pendingQueue.Peek().Should().BeSameAs(second);
+        logLines.Should().ContainSingle().Which.Should().Contain(
+            "[Auto] 保留していた owner/repo #42 の自動起動を再評価します（reason: opened）。");
+    }
+
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldKeepPendingEvent_WhenStillBusy()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent first = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent second = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, first, second);
+        int startCalls = 0;
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            _ =>
+            {
+                startCalls++;
+                return Task.FromResult(ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy));
+            },
+            pendingQueue);
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result.Should().BeNull();
+        startCalls.Should().Be(1);
+        pendingQueue.Count.Should().Be(2);
+        pendingQueue.Peek().Should().BeSameAs(first);
+    }
+
+    // 起動しなかった結果（設定 off・Auto-Pause・対象外・起動失敗）は保留から外し、次の保留を評価する
+    [Theory]
+    [InlineData("SkippedDisabled")]
+    [InlineData("SkippedAutoPaused")]
+    [InlineData("SkippedUnsupportedReason")]
+    [InlineData("Failed")]
+    public async Task ProcessPendingAsync_ShouldDropEventAndContinue_WhenNotStarted(string firstStatus)
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent first = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent second = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, first, second);
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            reviewEvent => Task.FromResult(ReferenceEquals(reviewEvent, first)
+                ? CreateResult(Enum.Parse<ReviewStartStatus>(firstStatus))
+                : CreateStartedResult()),
+            pendingQueue);
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result!.ReviewEvent.Should().BeSameAs(second);
+        pendingQueue.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldDropEvent_WhenRemovedFromList()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent removed = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent kept = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, removed, kept);
+        collectionCoordinator.Remove(removed);
+        List<string> startedEventIds = new();
+        List<string> logLines = CaptureLogLines();
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            reviewEvent =>
+            {
+                startedEventIds.Add(reviewEvent.EventId);
+                return Task.FromResult(CreateStartedResult());
+            },
+            pendingQueue);
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result!.ReviewEvent.Should().BeSameAs(kept);
+        startedEventIds.Should().Equal("evt_2");
+        logLines.Should().Contain(line => line.Contains(
+            "[Auto] 保留していた owner/repo #42 は一覧から削除されたため、自動起動しません。",
+            StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldDropEventWithoutStarting_WhenPullRequestIsClosed()
+    {
+        var statusClient = new StubStatusClient(PullRequestLifecycleState.Merged);
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(statusClient);
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        AddPending(collectionCoordinator, pendingQueue, CreateReviewEvent());
+        int startCalls = 0;
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            _ =>
+            {
+                startCalls++;
+                return Task.FromResult(CreateStartedResult());
+            },
+            pendingQueue);
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result.Should().BeNull();
+        startCalls.Should().Be(0);
+        pendingQueue.Count.Should().Be(0);
+        statusClient.Calls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldReturnNull_WhenNothingIsPending()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        int startCalls = 0;
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            new ReviewEventCollectionCoordinator(),
+            cleanupCoordinator,
+            _ =>
+            {
+                startCalls++;
+                return Task.FromResult(CreateStartedResult());
+            });
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result.Should().BeNull();
+        startCalls.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ProcessAsync_ShouldRejectNullEvent()
     {
         await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
@@ -135,12 +306,18 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
         Func<ReviewEvent, Task<ReviewStartResult>> starter = _ =>
             Task.FromResult(ReviewStartResult.Skipped(ReviewStartStatus.SkippedDisabled));
 
-        Action nullCollection = () => new ReviewEventProcessingCoordinator(null!, cleanupCoordinator, starter);
-        Action nullCleanup = () => new ReviewEventProcessingCoordinator(collectionCoordinator, null!, starter);
-        Action nullStarter = () => new ReviewEventProcessingCoordinator(collectionCoordinator, cleanupCoordinator, null!);
+        PendingReviewStartQueue pendingQueue = new();
+
+        Action nullCollection = () => new ReviewEventProcessingCoordinator(null!, cleanupCoordinator, pendingQueue, _loggingService, starter);
+        Action nullCleanup = () => new ReviewEventProcessingCoordinator(collectionCoordinator, null!, pendingQueue, _loggingService, starter);
+        Action nullPendingQueue = () => new ReviewEventProcessingCoordinator(collectionCoordinator, cleanupCoordinator, null!, _loggingService, starter);
+        Action nullLogging = () => new ReviewEventProcessingCoordinator(collectionCoordinator, cleanupCoordinator, pendingQueue, null!, starter);
+        Action nullStarter = () => new ReviewEventProcessingCoordinator(collectionCoordinator, cleanupCoordinator, pendingQueue, _loggingService, null!);
 
         nullCollection.Should().Throw<ArgumentNullException>();
         nullCleanup.Should().Throw<ArgumentNullException>();
+        nullPendingQueue.Should().Throw<ArgumentNullException>();
+        nullLogging.Should().Throw<ArgumentNullException>();
         nullStarter.Should().Throw<ArgumentNullException>();
 
         await cleanupCoordinator.DisposeAsync();
@@ -149,19 +326,45 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
     private ReviewEventCleanupCoordinator CreateCleanupCoordinator(IPullRequestStatusClient statusClient)
         => new(statusClient, _loggingService);
 
-    private static ReviewEventProcessingCoordinator CreateCoordinator(
+    private static void AddPending(
+        ReviewEventCollectionCoordinator collectionCoordinator,
+        PendingReviewStartQueue pendingQueue,
+        params ReviewEvent[] reviewEvents)
+    {
+        foreach (ReviewEvent reviewEvent in reviewEvents)
+        {
+            collectionCoordinator.Add(reviewEvent);
+            pendingQueue.AddOrReplace(reviewEvent);
+        }
+    }
+
+    private static ReviewStartResult CreateStartedResult()
+        => ReviewStartResult.Launched(new ReviewStartLaunch(null!, null!, null!, null!));
+
+    private static ReviewStartResult CreateResult(ReviewStartStatus status)
+        => status == ReviewStartStatus.Failed ? ReviewStartResult.Failure("起動できません") : ReviewStartResult.Skipped(status);
+
+    private List<string> CaptureLogLines()
+    {
+        List<string> logLines = new();
+        _loggingService.LogAppended += (_, line) => logLines.Add(line);
+        return logLines;
+    }
+
+    private ReviewEventProcessingCoordinator CreateCoordinator(
         ReviewEventCollectionCoordinator collectionCoordinator,
         ReviewEventCleanupCoordinator cleanupCoordinator,
-        Func<ReviewEvent, Task<ReviewStartResult>> starter)
-        => new(collectionCoordinator, cleanupCoordinator, starter);
+        Func<ReviewEvent, Task<ReviewStartResult>> starter,
+        PendingReviewStartQueue? pendingQueue = null)
+        => new(collectionCoordinator, cleanupCoordinator, pendingQueue ?? new PendingReviewStartQueue(), _loggingService, starter);
 
-    private static ReviewEvent CreateReviewEvent(string eventId = "evt_1")
+    private static ReviewEvent CreateReviewEvent(string eventId = "evt_1", int prNumber = 42)
         => new()
         {
             EventId = eventId,
             Repository = "owner/repo",
-            PrNumber = 42,
-            PrUrl = "https://github.com/owner/repo/pull/42",
+            PrNumber = prNumber,
+            PrUrl = $"https://github.com/owner/repo/pull/{prNumber}",
             Reason = "opened",
             Message = "Review requested",
         };

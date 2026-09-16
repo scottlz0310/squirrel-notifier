@@ -81,6 +81,7 @@ internal sealed class ReviewStartCoordinator
     private readonly SettingsService _settingsService;
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate;
+    private readonly PendingReviewStartQueue _pendingQueue;
     private readonly LoggingService _loggingService;
 
     // Auto-Pause 確認ダイアログ等の await 中は IsRunning がまだ false のため、起動ボタンの
@@ -92,18 +93,21 @@ internal sealed class ReviewStartCoordinator
         SettingsService settingsService,
         RateLimitSnapshotService rateLimitSnapshotService,
         AutoPauseGate autoPauseGate,
+        PendingReviewStartQueue pendingQueue,
         LoggingService loggingService)
     {
         ArgumentNullException.ThrowIfNull(launcherService);
         ArgumentNullException.ThrowIfNull(settingsService);
         ArgumentNullException.ThrowIfNull(rateLimitSnapshotService);
         ArgumentNullException.ThrowIfNull(autoPauseGate);
+        ArgumentNullException.ThrowIfNull(pendingQueue);
         ArgumentNullException.ThrowIfNull(loggingService);
 
         _launcherService = launcherService;
         _settingsService = settingsService;
         _rateLimitSnapshotService = rateLimitSnapshotService;
         _autoPauseGate = autoPauseGate;
+        _pendingQueue = pendingQueue;
         _loggingService = loggingService;
     }
 
@@ -112,7 +116,8 @@ internal sealed class ReviewStartCoordinator
 
     /// <summary>
     /// 「レビュー自動開始」設定（#254）に従って reviewer を自動起動する。
-    /// 起動を見送った場合はその理由を Recent activity へ残す.
+    /// 起動を見送った場合はその理由を Recent activity へ残す。別のレビューが実行中で見送った場合は、
+    /// 実行終了後に再評価するためイベントを保留する（#339）.
     /// </summary>
     /// <param name="reviewEvent">受信したレビューイベント.</param>
     /// <returns>起動結果.</returns>
@@ -124,6 +129,12 @@ internal sealed class ReviewStartCoordinator
             _settingsService.Settings.AutoReviewStartEnabled,
             reviewEvent.Reason,
             IsBusy);
+
+        if (outcome == ReviewAutoStartOutcome.SkippedBusy)
+        {
+            await HoldAsync(reviewEvent);
+            return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
+        }
 
         if (ReviewAutoStartPolicy.DescribeSkipReason(outcome) is string skipReason)
         {
@@ -185,7 +196,7 @@ internal sealed class ReviewStartCoordinator
             if (trigger == ReviewStartTrigger.Automatic)
             {
                 // 判定後にここへ到達するのは、判定と起動の間に別のレビューが始まった場合のみ
-                await LogAutoStartSkipAsync(reviewEvent, ReviewAutoStartPolicy.BusyReasonText);
+                await HoldAsync(reviewEvent);
             }
 
             return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
@@ -232,6 +243,12 @@ internal sealed class ReviewStartCoordinator
             }
 
             AgentExecutionSession session = _launcherService.StartSession(reviewEvent, role, CancellationToken.None);
+            if (role == LauncherRole.Reviewer)
+            {
+                // 手動起動でも、同じ PR のレビューを始めた時点で保留分を再評価する意味はなくなる
+                _pendingQueue.RemovePullRequest(reviewEvent);
+            }
+
             return ReviewStartResult.Launched(
                 new ReviewStartLaunch(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor));
         }
@@ -269,6 +286,17 @@ internal sealed class ReviewStartCoordinator
             ReviewAutoStartOutcome.SkippedDisabled => ReviewStartStatus.SkippedDisabled,
             ReviewAutoStartOutcome.SkippedUnsupportedReason => ReviewStartStatus.SkippedUnsupportedReason,
             _ => ReviewStartStatus.SkippedBusy,
+        };
+
+    private Task HoldAsync(ReviewEvent reviewEvent)
+        => _pendingQueue.AddOrReplace(reviewEvent) switch
+        {
+            PendingReviewStartChange.Added => _loggingService.WriteAsync(
+                $"[Auto] {reviewEvent.PrCaption} のレビューを保留しました: {ReviewAutoStartPolicy.BusyReasonText}。"
+                + $"実行終了後に自動起動します（reason: {reviewEvent.Reason}）。"),
+            PendingReviewStartChange.Replaced => _loggingService.WriteAsync(
+                $"[Auto] 保留中の {reviewEvent.PrCaption} を新しいイベントで更新しました（reason: {reviewEvent.Reason}）。"),
+            _ => Task.CompletedTask,
         };
 
     private Task LogAutoStartSkipAsync(ReviewEvent reviewEvent, string reason)

@@ -1278,6 +1278,68 @@ public class ReviewLauncherServiceTests : IDisposable
         (await firstRun).Success.Should().BeTrue();
     }
 
+    // 保留したレビューの再評価（#339）は、IsRunning が false に戻った後でないと再び実行中と判定される
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(0, true)]
+    public async Task RunCompleted_ShouldBeRaisedOnceAfterIsRunningReturnsToFalse(int exitCode, bool processStartThrows)
+    {
+        // Arrange
+        ConfigureSettings();
+        var mockRunner = new Mock<IProcessRunner>();
+        if (processStartThrows)
+        {
+            mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Throws(new InvalidOperationException("start failed"));
+        }
+        else
+        {
+            mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(CreateMockProcess(exitCode, "", "").Object);
+        }
+
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        var raised = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int raisedCount = 0;
+        service.RunCompleted += (_, _) =>
+        {
+            Interlocked.Increment(ref raisedCount);
+            raised.TrySetResult(service.IsRunning);
+        };
+
+        // Act
+        await service.LaunchAsync(CreateReviewEvent("test-run-completed"), LauncherRole.Reviewer, CancellationToken.None);
+        bool isRunningWhenRaised = await raised.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        isRunningWhenRaised.Should().BeFalse();
+        raisedCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RunCompleted_ShouldNotBeRaised_WhenStartIsRejectedWhileRunning()
+    {
+        // Arrange
+        ConfigureSettings();
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns(CreateMockProcess(0, "", "", delayMs: 500).Object);
+        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        int raisedCount = 0;
+        service.RunCompleted += (_, _) => Interlocked.Increment(ref raisedCount);
+
+        // Act: 1 本目の実行中に拒否される 2 本目を開始し、1 本目の終了まで待つ
+        var firstCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.RunCompleted += (_, _) => firstCompleted.TrySetResult();
+        AgentExecutionSession first = service.StartSession(CreateReviewEvent("test-run-completed-1"), LauncherRole.Reviewer, CancellationToken.None);
+        AgentExecutionSession rejected = service.StartSession(CreateReviewEvent("test-run-completed-2"), LauncherRole.Reviewer, CancellationToken.None);
+        await rejected.Completion;
+        await first.Completion;
+        await firstCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        raisedCount.Should().Be(1);
+    }
+
     [Fact]
     public async Task LaunchAsync_ShouldDecodeUtf8BomOutputCorrectly_WithoutLatin1Corruption()
     {

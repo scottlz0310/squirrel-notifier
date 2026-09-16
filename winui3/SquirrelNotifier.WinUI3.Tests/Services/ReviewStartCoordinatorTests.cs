@@ -17,6 +17,7 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
 
     private readonly string _workingDirectory = Path.Combine(Path.GetTempPath(), $"ReviewStartCoordinatorTests_{Guid.NewGuid()}");
     private readonly List<string> _logLines = [];
+    private readonly PendingReviewStartQueue _pendingQueue = new();
 
     [Theory]
     [InlineData("Reviewer", "Manual")]
@@ -57,10 +58,11 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         result.Launch!.ViewModel.Title.Should().Be($"owner/repo#42（{expectedRoleLabel}）");
     }
 
+    // 自動起動では、判定と起動の間に別のレビューが始まった場合も保留する（#339）
     [Theory]
     [InlineData("Manual", false)]
     [InlineData("Automatic", true)]
-    public async Task StartAsync_ShouldSkipBusy_WhenAnotherReviewIsRunning(string trigger, bool expectsLog)
+    public async Task StartAsync_ShouldSkipBusy_WhenAnotherReviewIsRunning(string trigger, bool expectsHeld)
     {
         FakeLauncherService launcher = new() { IsRunning = true };
         ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
@@ -75,7 +77,36 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         result.Launch.Should().BeNull();
         launcher.StartSessionCalls.Should().BeEmpty();
         _logLines.Any(line => line.Contains(ReviewAutoStartPolicy.BusyReasonText, StringComparison.Ordinal))
-            .Should().Be(expectsLog);
+            .Should().Be(expectsHeld);
+        _pendingQueue.Count.Should().Be(expectsHeld ? 1 : 0);
+    }
+
+    [Theory]
+    [InlineData("Reviewer", "Manual", false, 0)]
+    [InlineData("Reviewer", "Automatic", false, 0)]
+    [InlineData("Reviewed", "Manual", false, 1)]
+    [InlineData("Reviewer", "Manual", true, 1)]
+    public async Task StartAsync_ShouldRemovePendingPullRequest_OnlyWhenReviewerStarts(
+        string role,
+        string trigger,
+        bool startSessionThrows,
+        int expectedPendingCount)
+    {
+        // 保留は reviewer の起動を待つためのもの。reviewed 側の起動や起動失敗では外さない
+        FakeLauncherService launcher = new()
+        {
+            StartSessionException = startSessionThrows ? new InvalidOperationException("起動できません") : null,
+        };
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
+        _pendingQueue.AddOrReplace(CreateReviewEvent("synchronized"));
+
+        await coordinator.StartAsync(
+            CreateReviewEvent(),
+            Enum.Parse<LauncherRole>(role),
+            Enum.Parse<ReviewStartTrigger>(trigger),
+            _ => Task.FromResult(true));
+
+        _pendingQueue.Count.Should().Be(expectedPendingCount);
     }
 
     [Fact]
@@ -335,18 +366,58 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
     }
 
     [Fact]
-    public async Task TryStartAutomaticallyAsync_ShouldSkipBusy_WhenAnotherReviewIsRunning()
+    public async Task TryStartAutomaticallyAsync_ShouldHoldEvent_WhenAnotherReviewIsRunning()
     {
         FakeLauncherService launcher = new() { IsRunning = true };
         SettingsService settingsService = CreateSettingsService();
         settingsService.UpdateAutoReviewStartEnabled(true);
         ReviewStartCoordinator coordinator = CreateCoordinator(launcher, settingsService);
+        ReviewEvent reviewEvent = CreateReviewEvent();
 
-        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(CreateReviewEvent());
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(reviewEvent);
 
         result.Status.Should().Be(ReviewStartStatus.SkippedBusy);
-        _logLines.Should().ContainSingle(line =>
-            line.Contains(ReviewAutoStartPolicy.BusyReasonText, StringComparison.Ordinal));
+        _pendingQueue.Peek().Should().BeSameAs(reviewEvent);
+        _logLines.Should().ContainSingle().Which.Should().Contain(
+            $"[Auto] owner/repo #42 のレビューを保留しました: {ReviewAutoStartPolicy.BusyReasonText}。実行終了後に自動起動します（reason: opened）。");
+    }
+
+    [Theory]
+    [InlineData("owner/repo", 42, 1, 1, "保留中の owner/repo #42 を新しいイベントで更新しました（reason: re-review-requested）。")]
+    [InlineData("owner/repo", 43, 0, 2, "owner/repo #43 のレビューを保留しました")]
+    [InlineData("owner/repo", 42, -1, 1, null)]
+    public async Task TryStartAutomaticallyAsync_ShouldLogHoldChange_WhenAnotherEventArrivesWhileRunning(
+        string repository,
+        int prNumber,
+        int receivedOffsetSeconds,
+        int expectedPendingCount,
+        string? expectedLog)
+    {
+        FakeLauncherService launcher = new() { IsRunning = true };
+        SettingsService settingsService = CreateSettingsService();
+        settingsService.UpdateAutoReviewStartEnabled(true);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, settingsService);
+        ReviewEvent first = CreateReviewEvent("synchronized");
+        await coordinator.TryStartAutomaticallyAsync(first);
+        _logLines.Clear();
+
+        await coordinator.TryStartAutomaticallyAsync(new ReviewEvent
+        {
+            Repository = repository,
+            PrNumber = prNumber,
+            Reason = "re-review-requested",
+            ReceivedTime = first.ReceivedTime.AddSeconds(receivedOffsetSeconds),
+        });
+
+        _pendingQueue.Count.Should().Be(expectedPendingCount);
+        if (expectedLog is null)
+        {
+            _logLines.Should().BeEmpty();
+        }
+        else
+        {
+            _logLines.Should().ContainSingle().Which.Should().Contain(expectedLog);
+        }
     }
 
     [Fact]
@@ -403,6 +474,7 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             settingsService ?? CreateSettingsService(),
             new RateLimitSnapshotService(new RateLimitFileService(_workingDirectory)),
             new AutoPauseGate(),
+            _pendingQueue,
             loggingService);
     }
 
@@ -419,6 +491,12 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
 
     private sealed class FakeLauncherService : IReviewLauncherService
     {
+        public event EventHandler? RunCompleted
+        {
+            add { }
+            remove { }
+        }
+
         public bool IsRunning { get; set; }
 
         public Exception? StartSessionException { get; set; }
