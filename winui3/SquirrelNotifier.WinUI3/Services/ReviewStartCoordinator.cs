@@ -18,7 +18,7 @@ internal enum ReviewStartStatus
     /// <summary>起動した.</summary>
     Started,
 
-    /// <summary>起動処理が進行中のため見送った（ボタン連打などによる再入）.</summary>
+    /// <summary>起動処理が進行中のため見送った（ボタン連打などによる再入）。自動起動では <see cref="SkippedBusy"/> として保留する.</summary>
     SkippedReentrant,
 
     /// <summary>別のレビューが実行中のため見送った.</summary>
@@ -81,6 +81,7 @@ internal sealed class ReviewStartCoordinator
     private readonly SettingsService _settingsService;
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate;
+    private readonly PendingReviewStartQueue _pendingQueue;
     private readonly LoggingService _loggingService;
 
     // Auto-Pause 確認ダイアログ等の await 中は IsRunning がまだ false のため、起動ボタンの
@@ -92,27 +93,38 @@ internal sealed class ReviewStartCoordinator
         SettingsService settingsService,
         RateLimitSnapshotService rateLimitSnapshotService,
         AutoPauseGate autoPauseGate,
+        PendingReviewStartQueue pendingQueue,
         LoggingService loggingService)
     {
         ArgumentNullException.ThrowIfNull(launcherService);
         ArgumentNullException.ThrowIfNull(settingsService);
         ArgumentNullException.ThrowIfNull(rateLimitSnapshotService);
         ArgumentNullException.ThrowIfNull(autoPauseGate);
+        ArgumentNullException.ThrowIfNull(pendingQueue);
         ArgumentNullException.ThrowIfNull(loggingService);
 
         _launcherService = launcherService;
         _settingsService = settingsService;
         _rateLimitSnapshotService = rateLimitSnapshotService;
         _autoPauseGate = autoPauseGate;
+        _pendingQueue = pendingQueue;
         _loggingService = loggingService;
     }
+
+    /// <summary>
+    /// 起動処理を始めたが、セッションを起動せずに終わったときに発生する（確認ダイアログのキャンセル・Auto-Pause・
+    /// 起動失敗・キャンセル例外）。その間に保留したイベントは実行終了（<see cref="IReviewLauncherService.RunCompleted"/>）を
+    /// 待っても再評価されないため、再評価の契機に使う（#339）。起動処理を呼び出したスレッドで発生する.
+    /// </summary>
+    public event EventHandler? StartAbandoned;
 
     /// <summary>Gets a value indicating whether 起動処理が進行中、または実行中のレビューがあるか.</summary>
     public bool IsBusy => _isStartPending || _launcherService.IsRunning;
 
     /// <summary>
     /// 「レビュー自動開始」設定（#254）に従って reviewer を自動起動する。
-    /// 起動を見送った場合はその理由を Recent activity へ残す.
+    /// 起動を見送った場合はその理由を Recent activity へ残す。別のレビューが実行中で見送った場合は、
+    /// 実行終了後に再評価するためイベントを保留する（#339）.
     /// </summary>
     /// <param name="reviewEvent">受信したレビューイベント.</param>
     /// <returns>起動結果.</returns>
@@ -124,6 +136,12 @@ internal sealed class ReviewStartCoordinator
             _settingsService.Settings.AutoReviewStartEnabled,
             reviewEvent.Reason,
             IsBusy);
+
+        if (outcome == ReviewAutoStartOutcome.SkippedBusy)
+        {
+            await HoldAsync(reviewEvent);
+            return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
+        }
 
         if (ReviewAutoStartPolicy.DescribeSkipReason(outcome) is string skipReason)
         {
@@ -177,6 +195,14 @@ internal sealed class ReviewStartCoordinator
         // 多重表示例外の原因になるため（#147 レビュー指摘）
         if (_isStartPending)
         {
+            if (trigger == ReviewStartTrigger.Automatic)
+            {
+                // 自動起動の判定後、ログ書き込みの await 中に手動起動が始まった場合に到達する。
+                // 実行中と同じく保留しないと、再評価中のイベントが起動されないまま失われる（#339）
+                await HoldAsync(reviewEvent);
+                return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
+            }
+
             return ReviewStartResult.Skipped(ReviewStartStatus.SkippedReentrant);
         }
 
@@ -185,13 +211,14 @@ internal sealed class ReviewStartCoordinator
             if (trigger == ReviewStartTrigger.Automatic)
             {
                 // 判定後にここへ到達するのは、判定と起動の間に別のレビューが始まった場合のみ
-                await LogAutoStartSkipAsync(reviewEvent, ReviewAutoStartPolicy.BusyReasonText);
+                await HoldAsync(reviewEvent);
             }
 
             return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
         }
 
         _isStartPending = true;
+        bool launched = false;
         try
         {
             AppSettings settings = _settingsService.Settings;
@@ -232,6 +259,13 @@ internal sealed class ReviewStartCoordinator
             }
 
             AgentExecutionSession session = _launcherService.StartSession(reviewEvent, role, CancellationToken.None);
+            launched = true;
+            if (role == LauncherRole.Reviewer)
+            {
+                // 手動起動でも、同じ PR のレビューを始めた時点で保留分を再評価する意味はなくなる
+                _pendingQueue.RemovePullRequest(reviewEvent);
+            }
+
             return ReviewStartResult.Launched(
                 new ReviewStartLaunch(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor));
         }
@@ -254,6 +288,10 @@ internal sealed class ReviewStartCoordinator
         {
             // StartSession 成功後の同時実行抑止は _launcherService.IsRunning が担う
             _isStartPending = false;
+            if (!launched)
+            {
+                StartAbandoned?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
 
@@ -269,6 +307,17 @@ internal sealed class ReviewStartCoordinator
             ReviewAutoStartOutcome.SkippedDisabled => ReviewStartStatus.SkippedDisabled,
             ReviewAutoStartOutcome.SkippedUnsupportedReason => ReviewStartStatus.SkippedUnsupportedReason,
             _ => ReviewStartStatus.SkippedBusy,
+        };
+
+    private Task HoldAsync(ReviewEvent reviewEvent)
+        => _pendingQueue.AddOrReplace(reviewEvent) switch
+        {
+            PendingReviewStartChange.Added => _loggingService.WriteAsync(
+                $"[Auto] {reviewEvent.PrCaption} のレビューを保留しました: {ReviewAutoStartPolicy.BusyReasonText}。"
+                + $"実行終了後に自動起動します（reason: {reviewEvent.Reason}）。"),
+            PendingReviewStartChange.Replaced => _loggingService.WriteAsync(
+                $"[Auto] 保留中の {reviewEvent.PrCaption} を新しいイベントで更新しました（reason: {reviewEvent.Reason}）。"),
+            _ => Task.CompletedTask,
         };
 
     private Task LogAutoStartSkipAsync(ReviewEvent reviewEvent, string reason)

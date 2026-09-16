@@ -145,7 +145,9 @@ uninstall.cmd -KeepSettings
 - **Checkout Mappings**: reviewed 側の「レビューに対応」で使う checkout を `owner/repo=C:\src\repo` 形式で1行に1件指定
 - **レビュー自動開始**: review event を受信した時点で reviewer 側エージェントを自動起動するか（既定は無効）
 
-「レビュー自動開始」を有効にすると、`opened` / `synchronized` / `re-review-requested` のイベント受信時に「レビューする」を押したのと同じ経路でエージェントが起動します。無人で起動するため、[Auto-Pause](docs/auto-pause.md) が Paused のとき、および別のレビューが実行中のときは自動起動せず、理由をメイン画面の「Recent activity」に記録します（Auto-Pause の強行確認ダイアログは自動起動では表示しません）。自動起動を見送ったイベントはイベント一覧に残るため、「レビューする」から手動で起動できます。
+「レビュー自動開始」を有効にすると、`opened` / `synchronized` / `re-review-requested` のイベント受信時に「レビューする」を押したのと同じ経路でエージェントが起動します。無人で起動するため、[Auto-Pause](docs/auto-pause.md) が Paused のときは自動起動せず、理由をメイン画面の「Recent activity」に記録します（Auto-Pause の強行確認ダイアログは自動起動では表示しません）。自動起動を見送ったイベントはイベント一覧に残るため、「レビューする」から手動で起動できます。
+
+別のレビューの実行中、または起動処理中（Auto-Pause の強行確認ダイアログの表示中など）に届いたイベントは保留し、実行が終わった時点、または起動処理がレビューを起動せずに終わった時点で、受信順に 1 件ずつ自動起動を再評価します。同じ PR のイベントは 1 件にまとめ、新しいほうの reason で起動します。再評価でも自動起動の設定・Auto-Pause・PR の状態（マージ・クローズ済みなら起動しない）を確認し、イベント一覧から削除されたイベントは起動しません。保留と再評価の結果は「Recent activity」に記録します。前の実行のライブログウィンドウが開いている間に起動したレビューは、そのウィンドウが閉じた後にウィンドウを表示します。保留はアプリの再起動で失われますが、イベントは一覧に残るため手動で起動できます。
 
 launcher の作業ディレクトリはロールごとに固定されます。「レビューする」（reviewer）は `%LocalAppData%\SquirrelNotifier\launcher-workspace\reviewer` から起動し、対象 checkout を直接操作しません。「レビューに対応」（reviewed）は Checkout Mappings に登録した Git checkout から起動します。mapping が未設定、存在しない、Git checkout ではない、または Windows／Program Files／アプリのインストール先を指す場合は、プロセスを起動せずエラーにします。タスクスケジューラーやアプリの起動元ディレクトリには依存しません。
 

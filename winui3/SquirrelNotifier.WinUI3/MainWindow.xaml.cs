@@ -46,6 +46,7 @@ internal sealed partial class MainWindow : Window
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate = new();
     private readonly SubscriptionStateCoordinator _subscriptionStateCoordinator = new();
+    private readonly PendingReviewStartQueue _pendingReviewStartQueue = new();
     private readonly ReviewStartCoordinator _reviewStartCoordinator;
     private readonly TrayCommandCoordinator _trayCommandCoordinator;
     private readonly WindowLifecycleCoordinator _windowLifecycleCoordinator;
@@ -148,6 +149,7 @@ internal sealed partial class MainWindow : Window
             _settingsService,
             _rateLimitSnapshotService,
             _autoPauseGate,
+            _pendingReviewStartQueue,
             _loggingService);
         _agentExecutionWindowCoordinator = new AgentExecutionWindowCoordinator(
             launch => new AgentExecutionWindowAdapter(
@@ -161,7 +163,11 @@ internal sealed partial class MainWindow : Window
         _reviewEventProcessingCoordinator = new ReviewEventProcessingCoordinator(
             _reviewEventCollectionCoordinator,
             _reviewEventCleanupCoordinator,
+            _pendingReviewStartQueue,
+            _loggingService,
             _reviewStartCoordinator.TryStartAutomaticallyAsync);
+        _launcherService.RunCompleted += OnPendingReviewReevaluationRequested;
+        _reviewStartCoordinator.StartAbandoned += OnPendingReviewReevaluationRequested;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -350,6 +356,8 @@ internal sealed partial class MainWindow : Window
         _service.StateChanged -= OnStateChanged;
         _loggingService.LogAppended -= OnLogAppended;
         _notificationService.ReviewEventReceived -= OnReviewEventReceived;
+        _launcherService.RunCompleted -= OnPendingReviewReevaluationRequested;
+        _reviewStartCoordinator.StartAbandoned -= OnPendingReviewReevaluationRequested;
         _reviewEventCleanupCoordinator.EventsRemoved -= OnReviewEventsRemoved;
         _notificationService.NotificationRequested -= OnNotificationRequested;
         _rateLimitReminderService.ReminderFired -= OnRateLimitReminderFired;
@@ -872,6 +880,34 @@ internal sealed partial class MainWindow : Window
             // 原因を記録したうえでバルーン通知へフォールバックする
             await _loggingService.WriteAsync($"[UI] Failed to handle review event: {ex.Message}");
             _reviewNotificationCoordinator.ShowFallback(reviewEvent, isAutoStarted: false);
+        }
+    }
+
+    // 実行終了と、起動せずに終わった起動処理のどちらでも保留を再評価する（#339）
+    private void OnPendingReviewReevaluationRequested(object? sender, EventArgs e)
+    {
+        if (!DispatcherQueue.TryEnqueue(StartPendingReview))
+        {
+            _ = _loggingService.WriteAsync("保留中のレビューの再評価を UI へ配送できませんでした。");
+        }
+    }
+
+    // 実行中のため保留したレビューを再評価する（#339）。判断は ReviewEventProcessingCoordinator が持つ
+    private async void StartPendingReview()
+    {
+        try
+        {
+            PendingReviewStartResult? pending = await _reviewEventProcessingCoordinator.ProcessPendingAsync();
+            if (pending is not null)
+            {
+                _agentExecutionWindowCoordinator.Show(pending.StartResult);
+                _reviewNotificationCoordinator.Show(pending.ReviewEvent, isAutoStarted: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            // async void のため例外はここで確実に捕捉する。保留中のイベントは一覧に残っている
+            await _loggingService.WriteAsync($"[UI] Failed to start pending review: {ex.Message}");
         }
     }
 
