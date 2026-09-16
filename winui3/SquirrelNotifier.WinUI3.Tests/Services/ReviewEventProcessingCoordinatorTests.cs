@@ -261,6 +261,48 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
         statusClient.Calls.Should().ContainSingle();
     }
 
+    // 実行終了と起動放棄の両方が再評価を促すため、再評価の await 中に再び呼ばれ得る。
+    // 重ねて評価すると同じイベントを二重に起動し得るので、進行中の再評価の後に評価し直す（#339）
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldReevaluateAfterCurrentRun_WhenCalledDuringReevaluation()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent pendingEvent = CreateReviewEvent();
+        AddPending(collectionCoordinator, pendingQueue, pendingEvent);
+        TaskCompletionSource firstStartEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<ReviewStartResult> firstStartResult = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int startCalls = 0;
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            _ =>
+            {
+                startCalls++;
+                if (startCalls == 1)
+                {
+                    firstStartEntered.SetResult();
+                    return firstStartResult.Task;
+                }
+
+                return Task.FromResult(CreateStartedResult());
+            },
+            pendingQueue);
+
+        Task<PendingReviewStartResult?> current = coordinator.ProcessPendingAsync();
+        await firstStartEntered.Task;
+        PendingReviewStartResult? overlapping = await coordinator.ProcessPendingAsync();
+        firstStartResult.SetResult(ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy));
+        PendingReviewStartResult? result = await current;
+
+        overlapping.Should().BeNull();
+        startCalls.Should().Be(2);
+        result!.ReviewEvent.Should().BeSameAs(pendingEvent);
+        pendingQueue.Count.Should().Be(0);
+    }
+
     [Fact]
     public async Task ProcessPendingAsync_ShouldReturnNull_WhenNothingIsPending()
     {

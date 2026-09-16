@@ -181,16 +181,23 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         result.Status.Should().Be(ReviewStartStatus.Started);
     }
 
-    [Fact]
-    public async Task StartAsync_ShouldSkipReentrant_WhenCalledWhileOverridePromptIsOpen()
+    // 確認ダイアログの表示中はまだ IsRunning が false のため、連打による再入は
+    // 起動中フラグだけが止められる（#147 レビュー指摘の多重表示回帰）。
+    // 自動起動の再入は、実行中と同じく保留しないとイベントが失われる（#339）
+    [Theory]
+    [InlineData("Manual", "SkippedReentrant", 0)]
+    [InlineData("Automatic", "SkippedBusy", 1)]
+    public async Task StartAsync_ShouldNotStartReentrantCall_WhenCalledWhileOverridePromptIsOpen(
+        string reentrantTrigger,
+        string expectedStatus,
+        int expectedPendingCount)
     {
         await WriteSnapshotAsync(_pausedAgentId, usedPercentage: 96);
         FakeLauncherService launcher = new();
         ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
         ReviewStartResult? reentrantResult = null;
+        ReviewEvent reentrantEvent = new() { Repository = "owner/repo", PrNumber = 43, Reason = "opened" };
 
-        // 確認ダイアログの表示中はまだ IsRunning が false のため、連打による再入は
-        // 起動中フラグだけが止められる（#147 レビュー指摘の多重表示回帰）
         ReviewStartResult result = await coordinator.StartAsync(
             CreateReviewEvent(),
             LauncherRole.Reviewer,
@@ -198,16 +205,103 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             async _ =>
             {
                 reentrantResult = await coordinator.StartAsync(
-                    CreateReviewEvent(),
+                    reentrantEvent,
                     LauncherRole.Reviewer,
-                    ReviewStartTrigger.Manual,
+                    Enum.Parse<ReviewStartTrigger>(reentrantTrigger),
                     _ => Task.FromResult(true));
                 return true;
             });
 
         result.Status.Should().Be(ReviewStartStatus.Started);
-        reentrantResult!.Status.Should().Be(ReviewStartStatus.SkippedReentrant);
+        reentrantResult!.Status.Should().Be(Enum.Parse<ReviewStartStatus>(expectedStatus));
         launcher.StartSessionCalls.Should().ContainSingle();
+        _pendingQueue.Count.Should().Be(expectedPendingCount);
+    }
+
+    // 再評価中の自動起動がログ書き込みを await している間に手動起動が始まると、自動起動は再入になる。
+    // このとき保留を失わず、手動起動が起動せずに終わったら StartAbandoned で再評価を促す（#339 レビュー指摘）
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldKeepPendingEvent_WhenManualStartBeginsDuringAutoStartLog()
+    {
+        await WriteSnapshotAsync(_pausedAgentId, usedPercentage: 96);
+        FakeLauncherService launcher = new();
+        SettingsService settingsService = CreateSettingsService();
+        settingsService.UpdateAutoReviewStartEnabled(true);
+        TaskCompletionSource<bool> overridePrompt = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<ReviewStartResult>? manualStart = null;
+        ReviewStartCoordinator? coordinator = null;
+        coordinator = CreateCoordinator(launcher, settingsService, line =>
+        {
+            if (manualStart is null && line.Contains("のレビューを自動起動します", StringComparison.Ordinal))
+            {
+                manualStart = coordinator!.StartAsync(
+                    new ReviewEvent { Repository = "owner/repo", PrNumber = 43, Reason = "opened" },
+                    LauncherRole.Reviewer,
+                    ReviewStartTrigger.Manual,
+                    _ => overridePrompt.Task);
+            }
+        });
+        int abandonedCount = 0;
+        coordinator.StartAbandoned += (_, _) => Interlocked.Increment(ref abandonedCount);
+        ReviewEvent pendingEvent = CreateReviewEvent();
+        _pendingQueue.AddOrReplace(pendingEvent);
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(pendingEvent);
+
+        result.Status.Should().Be(ReviewStartStatus.SkippedBusy);
+        _pendingQueue.Peek().Should().BeSameAs(pendingEvent);
+        abandonedCount.Should().Be(0);
+
+        overridePrompt.SetResult(false);
+        (await manualStart!).Status.Should().Be(ReviewStartStatus.CancelledByUser);
+
+        launcher.StartSessionCalls.Should().BeEmpty();
+        _pendingQueue.Peek().Should().BeSameAs(pendingEvent);
+        abandonedCount.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("Started", 0)]
+    [InlineData("SkippedBusy", 0)]
+    [InlineData("CancelledByUser", 1)]
+    [InlineData("SkippedAutoPaused", 1)]
+    [InlineData("Failed", 1)]
+    [InlineData("Cancelled", 1)]
+    public async Task StartAsync_ShouldRaiseStartAbandoned_OnlyWhenStartBeganWithoutLaunching(
+        string scenario,
+        int expectedAbandonedCount)
+    {
+        await WriteSnapshotAsync(
+            _pausedAgentId,
+            usedPercentage: scenario is "CancelledByUser" or "SkippedAutoPaused" ? 96 : 42);
+        FakeLauncherService launcher = new()
+        {
+            IsRunning = scenario == "SkippedBusy",
+            StartSessionException = scenario == "Failed" ? new InvalidOperationException("起動できません") : null,
+        };
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
+        int abandonedCount = 0;
+        coordinator.StartAbandoned += (_, _) => abandonedCount++;
+        using CancellationTokenSource cts = new();
+        if (scenario == "Cancelled")
+        {
+            await cts.CancelAsync();
+        }
+
+        try
+        {
+            await coordinator.StartAsync(
+                CreateReviewEvent(),
+                LauncherRole.Reviewer,
+                scenario == "SkippedAutoPaused" ? ReviewStartTrigger.Automatic : ReviewStartTrigger.Manual,
+                _ => Task.FromResult(false),
+                cts.Token);
+        }
+        catch (OperationCanceledException) when (scenario == "Cancelled")
+        {
+        }
+
+        abandonedCount.Should().Be(expectedAbandonedCount);
     }
 
     [Theory]
@@ -465,10 +559,15 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
 
     private ReviewStartCoordinator CreateCoordinator(
         IReviewLauncherService launcherService,
-        SettingsService? settingsService = null)
+        SettingsService? settingsService = null,
+        Action<string>? onLogAppended = null)
     {
         LoggingService loggingService = new(_workingDirectory);
-        loggingService.LogAppended += (_, line) => _logLines.Add(line);
+        loggingService.LogAppended += (_, line) =>
+        {
+            _logLines.Add(line);
+            onLogAppended?.Invoke(line);
+        };
         return new ReviewStartCoordinator(
             launcherService,
             settingsService ?? CreateSettingsService(),

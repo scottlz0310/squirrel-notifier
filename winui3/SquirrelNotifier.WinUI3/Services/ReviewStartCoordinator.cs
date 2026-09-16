@@ -18,7 +18,7 @@ internal enum ReviewStartStatus
     /// <summary>起動した.</summary>
     Started,
 
-    /// <summary>起動処理が進行中のため見送った（ボタン連打などによる再入）.</summary>
+    /// <summary>起動処理が進行中のため見送った（ボタン連打などによる再入）。自動起動では <see cref="SkippedBusy"/> として保留する.</summary>
     SkippedReentrant,
 
     /// <summary>別のレビューが実行中のため見送った.</summary>
@@ -111,6 +111,13 @@ internal sealed class ReviewStartCoordinator
         _loggingService = loggingService;
     }
 
+    /// <summary>
+    /// 起動処理を始めたが、セッションを起動せずに終わったときに発生する（確認ダイアログのキャンセル・Auto-Pause・
+    /// 起動失敗・キャンセル例外）。その間に保留したイベントは実行終了（<see cref="IReviewLauncherService.RunCompleted"/>）を
+    /// 待っても再評価されないため、再評価の契機に使う（#339）。起動処理を呼び出したスレッドで発生する.
+    /// </summary>
+    public event EventHandler? StartAbandoned;
+
     /// <summary>Gets a value indicating whether 起動処理が進行中、または実行中のレビューがあるか.</summary>
     public bool IsBusy => _isStartPending || _launcherService.IsRunning;
 
@@ -188,6 +195,14 @@ internal sealed class ReviewStartCoordinator
         // 多重表示例外の原因になるため（#147 レビュー指摘）
         if (_isStartPending)
         {
+            if (trigger == ReviewStartTrigger.Automatic)
+            {
+                // 自動起動の判定後、ログ書き込みの await 中に手動起動が始まった場合に到達する。
+                // 実行中と同じく保留しないと、再評価中のイベントが起動されないまま失われる（#339）
+                await HoldAsync(reviewEvent);
+                return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
+            }
+
             return ReviewStartResult.Skipped(ReviewStartStatus.SkippedReentrant);
         }
 
@@ -203,6 +218,7 @@ internal sealed class ReviewStartCoordinator
         }
 
         _isStartPending = true;
+        bool launched = false;
         try
         {
             AppSettings settings = _settingsService.Settings;
@@ -243,6 +259,7 @@ internal sealed class ReviewStartCoordinator
             }
 
             AgentExecutionSession session = _launcherService.StartSession(reviewEvent, role, CancellationToken.None);
+            launched = true;
             if (role == LauncherRole.Reviewer)
             {
                 // 手動起動でも、同じ PR のレビューを始めた時点で保留分を再評価する意味はなくなる
@@ -271,6 +288,10 @@ internal sealed class ReviewStartCoordinator
         {
             // StartSession 成功後の同時実行抑止は _launcherService.IsRunning が担う
             _isStartPending = false;
+            if (!launched)
+            {
+                StartAbandoned?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
 

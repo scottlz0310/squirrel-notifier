@@ -16,6 +16,8 @@ internal sealed class ReviewEventProcessingCoordinator
     private readonly PendingReviewStartQueue _pendingQueue;
     private readonly LoggingService _loggingService;
     private readonly Func<ReviewEvent, Task<ReviewStartResult>> _tryStartAutomaticallyAsync;
+    private bool _isProcessingPending;
+    private bool _isReprocessRequested;
 
     public ReviewEventProcessingCoordinator(
         ReviewEventCollectionCoordinator collectionCoordinator,
@@ -63,10 +65,39 @@ internal sealed class ReviewEventProcessingCoordinator
     /// 一覧から消えたイベント（手動削除・保持上限による押し出し・終了済み PR の自動削除）と、
     /// 終了済みと判明した PR は起動せずに保留から外す。再評価でも通常の自動起動と同じ判定を通すため、
     /// 設定 off・Auto-Pause で見送ったイベントも保留から外れる。再び実行中と判定された場合は、
-    /// 保留を残したまま次の実行終了を待つ.
+    /// 保留を残したまま次の実行終了を待つ。
+    /// 再評価の await 中に呼ばれた場合は重ねて評価せず（同じイベントを二重に起動し得るため）、
+    /// 進行中の再評価が終わった後に評価し直す.
     /// </remarks>
     /// <returns>起動したイベントと結果。起動しなかった場合は <see langword="null"/>.</returns>
     public async Task<PendingReviewStartResult?> ProcessPendingAsync()
+    {
+        if (_isProcessingPending)
+        {
+            _isReprocessRequested = true;
+            return null;
+        }
+
+        _isProcessingPending = true;
+        try
+        {
+            PendingReviewStartResult? started;
+            do
+            {
+                _isReprocessRequested = false;
+                started = await StartFirstPendingAsync();
+            }
+            while (started is null && _isReprocessRequested);
+
+            return started;
+        }
+        finally
+        {
+            _isProcessingPending = false;
+        }
+    }
+
+    private async Task<PendingReviewStartResult?> StartFirstPendingAsync()
     {
         while (_pendingQueue.Peek() is ReviewEvent pendingEvent)
         {

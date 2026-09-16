@@ -166,7 +166,8 @@ internal sealed partial class MainWindow : Window
             _pendingReviewStartQueue,
             _loggingService,
             _reviewStartCoordinator.TryStartAutomaticallyAsync);
-        _launcherService.RunCompleted += OnLauncherRunCompleted;
+        _launcherService.RunCompleted += OnPendingReviewReevaluationRequested;
+        _reviewStartCoordinator.StartAbandoned += OnPendingReviewReevaluationRequested;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -355,7 +356,8 @@ internal sealed partial class MainWindow : Window
         _service.StateChanged -= OnStateChanged;
         _loggingService.LogAppended -= OnLogAppended;
         _notificationService.ReviewEventReceived -= OnReviewEventReceived;
-        _launcherService.RunCompleted -= OnLauncherRunCompleted;
+        _launcherService.RunCompleted -= OnPendingReviewReevaluationRequested;
+        _reviewStartCoordinator.StartAbandoned -= OnPendingReviewReevaluationRequested;
         _reviewEventCleanupCoordinator.EventsRemoved -= OnReviewEventsRemoved;
         _notificationService.NotificationRequested -= OnNotificationRequested;
         _rateLimitReminderService.ReminderFired -= OnRateLimitReminderFired;
@@ -881,7 +883,8 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private void OnLauncherRunCompleted(object? sender, EventArgs e)
+    // 実行終了と、起動せずに終わった起動処理のどちらでも保留を再評価する（#339）
+    private void OnPendingReviewReevaluationRequested(object? sender, EventArgs e)
     {
         if (!DispatcherQueue.TryEnqueue(StartPendingReview))
         {
