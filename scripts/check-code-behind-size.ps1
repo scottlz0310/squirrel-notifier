@@ -27,12 +27,14 @@ $limits = [ordered]@{
     # 監視対象選択、Recent activity のログ行保持、Recent review events の一覧保持・処理順序、レビュー登録結果の分類、Gateway URL / Resource URI 入力フロー、Gateway login lifecycle、実行ウィンドウ lifecycle、レビュー通知の表示経路、Settings 入力状態を Coordinator へ移した。WinUI 固有の表示アダプターは code-behind 側に残している。
     # #305 の resume 設定欄・切替・対応状況表示の UI 配線を反映。判断は Helpers 側に配置している。
     # #339 の実行終了・起動放棄イベントの購読・UI スレッドへの配送・保留分の起動結果の表示を反映。保留と再評価の判断は Services 側に配置している。
-    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1408
+    # #340 の Auto-Pause 解除・再評価予約イベントの購読と、保留理由を通知へ渡す配線を反映。
+    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1418
     # #305 の resume 失敗メッセージを既存 InfoBar に表示する配線を反映。
     "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 318
     # #276 の status client / Coordinator の生成と終了時破棄を反映。
     "winui3/SquirrelNotifier.WinUI3/App.xaml.cs"                     = 109
-    "winui3/SquirrelNotifier.WinUI3/ReviewNotificationPopup.xaml.cs" = 82
+    # #340 の保留理由を通知の概要文へ渡す引数を反映。
+    "winui3/SquirrelNotifier.WinUI3/ReviewNotificationPopup.xaml.cs" = 83
 }
 
 $violations = New-Object System.Collections.Generic.List[string]

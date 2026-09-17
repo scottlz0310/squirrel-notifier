@@ -80,6 +80,12 @@ internal sealed class AutoPauseGate
     /// <summary>Paused な agent の集合が変化したときに発火する。メイン UI の表示更新用.</summary>
     public event EventHandler? StateChanged;
 
+    /// <summary>
+    /// Paused だった agent の解除を確認したときに発火する（#340）。<see cref="StateChanged"/> は
+    /// Pause の開始でも発火するため、Auto-Pause で保留したレビューの再評価契機には使えない.
+    /// </summary>
+    public event EventHandler? Released;
+
     // 現在 Paused な agent の根拠 limit 一覧（agentId 昇順）
     public IReadOnlyList<AutoPausedLimit> PausedLimits
         => _pausedByAgentId.Values.OrderBy(paused => paused.AgentId, StringComparer.Ordinal).ToList();
@@ -137,6 +143,7 @@ internal sealed class AutoPauseGate
         if (_pausedByAgentId.Remove(agentId))
         {
             StateChanged?.Invoke(this, EventArgs.Empty);
+            Released?.Invoke(this, EventArgs.Empty);
         }
 
         return new AutoPauseDecision(AutoPauseStatus.Allowed, null);

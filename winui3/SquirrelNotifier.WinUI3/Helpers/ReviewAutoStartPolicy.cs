@@ -36,8 +36,14 @@ internal enum ReviewAutoStartOutcome
 /// </summary>
 internal static class ReviewAutoStartPolicy
 {
+    /// <summary>別のレビューが実行中で保留したときの、通知に出す短い理由（#340）.</summary>
+    public const string BusyHoldLabel = "別のレビューが実行中";
+
+    /// <summary>Auto-Pause 中で保留したときの、通知に出す短い理由（#340）.</summary>
+    public const string AutoPausedHoldLabel = "Auto-Pause 中";
+
     /// <summary>別のレビューが実行中で自動起動を見送ったときの理由.</summary>
-    public const string BusyReasonText = "別のレビューが実行中のため";
+    public const string BusyReasonText = $"{BusyHoldLabel}のため";
 
     private const string _unsupportedReasonText = "reviewer 側のアクションを伴わない reason のため";
 

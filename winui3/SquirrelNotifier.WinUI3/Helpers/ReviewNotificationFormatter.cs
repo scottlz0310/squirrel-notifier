@@ -16,11 +16,20 @@ internal static class ReviewNotificationFormatter
     /// </summary>
     /// <param name="reviewEvent">表示対象のレビューイベント.</param>
     /// <param name="isAutoStarted">自動起動が成功したイベントかどうか.</param>
+    /// <param name="holdReason">
+    /// 再評価まで保留した理由（#339/#340）。無人運用では通知が唯一の気づく手段になるため、
+    /// 見送っただけのイベントと区別できる文言にする。保留していない場合は <see langword="null"/>.
+    /// </param>
     /// <returns>通知に表示する概要文.</returns>
-    public static string BuildSummary(ReviewEvent reviewEvent, bool isAutoStarted)
+    public static string BuildSummary(ReviewEvent reviewEvent, bool isAutoStarted, string? holdReason = null)
     {
-        return isAutoStarted
-            ? $"自動でレビューを開始しました: {reviewEvent.Repository}#{reviewEvent.PrNumber}"
-            : $"{reviewEvent.Reason}: {reviewEvent.Repository}#{reviewEvent.PrNumber}";
+        if (isAutoStarted)
+        {
+            return $"自動でレビューを開始しました: {reviewEvent.Repository}#{reviewEvent.PrNumber}";
+        }
+
+        return holdReason is null
+            ? $"{reviewEvent.Reason}: {reviewEvent.Repository}#{reviewEvent.PrNumber}"
+            : $"レビューを保留中（{holdReason}）: {reviewEvent.Repository}#{reviewEvent.PrNumber}";
     }
 }

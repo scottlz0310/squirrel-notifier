@@ -144,8 +144,11 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
             "[Auto] 保留していた owner/repo #42 の自動起動を再評価します（reason: opened）。");
     }
 
-    [Fact]
-    public async Task ProcessPendingAsync_ShouldKeepPendingEvent_WhenStillBusy()
+    // 実行中（#339）・Auto-Pause 中（#340）はどちらも保留を残し、次の契機を待つ
+    [Theory]
+    [InlineData("SkippedBusy")]
+    [InlineData("SkippedAutoPaused")]
+    public async Task ProcessPendingAsync_ShouldKeepPendingEvent_WhenStillHeld(string status)
     {
         await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
             new StubStatusClient(PullRequestLifecycleState.Open));
@@ -161,7 +164,7 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
             _ =>
             {
                 startCalls++;
-                return Task.FromResult(ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy));
+                return Task.FromResult(ReviewStartResult.Skipped(Enum.Parse<ReviewStartStatus>(status)));
             },
             pendingQueue);
 
@@ -173,10 +176,9 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
         pendingQueue.Peek().Should().BeSameAs(first);
     }
 
-    // 起動しなかった結果（設定 off・Auto-Pause・対象外・起動失敗）は保留から外し、次の保留を評価する
+    // 起動しなかった結果（設定 off・対象外・起動失敗）は保留から外し、次の保留を評価する
     [Theory]
     [InlineData("SkippedDisabled")]
-    [InlineData("SkippedAutoPaused")]
     [InlineData("SkippedUnsupportedReason")]
     [InlineData("Failed")]
     public async Task ProcessPendingAsync_ShouldDropEventAndContinue_WhenNotStarted(string firstStatus)

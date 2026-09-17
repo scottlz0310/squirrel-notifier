@@ -59,13 +59,14 @@ internal sealed class ReviewEventProcessingCoordinator
     }
 
     /// <summary>
-    /// 実行中のため保留したイベントを、保留した順に再評価し、最初に起動できた 1 件を返す（#339）.
+    /// 実行中（#339）または Auto-Pause 中（#340）のため保留したイベントを、保留した順に再評価し、
+    /// 最初に起動できた 1 件を返す.
     /// </summary>
     /// <remarks>
     /// 一覧から消えたイベント（手動削除・保持上限による押し出し・終了済み PR の自動削除）と、
     /// 終了済みと判明した PR は起動せずに保留から外す。再評価でも通常の自動起動と同じ判定を通すため、
-    /// 設定 off・Auto-Pause で見送ったイベントも保留から外れる。再び実行中と判定された場合は、
-    /// 保留を残したまま次の実行終了を待つ。
+    /// 設定 off で見送ったイベントは保留から外れる。再び実行中・Auto-Pause 中と判定された場合は、
+    /// 保留を残したまま次の契機（実行終了・Auto-Pause の解除・リセット時刻の通過）を待つ。
     /// 再評価の await 中に呼ばれた場合は重ねて評価せず（同じイベントを二重に起動し得るため）、
     /// 進行中の再評価が終わった後に評価し直す.
     /// </remarks>
@@ -118,8 +119,9 @@ internal sealed class ReviewEventProcessingCoordinator
             await _loggingService.WriteAsync(
                 $"[Auto] 保留していた {pendingEvent.PrCaption} の自動起動を再評価します（reason: {pendingEvent.Reason}）。");
             ReviewStartResult startResult = await _tryStartAutomaticallyAsync(pendingEvent);
-            if (startResult.Status == ReviewStartStatus.SkippedBusy)
+            if (startResult.Status is ReviewStartStatus.SkippedBusy or ReviewStartStatus.SkippedAutoPaused)
             {
+                // 保留したまま。後続の保留も同じ判定になるため、次の契機を待つ
                 return null;
             }
 

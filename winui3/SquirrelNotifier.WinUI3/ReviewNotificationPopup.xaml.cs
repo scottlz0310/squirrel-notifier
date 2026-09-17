@@ -37,11 +37,12 @@ public sealed partial class ReviewNotificationPopup : UserControl
     /// このイベントで reviewer を自動起動したか（#254）。自動起動済みの場合は事後報告に徹し、
     /// 押しても同時実行抑止で弾かれるだけの「レビューする」を出さない.
     /// </param>
-    internal void SetReviewEvent(ReviewEvent reviewEvent, bool isAutoStarted = false)
+    /// <param name="holdReason">再評価まで保留した理由（#339/#340）。保留していない場合は <see langword="null"/>.</param>
+    internal void SetReviewEvent(ReviewEvent reviewEvent, bool isAutoStarted = false, string? holdReason = null)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
         _reviewEvent = reviewEvent;
-        TitleText.Text = ReviewNotificationFormatter.BuildSummary(reviewEvent, isAutoStarted);
+        TitleText.Text = ReviewNotificationFormatter.BuildSummary(reviewEvent, isAutoStarted, holdReason);
         MessageText.Text = reviewEvent.Message;
         OpenPrButton.Visibility = UrlValidator.IsSafeGitHubUrl(
             reviewEvent.PrUrl,

@@ -156,6 +156,25 @@ public class AutoPauseGateTests
         raised.Should().Be(2);
     }
 
+    // Released は Pause 開始では発火しない。保留したレビューの再評価契機に使うため（#340）
+    [Fact]
+    public void Evaluate_ShouldRaiseReleasedOnlyOnResume()
+    {
+        AutoPauseGate gate = CreateGate();
+        int released = 0;
+        gate.Released += (_, _) => released++;
+
+        gate.Evaluate("claude-code", [CreateSnapshot("claude-code", _now, 97)], _freshness);
+        released.Should().Be(0);
+
+        gate.Evaluate("claude-code", [CreateSnapshot("claude-code", _now, 10)], _freshness);
+        released.Should().Be(1);
+
+        // Paused でなかった agent の評価では発火しない
+        gate.Evaluate("claude-code", [CreateSnapshot("claude-code", _now, 10)], _freshness);
+        released.Should().Be(1);
+    }
+
     [Theory]
     [InlineData(20, 30, "Allowed")]
     [InlineData(96, 30, "Paused")]
