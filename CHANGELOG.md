@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `AutoPauseResumeScheduler` の、保留が一度も起きないまま破棄される経路と、`RetryDue` の解除後にタイマーが発火する経路をテストで固定した（#342 のレビューで Codecov が未カバーと報告した分岐）。MainWindow は `RetryDue` を解除してから scheduler を破棄するため、どちらも実際に通り得る
+
 ### Changed
 
 - 「レビュー自動開始」で、Auto-Pause が Paused のために自動起動を見送ったイベントを、これまでは見送ったままにしていたが、#339 の保留キューへ保留し、Auto-Pause の解除を確認した時点で自動起動を再評価するようにした（#340）。解除は fresh なレートリミット snapshot でしか確認できないため、保留中はリセット時刻の通過を契機に再評価し、そこで解除を確認できない場合は 15 分ごとに再評価する。レートリミット欄の「更新」やレビューの終了で解除を確認できた場合はその時点で再評価する。再評価でも PR の状態を確認するため、解除前にマージ・クローズされた PR は起動しない

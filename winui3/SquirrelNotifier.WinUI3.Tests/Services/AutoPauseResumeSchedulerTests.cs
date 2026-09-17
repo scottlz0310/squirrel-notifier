@@ -71,6 +71,37 @@ public sealed class AutoPauseResumeSchedulerTests
         timeProvider.Timers.Should().ContainSingle().Which.IsDisposed.Should().BeTrue();
     }
 
+    // 保留が一度も起きないまま終了する経路（予約なしの Dispose）で落ちないこと
+    [Fact]
+    public void Dispose_ShouldSucceed_WhenNothingWasScheduled()
+    {
+        RecordingTimeProvider timeProvider = new(_now);
+        AutoPauseResumeScheduler scheduler = new(timeProvider);
+
+        Action act = scheduler.Dispose;
+
+        act.Should().NotThrow();
+        timeProvider.Timers.Should().BeEmpty();
+    }
+
+    // MainWindow は RetryDue を解除してから scheduler を破棄するため、その間に発火し得る
+    [Fact]
+    public void RetryDue_ShouldNotThrow_WhenNoHandlerIsAttached()
+    {
+        RecordingTimeProvider timeProvider = new(_now);
+        using AutoPauseResumeScheduler scheduler = new(timeProvider);
+        int raised = 0;
+        EventHandler handler = (_, _) => raised++;
+        scheduler.RetryDue += handler;
+        scheduler.Schedule(_now.AddMinutes(1));
+        scheduler.RetryDue -= handler;
+
+        Action act = timeProvider.Timers[0].Fire;
+
+        act.Should().NotThrow();
+        raised.Should().Be(0);
+    }
+
     [Fact]
     public void RetryInterval_ShouldStayLongEnoughToKeepRecentActivityReadable()
     {
