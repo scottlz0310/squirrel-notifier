@@ -18,6 +18,7 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
     private readonly string _workingDirectory = Path.Combine(Path.GetTempPath(), $"ReviewStartCoordinatorTests_{Guid.NewGuid()}");
     private readonly List<string> _logLines = [];
     private readonly PendingReviewStartQueue _pendingQueue = new();
+    private readonly AutoPauseResumeScheduler _autoPauseResumeScheduler = new();
 
     [Theory]
     [InlineData("Reviewer", "Manual")]
@@ -109,16 +110,18 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         _pendingQueue.Count.Should().Be(expectedPendingCount);
     }
 
+    // Auto-Pause 中の自動起動は、解除後の再評価まで保留する（#340）
     [Fact]
-    public async Task StartAsync_ShouldSkipAutoPaused_WhenAutomaticAndAgentIsPaused()
+    public async Task StartAsync_ShouldHoldEvent_WhenAutomaticAndAgentIsPaused()
     {
         await WriteSnapshotAsync(_pausedAgentId, usedPercentage: 96);
         FakeLauncherService launcher = new();
         ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
+        ReviewEvent reviewEvent = CreateReviewEvent();
         bool promptShown = false;
 
         ReviewStartResult result = await coordinator.StartAsync(
-            CreateReviewEvent(),
+            reviewEvent,
             LauncherRole.Reviewer,
             ReviewStartTrigger.Automatic,
             _ =>
@@ -128,9 +131,31 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             });
 
         result.Status.Should().Be(ReviewStartStatus.SkippedAutoPaused);
+        result.HoldReason.Should().Be(ReviewAutoStartPolicy.AutoPausedHoldLabel);
         promptShown.Should().BeFalse();
         launcher.StartSessionCalls.Should().BeEmpty();
-        _logLines.Should().ContainSingle(line => line.Contains("Auto-Pause 中のため", StringComparison.Ordinal));
+        _pendingQueue.Peek().Should().BeSameAs(reviewEvent);
+        _logLines.Should().ContainSingle(line =>
+            line.Contains("のレビューを保留しました: Auto-Pause 中のため", StringComparison.Ordinal)
+            && line.Contains("解除後に自動起動します（reason: opened）。", StringComparison.Ordinal));
+    }
+
+    // 保留中の agent が別スロットで解除された等で gate が Paused を返さなくなったら、そのまま起動する（#340）
+    [Fact]
+    public async Task StartAsync_ShouldStartHeldEvent_WhenAutoPauseIsReleased()
+    {
+        await WriteSnapshotAsync(_pausedAgentId, usedPercentage: 96);
+        FakeLauncherService launcher = new();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        await coordinator.StartAsync(reviewEvent, LauncherRole.Reviewer, ReviewStartTrigger.Automatic);
+        await WriteSnapshotAsync(_pausedAgentId, usedPercentage: 42);
+
+        ReviewStartResult result = await coordinator.StartAsync(
+            reviewEvent, LauncherRole.Reviewer, ReviewStartTrigger.Automatic);
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        _pendingQueue.Count.Should().Be(0);
     }
 
     [Theory]
@@ -260,11 +285,12 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         abandonedCount.Should().Be(1);
     }
 
+    // Auto-Pause で保留した場合は、再評価しても同じ判定になるため契機にしない（#340）
     [Theory]
     [InlineData("Started", 0)]
     [InlineData("SkippedBusy", 0)]
+    [InlineData("SkippedAutoPaused", 0)]
     [InlineData("CancelledByUser", 1)]
-    [InlineData("SkippedAutoPaused", 1)]
     [InlineData("Failed", 1)]
     [InlineData("Cancelled", 1)]
     public async Task StartAsync_ShouldRaiseStartAbandoned_OnlyWhenStartBeganWithoutLaunching(
@@ -542,6 +568,7 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
 
     public void Dispose()
     {
+        _autoPauseResumeScheduler.Dispose();
         if (Directory.Exists(_workingDirectory))
         {
             Directory.Delete(_workingDirectory, recursive: true);
@@ -574,6 +601,7 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             new RateLimitSnapshotService(new RateLimitFileService(_workingDirectory)),
             new AutoPauseGate(),
             _pendingQueue,
+            _autoPauseResumeScheduler,
             loggingService);
     }
 

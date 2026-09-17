@@ -24,7 +24,10 @@ internal enum ReviewStartStatus
     /// <summary>別のレビューが実行中のため見送った.</summary>
     SkippedBusy,
 
-    /// <summary>Auto-Pause（#147）中で override を確認できないため見送った.</summary>
+    /// <summary>
+    /// Auto-Pause（#147）中で override を確認できないため見送った。自動起動では解除後の
+    /// 再評価まで保留する（#340）.
+    /// </summary>
     SkippedAutoPaused,
 
     /// <summary>「レビュー自動開始」設定が off のため見送った.</summary>
@@ -51,11 +54,24 @@ internal sealed record ReviewStartLaunch(
 /// レビュー起動の結果。<see cref="Launch"/> が非 null のときだけウィンドウを開く。
 /// 見送りの理由は <see cref="Status"/> で表現し、ダイアログを出すか・何も出さないかは呼び出し側が決める.
 /// </summary>
-internal sealed record ReviewStartResult(ReviewStartStatus Status, ReviewStartLaunch? Launch, string? FailureMessage)
+internal sealed record ReviewStartResult(
+    ReviewStartStatus Status,
+    ReviewStartLaunch? Launch,
+    string? FailureMessage,
+    string? HoldReason = null)
 {
     public bool IsStarted => Status == ReviewStartStatus.Started;
 
     public static ReviewStartResult Skipped(ReviewStartStatus status) => new(status, null, null);
+
+    /// <summary>
+    /// 再評価まで保留したイベントの結果（#339/#340）.
+    /// </summary>
+    /// <param name="status">見送りの理由.</param>
+    /// <param name="holdReason">保留した理由。通知に出す短い文言.</param>
+    /// <returns>保留を表す結果.</returns>
+    public static ReviewStartResult Held(ReviewStartStatus status, string holdReason)
+        => new(status, null, null, holdReason);
 
     public static ReviewStartResult Launched(ReviewStartLaunch launch) => new(ReviewStartStatus.Started, launch, null);
 
@@ -82,6 +98,7 @@ internal sealed class ReviewStartCoordinator
     private readonly RateLimitSnapshotService _rateLimitSnapshotService;
     private readonly AutoPauseGate _autoPauseGate;
     private readonly PendingReviewStartQueue _pendingQueue;
+    private readonly AutoPauseResumeScheduler _autoPauseResumeScheduler;
     private readonly LoggingService _loggingService;
 
     // Auto-Pause 確認ダイアログ等の await 中は IsRunning がまだ false のため、起動ボタンの
@@ -94,6 +111,7 @@ internal sealed class ReviewStartCoordinator
         RateLimitSnapshotService rateLimitSnapshotService,
         AutoPauseGate autoPauseGate,
         PendingReviewStartQueue pendingQueue,
+        AutoPauseResumeScheduler autoPauseResumeScheduler,
         LoggingService loggingService)
     {
         ArgumentNullException.ThrowIfNull(launcherService);
@@ -101,6 +119,7 @@ internal sealed class ReviewStartCoordinator
         ArgumentNullException.ThrowIfNull(rateLimitSnapshotService);
         ArgumentNullException.ThrowIfNull(autoPauseGate);
         ArgumentNullException.ThrowIfNull(pendingQueue);
+        ArgumentNullException.ThrowIfNull(autoPauseResumeScheduler);
         ArgumentNullException.ThrowIfNull(loggingService);
 
         _launcherService = launcherService;
@@ -108,13 +127,16 @@ internal sealed class ReviewStartCoordinator
         _rateLimitSnapshotService = rateLimitSnapshotService;
         _autoPauseGate = autoPauseGate;
         _pendingQueue = pendingQueue;
+        _autoPauseResumeScheduler = autoPauseResumeScheduler;
         _loggingService = loggingService;
     }
 
     /// <summary>
-    /// 起動処理を始めたが、セッションを起動せずに終わったときに発生する（確認ダイアログのキャンセル・Auto-Pause・
+    /// 起動処理を始めたが、セッションを起動せずに終わったときに発生する（確認ダイアログのキャンセル・
     /// 起動失敗・キャンセル例外）。その間に保留したイベントは実行終了（<see cref="IReviewLauncherService.RunCompleted"/>）を
-    /// 待っても再評価されないため、再評価の契機に使う（#339）。起動処理を呼び出したスレッドで発生する.
+    /// 待っても再評価されないため、再評価の契機に使う（#339）。起動処理を呼び出したスレッドで発生する。
+    /// Auto-Pause を理由に保留した場合は、再評価しても同じ判定になるため発生しない（#340。解除は
+    /// <see cref="AutoPauseGate.Released"/> と <see cref="AutoPauseResumeScheduler"/> が契機になる）.
     /// </summary>
     public event EventHandler? StartAbandoned;
 
@@ -124,7 +146,8 @@ internal sealed class ReviewStartCoordinator
     /// <summary>
     /// 「レビュー自動開始」設定（#254）に従って reviewer を自動起動する。
     /// 起動を見送った場合はその理由を Recent activity へ残す。別のレビューが実行中で見送った場合は、
-    /// 実行終了後に再評価するためイベントを保留する（#339）.
+    /// 実行終了後に再評価するためイベントを保留する（#339）。Auto-Pause 中で見送った場合は
+    /// <see cref="StartAsync"/> が解除後の再評価まで保留する（#340）.
     /// </summary>
     /// <param name="reviewEvent">受信したレビューイベント.</param>
     /// <returns>起動結果.</returns>
@@ -139,8 +162,8 @@ internal sealed class ReviewStartCoordinator
 
         if (outcome == ReviewAutoStartOutcome.SkippedBusy)
         {
-            await HoldAsync(reviewEvent);
-            return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
+            await HoldForBusyAsync(reviewEvent);
+            return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, ReviewAutoStartPolicy.BusyHoldLabel);
         }
 
         if (ReviewAutoStartPolicy.DescribeSkipReason(outcome) is string skipReason)
@@ -199,8 +222,8 @@ internal sealed class ReviewStartCoordinator
             {
                 // 自動起動の判定後、ログ書き込みの await 中に手動起動が始まった場合に到達する。
                 // 実行中と同じく保留しないと、再評価中のイベントが起動されないまま失われる（#339）
-                await HoldAsync(reviewEvent);
-                return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
+                await HoldForBusyAsync(reviewEvent);
+                return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, ReviewAutoStartPolicy.BusyHoldLabel);
             }
 
             return ReviewStartResult.Skipped(ReviewStartStatus.SkippedReentrant);
@@ -211,14 +234,18 @@ internal sealed class ReviewStartCoordinator
             if (trigger == ReviewStartTrigger.Automatic)
             {
                 // 判定後にここへ到達するのは、判定と起動の間に別のレビューが始まった場合のみ
-                await HoldAsync(reviewEvent);
+                await HoldForBusyAsync(reviewEvent);
+                return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, ReviewAutoStartPolicy.BusyHoldLabel);
             }
 
             return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
         }
 
         _isStartPending = true;
-        bool launched = false;
+
+        // 起動せずに終わったときに再評価を促すか（#339）。Auto-Pause で保留した場合は再評価しても
+        // 同じ判定になるため促さない（#340）
+        bool raiseStartAbandoned = true;
         try
         {
             AppSettings settings = _settingsService.Settings;
@@ -248,8 +275,10 @@ internal sealed class ReviewStartCoordinator
                 AutoPausedLimit pausedLimit = autoPauseDecision.PausedLimit!;
                 if (!ReviewAutoStartPolicy.AllowsAutoPauseOverridePrompt(trigger))
                 {
-                    await LogAutoStartSkipAsync(reviewEvent, $"Auto-Pause 中のため（{pausedLimit.BuildReasonText()}）");
-                    return ReviewStartResult.Skipped(ReviewStartStatus.SkippedAutoPaused);
+                    raiseStartAbandoned = false;
+                    await HoldForAutoPauseAsync(reviewEvent, pausedLimit);
+                    return ReviewStartResult.Held(
+                        ReviewStartStatus.SkippedAutoPaused, ReviewAutoStartPolicy.AutoPausedHoldLabel);
                 }
 
                 if (!await confirmAutoPauseOverrideAsync!(pausedLimit))
@@ -259,7 +288,7 @@ internal sealed class ReviewStartCoordinator
             }
 
             AgentExecutionSession session = _launcherService.StartSession(reviewEvent, role, CancellationToken.None);
-            launched = true;
+            raiseStartAbandoned = false;
             if (role == LauncherRole.Reviewer)
             {
                 // 手動起動でも、同じ PR のレビューを始めた時点で保留分を再評価する意味はなくなる
@@ -288,7 +317,7 @@ internal sealed class ReviewStartCoordinator
         {
             // StartSession 成功後の同時実行抑止は _launcherService.IsRunning が担う
             _isStartPending = false;
-            if (!launched)
+            if (raiseStartAbandoned)
             {
                 StartAbandoned?.Invoke(this, EventArgs.Empty);
             }
@@ -309,12 +338,21 @@ internal sealed class ReviewStartCoordinator
             _ => ReviewStartStatus.SkippedBusy,
         };
 
-    private Task HoldAsync(ReviewEvent reviewEvent)
+    private Task HoldForBusyAsync(ReviewEvent reviewEvent)
+        => HoldAsync(reviewEvent, $"{ReviewAutoStartPolicy.BusyReasonText}。実行終了後に自動起動します");
+
+    // Auto-Pause は解除しても gate を再評価する契機が無いため、リセット時刻へ再評価を予約する（#340）
+    private Task HoldForAutoPauseAsync(ReviewEvent reviewEvent, AutoPausedLimit pausedLimit)
+    {
+        _autoPauseResumeScheduler.Schedule(pausedLimit.ResetAt);
+        return HoldAsync(reviewEvent, $"Auto-Pause 中のため（{pausedLimit.BuildReasonText()}）。解除後に自動起動します");
+    }
+
+    private Task HoldAsync(ReviewEvent reviewEvent, string reasonText)
         => _pendingQueue.AddOrReplace(reviewEvent) switch
         {
             PendingReviewStartChange.Added => _loggingService.WriteAsync(
-                $"[Auto] {reviewEvent.PrCaption} のレビューを保留しました: {ReviewAutoStartPolicy.BusyReasonText}。"
-                + $"実行終了後に自動起動します（reason: {reviewEvent.Reason}）。"),
+                $"[Auto] {reviewEvent.PrCaption} のレビューを保留しました: {reasonText}（reason: {reviewEvent.Reason}）。"),
             PendingReviewStartChange.Replaced => _loggingService.WriteAsync(
                 $"[Auto] 保留中の {reviewEvent.PrCaption} を新しいイベントで更新しました（reason: {reviewEvent.Reason}）。"),
             _ => Task.CompletedTask,

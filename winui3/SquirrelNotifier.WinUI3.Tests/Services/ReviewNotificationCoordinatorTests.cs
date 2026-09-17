@@ -21,8 +21,29 @@ public sealed class ReviewNotificationCoordinatorTests
 
         recorder.PopupEvents.Should().BeEmpty();
         recorder.BalloonEvents.Should().ContainSingle()
-            .Which.Should().Be((reviewEvent, false));
+            .Which.Should().Be((reviewEvent, false, null));
         recorder.Logs.Should().BeEmpty();
+    }
+
+    // 保留理由は、ポップアップとバルーンのどちらでも同じ文言規則で表示できるよう素通しする（#340）
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Show_ShouldPassHoldReasonThrough(bool popupAttached)
+    {
+        NotificationRecorder recorder = new();
+        ReviewNotificationCoordinator coordinator = recorder.CreateCoordinator();
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        if (popupAttached)
+        {
+            coordinator.AttachPopup(() => recorder.Attached = true);
+        }
+
+        coordinator.Show(reviewEvent, isAutoStarted: false, holdReason: "Auto-Pause 中");
+
+        List<(ReviewEvent ReviewEvent, bool IsAutoStarted, string? HoldReason)> target =
+            popupAttached ? recorder.PopupEvents : recorder.BalloonEvents;
+        target.Should().ContainSingle().Which.Should().Be((reviewEvent, false, "Auto-Pause 中"));
     }
 
     [Fact]
@@ -37,7 +58,7 @@ public sealed class ReviewNotificationCoordinatorTests
 
         recorder.Attached.Should().BeTrue();
         recorder.PopupEvents.Should().ContainSingle()
-            .Which.Should().Be((reviewEvent, true));
+            .Which.Should().Be((reviewEvent, true, null));
         recorder.BalloonEvents.Should().BeEmpty();
     }
 
@@ -53,7 +74,7 @@ public sealed class ReviewNotificationCoordinatorTests
 
         recorder.PopupEvents.Should().BeEmpty();
         recorder.BalloonEvents.Should().ContainSingle()
-            .Which.Should().Be((reviewEvent, false));
+            .Which.Should().Be((reviewEvent, false, null));
         recorder.Logs.Should().ContainSingle()
             .Which.Should().Contain("Failed to attach tray popup: popup unavailable");
     }
@@ -73,7 +94,7 @@ public sealed class ReviewNotificationCoordinatorTests
 
         recorder.PopupEvents.Should().ContainSingle();
         recorder.BalloonEvents.Should().ContainSingle()
-            .Which.Should().Be((reviewEvent, true));
+            .Which.Should().Be((reviewEvent, true, null));
         recorder.Logs.Should().ContainSingle()
             .Which.Should().Contain("Failed to show review popup: popup unavailable");
     }
@@ -90,7 +111,7 @@ public sealed class ReviewNotificationCoordinatorTests
 
         recorder.PopupEvents.Should().BeEmpty();
         recorder.BalloonEvents.Should().ContainSingle()
-            .Which.Should().Be((reviewEvent, false));
+            .Which.Should().Be((reviewEvent, false, null));
     }
 
     private static ReviewEvent CreateReviewEvent()
@@ -107,23 +128,23 @@ public sealed class ReviewNotificationCoordinatorTests
 
         public bool ThrowOnPopup { get; init; }
 
-        public List<(ReviewEvent ReviewEvent, bool IsAutoStarted)> PopupEvents { get; } = [];
+        public List<(ReviewEvent ReviewEvent, bool IsAutoStarted, string? HoldReason)> PopupEvents { get; } = [];
 
-        public List<(ReviewEvent ReviewEvent, bool IsAutoStarted)> BalloonEvents { get; } = [];
+        public List<(ReviewEvent ReviewEvent, bool IsAutoStarted, string? HoldReason)> BalloonEvents { get; } = [];
 
         public List<string> Logs { get; } = [];
 
         public ReviewNotificationCoordinator CreateCoordinator()
             => new(
-                (reviewEvent, isAutoStarted) =>
+                (reviewEvent, isAutoStarted, holdReason) =>
                 {
-                    PopupEvents.Add((reviewEvent, isAutoStarted));
+                    PopupEvents.Add((reviewEvent, isAutoStarted, holdReason));
                     if (ThrowOnPopup)
                     {
                         throw new InvalidOperationException("popup unavailable");
                     }
                 },
-                (reviewEvent, isAutoStarted) => BalloonEvents.Add((reviewEvent, isAutoStarted)),
+                (reviewEvent, isAutoStarted, holdReason) => BalloonEvents.Add((reviewEvent, isAutoStarted, holdReason)),
                 message =>
                 {
                     Logs.Add(message);

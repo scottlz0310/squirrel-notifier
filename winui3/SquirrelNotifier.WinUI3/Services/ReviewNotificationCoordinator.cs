@@ -11,14 +11,14 @@ namespace SquirrelNotifier.WinUI3.Services;
 /// </summary>
 internal sealed class ReviewNotificationCoordinator
 {
-    private readonly Action<ReviewEvent, bool> _showPopup;
-    private readonly Action<ReviewEvent, bool> _showBalloon;
+    private readonly Action<ReviewEvent, bool, string?> _showPopup;
+    private readonly Action<ReviewEvent, bool, string?> _showBalloon;
     private readonly Func<string, Task> _writeLogAsync;
     private bool _isPopupAvailable;
 
     internal ReviewNotificationCoordinator(
-        Action<ReviewEvent, bool> showPopup,
-        Action<ReviewEvent, bool> showBalloon,
+        Action<ReviewEvent, bool, string?> showPopup,
+        Action<ReviewEvent, bool, string?> showBalloon,
         Func<string, Task> writeLogAsync)
     {
         ArgumentNullException.ThrowIfNull(showPopup);
@@ -46,26 +46,26 @@ internal sealed class ReviewNotificationCoordinator
         }
     }
 
-    public void Show(ReviewEvent reviewEvent, bool isAutoStarted)
+    public void Show(ReviewEvent reviewEvent, bool isAutoStarted, string? holdReason = null)
     {
         if (!_isPopupAvailable)
         {
-            ShowFallback(reviewEvent, isAutoStarted);
+            ShowFallback(reviewEvent, isAutoStarted, holdReason);
             return;
         }
 
         try
         {
-            _showPopup(reviewEvent, isAutoStarted);
+            _showPopup(reviewEvent, isAutoStarted, holdReason);
         }
         catch (Exception ex)
         {
             _ = _writeLogAsync(
                 $"[UI] Failed to show review popup: {ex.Message}");
-            ShowFallback(reviewEvent, isAutoStarted);
+            ShowFallback(reviewEvent, isAutoStarted, holdReason);
         }
     }
 
-    public void ShowFallback(ReviewEvent reviewEvent, bool isAutoStarted)
-        => _showBalloon(reviewEvent, isAutoStarted);
+    public void ShowFallback(ReviewEvent reviewEvent, bool isAutoStarted, string? holdReason = null)
+        => _showBalloon(reviewEvent, isAutoStarted, holdReason);
 }
