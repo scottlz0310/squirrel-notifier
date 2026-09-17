@@ -66,4 +66,14 @@ internal sealed class SettingsInputCoordinator
 
         _settingsService.UpdateAutoReviewStartEnabled(enabled);
     }
+
+    public void UpdateReviewedActionVisible(bool visible)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        _settingsService.UpdateReviewedActionVisible(visible);
+    }
 }

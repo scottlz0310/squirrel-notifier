@@ -6,6 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:controls="using:CommunityToolkit.WinUI.Controls"
     xmlns:models="using:SquirrelNotifier.WinUI3.Models"
+    xmlns:vm="using:SquirrelNotifier.WinUI3.ViewModels"
     xmlns:tb="using:H.NotifyIcon"
     mc:Ignorable="d"
     Title="Squirrel Notifier">
@@ -15,6 +16,8 @@
         <Grid.Resources>
             <XamlUICommand x:Key="TrayOpenCommand" ExecuteRequested="OnTrayOpenCommandExecuteRequested"/>
             <XamlUICommand x:Key="TrayRightClickCommand" ExecuteRequested="OnTrayRightClickCommandExecuteRequested"/>
+            <!-- Recent review events の DataTemplate からは x:Bind でページ側へ届かないため、行アクションの表示状態は共有リソースで渡す（#256） -->
+            <vm:ReviewEventActionsViewModel x:Key="ReviewEventActions"/>
         </Grid.Resources>
         <!--
             右クリックメニューは ContextFlyout ではなく Win32 のポップアップメニューで表示する。
@@ -114,7 +117,7 @@
                     <ScrollViewer x:Name="SettingsScrollViewer" Height="160" MinHeight="80"
                                   MaxHeight="80"
                                   HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
-                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                               ColumnDefinitions="Auto,*"
                               RowSpacing="8"
                               ColumnSpacing="8"
@@ -209,18 +212,24 @@
                                           OnContent="有効" OffContent="無効"
                                           Toggled="OnAutoReviewStartToggled"/>
 
-                            <TextBlock Grid.Row="17" Grid.Column="0" Text="ライブログ自動クローズ:" VerticalAlignment="Center"/>
-                            <ToggleSwitch Grid.Row="17" Grid.Column="1" x:Name="LiveLogAutoCloseToggle"
+                            <TextBlock Grid.Row="17" Grid.Column="0" Text="「レビューに対応」の表示:" VerticalAlignment="Center"/>
+                            <ToggleSwitch Grid.Row="17" Grid.Column="1" x:Name="ReviewedActionVisibleToggle"
+                                          OnContent="表示" OffContent="非表示"
+                                          ToolTipService.ToolTip="レビュー指摘への対応は、PR を実装した CLI エージェントが同じセッションで引き受けます（待機ステップ）。この導線はその CLI を使えない場面の退避手段です。"
+                                          Toggled="OnReviewedActionVisibleToggled"/>
+
+                            <TextBlock Grid.Row="18" Grid.Column="0" Text="ライブログ自動クローズ:" VerticalAlignment="Center"/>
+                            <ToggleSwitch Grid.Row="18" Grid.Column="1" x:Name="LiveLogAutoCloseToggle"
                                           OnContent="有効" OffContent="無効"
                                           Toggled="OnLiveLogAutoCloseToggled"/>
 
-                            <TextBlock Grid.Row="18" Grid.Column="0" Text="自動起動:" VerticalAlignment="Center"/>
-                            <ToggleSwitch Grid.Row="18" Grid.Column="1" x:Name="AutoStartToggle"
+                            <TextBlock Grid.Row="19" Grid.Column="0" Text="自動起動:" VerticalAlignment="Center"/>
+                            <ToggleSwitch Grid.Row="19" Grid.Column="1" x:Name="AutoStartToggle"
                                           OnContent="有効" OffContent="無効"
                                           Toggled="OnAutoStartToggled"/>
 
-                            <TextBlock Grid.Row="19" Grid.Column="0" Text="タスク状態:" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Row="19" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Grid.Row="20" Grid.Column="0" Text="タスク状態:" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="20" Grid.Column="1" Orientation="Horizontal" Spacing="8">
                                 <TextBlock x:Name="AutoStartStatusText" VerticalAlignment="Center" Text="確認中..."/>
                                 <Button x:Name="RepairAutoStartButton" Content="修復" Click="OnRepairAutoStartClick" IsEnabled="False"/>
                             </StackPanel>
@@ -337,6 +346,7 @@
                                                 </SplitButton.Flyout>
                                             </SplitButton>
                                             <SplitButton Content="レビューに対応"
+                                                         Visibility="{Binding Source={StaticResource ReviewEventActions}, Path=ReviewedActionVisibility, Mode=OneWay}"
                                                          AutomationProperties.Name="reviewed としてレビュー対応を起動"
                                                          Click="OnLaunchReviewedClick"
                                                          CommandParameter="{x:Bind}">
