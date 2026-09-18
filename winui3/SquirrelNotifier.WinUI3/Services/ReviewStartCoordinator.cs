@@ -100,6 +100,7 @@ internal sealed class ReviewStartCoordinator
     private readonly PendingReviewStartQueue _pendingQueue;
     private readonly AutoPauseResumeScheduler _autoPauseResumeScheduler;
     private readonly LoggingService _loggingService;
+    private readonly ReviewCycleCoordinator? _reviewCycleCoordinator;
 
     // Auto-Pause 確認ダイアログ等の await 中は IsRunning がまだ false のため、起動ボタンの
     // 連打で再入し ContentDialog の多重表示（WinUI3 では例外）になる。それを防ぐフラグ
@@ -112,7 +113,8 @@ internal sealed class ReviewStartCoordinator
         AutoPauseGate autoPauseGate,
         PendingReviewStartQueue pendingQueue,
         AutoPauseResumeScheduler autoPauseResumeScheduler,
-        LoggingService loggingService)
+        LoggingService loggingService,
+        ReviewCycleCoordinator? reviewCycleCoordinator = null)
     {
         ArgumentNullException.ThrowIfNull(launcherService);
         ArgumentNullException.ThrowIfNull(settingsService);
@@ -129,6 +131,7 @@ internal sealed class ReviewStartCoordinator
         _pendingQueue = pendingQueue;
         _autoPauseResumeScheduler = autoPauseResumeScheduler;
         _loggingService = loggingService;
+        _reviewCycleCoordinator = reviewCycleCoordinator;
     }
 
     /// <summary>
@@ -295,8 +298,13 @@ internal sealed class ReviewStartCoordinator
                 _pendingQueue.RemovePullRequest(reviewEvent);
             }
 
-            return ReviewStartResult.Launched(
-                new ReviewStartLaunch(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor));
+            ReviewStartLaunch launch = new(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor);
+            if (role == LauncherRole.Reviewer && _reviewCycleCoordinator is not null)
+            {
+                await _reviewCycleCoordinator.MarkReviewerStartedAsync(reviewEvent, launch);
+            }
+
+            return ReviewStartResult.Launched(launch);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

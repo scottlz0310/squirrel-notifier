@@ -16,6 +16,7 @@ internal sealed class ReviewEventProcessingCoordinator
     private readonly PendingReviewStartQueue _pendingQueue;
     private readonly LoggingService _loggingService;
     private readonly Func<ReviewEvent, Task<ReviewStartResult>> _tryStartAutomaticallyAsync;
+    private readonly ReviewCycleCoordinator? _reviewCycleCoordinator;
     private bool _isProcessingPending;
     private bool _isReprocessRequested;
 
@@ -24,13 +25,15 @@ internal sealed class ReviewEventProcessingCoordinator
         ReviewEventCleanupCoordinator cleanupCoordinator,
         PendingReviewStartQueue pendingQueue,
         LoggingService loggingService,
-        Func<ReviewEvent, Task<ReviewStartResult>> tryStartAutomaticallyAsync)
+        Func<ReviewEvent, Task<ReviewStartResult>> tryStartAutomaticallyAsync,
+        ReviewCycleCoordinator? reviewCycleCoordinator = null)
     {
         _collectionCoordinator = collectionCoordinator ?? throw new ArgumentNullException(nameof(collectionCoordinator));
         _cleanupCoordinator = cleanupCoordinator ?? throw new ArgumentNullException(nameof(cleanupCoordinator));
         _pendingQueue = pendingQueue ?? throw new ArgumentNullException(nameof(pendingQueue));
         _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
         _tryStartAutomaticallyAsync = tryStartAutomaticallyAsync ?? throw new ArgumentNullException(nameof(tryStartAutomaticallyAsync));
+        _reviewCycleCoordinator = reviewCycleCoordinator;
     }
 
     /// <summary>
@@ -52,6 +55,11 @@ internal sealed class ReviewEventProcessingCoordinator
         if (!await _cleanupCoordinator.IsActionAllowedAsync(reviewEvent, CancellationToken.None))
         {
             return new ReviewEventProcessingResult(null);
+        }
+
+        if (_reviewCycleCoordinator is not null)
+        {
+            await _reviewCycleCoordinator.ObserveEventAsync(reviewEvent);
         }
 
         ReviewStartResult startResult = await _tryStartAutomaticallyAsync(reviewEvent);

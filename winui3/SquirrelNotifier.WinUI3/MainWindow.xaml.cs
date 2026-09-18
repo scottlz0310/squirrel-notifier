@@ -40,6 +40,7 @@ internal sealed partial class MainWindow : Window
     private readonly ITaskSchedulerService _taskSchedulerService;
     private readonly ReviewRegistrationCoordinator _reviewRegistrationCoordinator;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
+    private readonly ReviewCycleCoordinator _reviewCycleCoordinator;
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitReminderCoordinator _rateLimitReminderCoordinator;
     private readonly RateLimitAgentMonitoringCoordinator _rateLimitAgentMonitoringCoordinator;
@@ -91,6 +92,7 @@ internal sealed partial class MainWindow : Window
         IRateLimitReminderService rateLimitReminderService,
         RateLimitFileService rateLimitFileService,
         ReviewEventCleanupCoordinator reviewEventCleanupCoordinator,
+        ReviewCycleCoordinator reviewCycleCoordinator,
         bool showWindow = true)
     {
         InitializeComponent();
@@ -127,6 +129,7 @@ internal sealed partial class MainWindow : Window
         _taskSchedulerService = taskSchedulerService;
         _reviewRegistrationCoordinator = new(reviewRegistrationService);
         _reviewEventCleanupCoordinator = reviewEventCleanupCoordinator;
+        _reviewCycleCoordinator = reviewCycleCoordinator;
         _rateLimitReminderService = rateLimitReminderService;
         _rateLimitReminderCoordinator = new(_rateLimitReminderService);
         _rateLimitSnapshotService = new RateLimitSnapshotService(rateLimitFileService);
@@ -152,7 +155,8 @@ internal sealed partial class MainWindow : Window
             _autoPauseGate,
             _pendingReviewStartQueue,
             _autoPauseResumeScheduler,
-            _loggingService);
+            _loggingService,
+            _reviewCycleCoordinator);
         _agentExecutionWindowCoordinator = new AgentExecutionWindowCoordinator(
             launch => new AgentExecutionWindowAdapter(
                 new AgentExecutionWindow(
@@ -167,7 +171,8 @@ internal sealed partial class MainWindow : Window
             _reviewEventCleanupCoordinator,
             _pendingReviewStartQueue,
             _loggingService,
-            _reviewStartCoordinator.TryStartAutomaticallyAsync);
+            _reviewStartCoordinator.TryStartAutomaticallyAsync,
+            _reviewCycleCoordinator);
         _launcherService.RunCompleted += OnPendingReviewReevaluationRequested;
         _reviewStartCoordinator.StartAbandoned += OnPendingReviewReevaluationRequested;
 
@@ -178,6 +183,7 @@ internal sealed partial class MainWindow : Window
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
         _reviewEventCleanupCoordinator.EventsRemoved += OnReviewEventsRemoved;
+        _reviewCycleCoordinator.StateChanged += OnReviewCycleStateChanged;
         _notificationService.NotificationRequested += OnNotificationRequested;
         _rateLimitReminderService.ReminderFired += OnRateLimitReminderFired;
         _reviewNotificationContent = new ReviewNotificationPopup();
@@ -369,6 +375,7 @@ internal sealed partial class MainWindow : Window
         _autoPauseGate.Released -= OnPendingReviewReevaluationRequested;
         _autoPauseResumeScheduler.RetryDue -= OnPendingReviewReevaluationRequested;
         _reviewEventCleanupCoordinator.EventsRemoved -= OnReviewEventsRemoved;
+        _reviewCycleCoordinator.StateChanged -= OnReviewCycleStateChanged;
         _notificationService.NotificationRequested -= OnNotificationRequested;
         _rateLimitReminderService.ReminderFired -= OnRateLimitReminderFired;
         _reviewNotificationContent.OpenPrRequested -= OnTrayPopupOpenPrRequested;
@@ -976,6 +983,14 @@ internal sealed partial class MainWindow : Window
             }))
         {
             _ = _loggingService.WriteAsync("レビューイベントの自動削除結果を UI へ反映できませんでした。");
+        }
+    }
+
+    private void OnReviewCycleStateChanged(object? sender, ReviewCycleStateChangedEventArgs e)
+    {
+        if (!DispatcherQueue.TryEnqueue(() => e.ReviewEvent.ApplyCycleState(e.State)))
+        {
+            _ = _loggingService.WriteAsync($"レビューサイクルの表示状態を UI へ反映できませんでした: {e.ReviewEvent.PrCaption}");
         }
     }
 

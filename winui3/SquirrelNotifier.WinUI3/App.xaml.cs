@@ -22,6 +22,7 @@ public partial class App : Application
     private readonly AutoUpdateService _autoUpdateService;
     private readonly GitHubPullRequestStatusClient _pullRequestStatusClient;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
+    private readonly ReviewCycleCoordinator _reviewCycleCoordinator;
     private readonly ReviewLauncherService _launcherService;
     private readonly TaskSchedulerService _taskSchedulerService = new();
     private readonly ReviewRegistrationService _reviewRegistrationService;
@@ -54,6 +55,9 @@ public partial class App : Application
         _reviewEventCleanupCoordinator = new ReviewEventCleanupCoordinator(
             _pullRequestStatusClient,
             _loggingService);
+        _reviewCycleCoordinator = new ReviewCycleCoordinator(
+            new ReviewCycleStore(_settingsService.SettingsDirectory),
+            _loggingService);
         var enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
         _reviewRegistrationService = new ReviewRegistrationService(_subscriptionService, enqueueReviewService);
         _rateLimitReminderService = new RateLimitReminderService(_notificationService);
@@ -66,7 +70,7 @@ public partial class App : Application
         string[] commandLineArgs = Environment.GetCommandLineArgs();
         bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, new UrlOpener(), new FileOpener(), new ClipboardService(), new WindowIconService(), _taskSchedulerService, _reviewRegistrationService, _rateLimitReminderService, _rateLimitFileService, _reviewEventCleanupCoordinator, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, new UrlOpener(), new FileOpener(), new ClipboardService(), new WindowIconService(), _taskSchedulerService, _reviewRegistrationService, _rateLimitReminderService, _rateLimitFileService, _reviewEventCleanupCoordinator, _reviewCycleCoordinator, showWindow);
         _window.Closed += OnWindowClosed;
 
         _window.Activate();

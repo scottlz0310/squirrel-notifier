@@ -331,6 +331,10 @@
                                                              FontSize="11"
                                                              Padding="0"
                                                              HorizontalAlignment="Left"/>
+                                            <TextBlock Text="{x:Bind CycleStatusLabel, Mode=OneWay}"
+                                                       FontSize="11"
+                                                       Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"
+                                                       TextWrapping="Wrap"/>
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                             <SplitButton Content="レビューする"

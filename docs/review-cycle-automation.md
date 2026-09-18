@@ -43,6 +43,18 @@ webhook の delivery-id による重複排除は webhook 受信経路にしか�
      - 指摘なし: 人にマージ判断を仰いで終了
 ```
 
+## Recent review events のサイクル表示
+
+Squirrel Notifier は reviewer 側の queue event とローカル reviewer プロセスのライフサイクルを、PR 単位のラウンドとして表示する。
+
+- 最初の `opened` / `synchronized` はラウンド 1 として記録する
+- 新しい `re-review-requested` を受信するとラウンドを 1 つ進める。同じ event ID は重複して数えない
+- reviewer のプロセス実行中は `reviewer 実行中`、正常終了後は `reviewer 実行完了（結果未確認）` と表示する
+- 「結果未確認」はレビュー承認を意味しない。Verdict、未解決スレッド、CI、マージ可否の正本は thread-owl / GitHub にある
+- ローカル表示状態は `%LocalAppData%\SquirrelNotifier\review-cycles.json` に保存し、7 日間または 100 PR 分を超えた状態は保持しない
+
+この表示はレビュー業務状態の代替ではない。実装 CLI の `review://status/...` 待機がタイムアウトした場合も、Recent activity のローカル実行結果だけからレビュー完了やマージ可否を推測してはならない。
+
 このモードでは `enqueue_review` を呼ばない限り queue には何も載らない。**コメントの
 投稿だけではサイクルは始まらない**。
 
