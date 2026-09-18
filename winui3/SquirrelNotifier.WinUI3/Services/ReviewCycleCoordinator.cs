@@ -261,7 +261,13 @@ internal sealed class ReviewCycleCoordinator
     {
         if (_states.TryGetValue(key, out ReviewCycleState? state))
         {
-            return state;
+            DateTimeOffset cutoff = _timeProvider.GetUtcNow() - ReviewCycleStore.DefaultTtl;
+            if (state.UpdatedAt > cutoff)
+            {
+                return state;
+            }
+
+            _states.Remove(key);
         }
 
         try

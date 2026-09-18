@@ -78,6 +78,22 @@ public sealed class ReviewCycleCoordinatorTests : IDisposable
         state.Status.Should().Be(ReviewCycleStatus.AwaitingReviewer);
     }
 
+    [Fact]
+    public async Task ObserveEventAsync_ShouldDiscardExpiredMemoryState()
+    {
+        var timeProvider = new MutableTimeProvider(new DateTimeOffset(2026, 9, 19, 0, 0, 0, TimeSpan.Zero));
+        ReviewCycleStore store = new(_testDirectory, timeProvider);
+        ReviewCycleCoordinator coordinator = CreateCoordinator(store, timeProvider);
+
+        await coordinator.ObserveEventAsync(CreateReviewEvent("opened", "event-opened"));
+        timeProvider.UtcNow += ReviewCycleStore.DefaultTtl;
+        await coordinator.ObserveEventAsync(CreateReviewEvent("re-review-requested", "event-re-review"));
+
+        ReviewCycleState state = (await store.TryGetAsync("owner/repo", 42))!;
+        state.Round.Should().Be(1);
+        state.ProcessedEventIds.Should().ContainSingle().Which.Should().Be("event-re-review");
+    }
+
     [Theory]
     [InlineData(true, "ReviewerCompleted")]
     [InlineData(false, "ReviewerFailed")]
@@ -194,11 +210,15 @@ public sealed class ReviewCycleCoordinatorTests : IDisposable
         reviewEvent.CycleRound.Should().Be(0);
     }
 
-    private ReviewCycleCoordinator CreateCoordinator(IReviewCycleStore? store = null)
-        => CreateCoordinatorWithStore(store ?? new ReviewCycleStore(_testDirectory));
+    private ReviewCycleCoordinator CreateCoordinator(
+        IReviewCycleStore? store = null,
+        TimeProvider? timeProvider = null)
+        => CreateCoordinatorWithStore(store ?? new ReviewCycleStore(_testDirectory, timeProvider), timeProvider);
 
-    private ReviewCycleCoordinator CreateCoordinatorWithStore(IReviewCycleStore store)
-        => new(store, _loggingService);
+    private ReviewCycleCoordinator CreateCoordinatorWithStore(
+        IReviewCycleStore store,
+        TimeProvider? timeProvider = null)
+        => new(store, _loggingService, timeProvider);
 
     private static List<ReviewCycleState> CaptureStates(
         ReviewCycleCoordinator coordinator,
@@ -226,4 +246,11 @@ public sealed class ReviewCycleCoordinatorTests : IDisposable
             Reason = reason,
             Message = reason,
         };
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => UtcNow;
+    }
 }
