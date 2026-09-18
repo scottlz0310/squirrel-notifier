@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-18
+
+レビュー自動起動の保留・再開、設定可能なレビュー対応 UI、ログインダイアログの競合修正などを含む機能リリースです。
+
 ### Added
 
 - 全自動レビューサイクルの運用手順を [`docs/review-cycle-automation.md`](docs/review-cycle-automation.md) にまとめた（#87）。責務の分担、前提となる設定と環境変数、自動起動の判定順序、保留と再開の契機、`reason` の使い分け、止まったときに Recent activity から原因を切り分ける手順を、README と `docs/auto-pause.md` に分散していた内容から集約している
@@ -444,7 +448,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.8.0...v0.9.0
