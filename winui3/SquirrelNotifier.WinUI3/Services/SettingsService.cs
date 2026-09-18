@@ -363,6 +363,12 @@ internal sealed class SettingsService
         SaveSettings();
     }
 
+    public void UpdateReviewedActionVisible(bool visible)
+    {
+        _settings.ReviewedActionVisible = visible;
+        SaveSettings();
+    }
+
     /// <summary>
     /// 指定した launcher スロットの rateLimitAgentId を解決する（#149）。
     /// レートリミット取得手段が無いプリセット（copilot 等）、および command がどのプリセットとも
@@ -597,6 +603,11 @@ internal sealed class AppSettings
     // 保存済みの CLI session を次回起動へ引き継ぐか（#304）。resume は #305 の設定 UI で
     // 明示的に有効化するまで dormant にする。
     public bool SessionResumeEnabled { get; set; }
+
+    // Recent review events の行に「レビューに対応」を表示するか（#256）。押すと reviewed 側を
+    // コールドスタートするが、指摘への対応は PR を実装した CLI エージェントが同じセッションで
+    // 引き受けるほうが良いため既定は非表示。実装 CLI を使えない場面の退避手段として機能は残す
+    public bool ReviewedActionVisible { get; set; }
 
     // ローカルの statusline スクリプトがレートリミット状態を書き出すエージェント ID
     // （RateLimitAgentCatalog 参照）のうち、監視対象として選択されているもの

@@ -1298,6 +1298,26 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void Settings_ShouldDefaultReviewedActionToHidden()
+    {
+        // 押すと reviewed 側をコールドスタートする劣った導線のため、既定は非表示（#256）
+        new AppSettings().ReviewedActionVisible.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void UpdateReviewedActionVisible_ShouldPersistValue(bool visible)
+    {
+        _settingsService.UpdateReviewedActionVisible(visible);
+
+        _settingsService.Settings.ReviewedActionVisible.Should().Be(visible);
+
+        var reloaded = new SettingsService(_settingsDirectory, pnpmBinDir: string.Empty);
+        reloaded.Settings.ReviewedActionVisible.Should().Be(visible);
+    }
+
+    [Fact]
     public void Settings_ShouldDefaultRateLimitFreshnessThresholdToFifteenMinutes()
     {
         new AppSettings().RateLimitFreshnessThresholdMinutes.Should().Be(15);

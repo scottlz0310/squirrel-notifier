@@ -65,16 +65,20 @@ public sealed class SettingsInputCoordinatorTests : IDisposable
 
         coordinator.UpdateLiveLogAutoCloseEnabled(false);
         coordinator.UpdateAutoReviewStartEnabled(true);
+        coordinator.UpdateReviewedActionVisible(true);
 
         _settingsService.Settings.LiveLogAutoCloseEnabled.Should().BeTrue();
         _settingsService.Settings.AutoReviewStartEnabled.Should().BeFalse();
+        _settingsService.Settings.ReviewedActionVisible.Should().BeFalse();
 
         coordinator.CompleteInitialization();
         coordinator.UpdateLiveLogAutoCloseEnabled(false);
         coordinator.UpdateAutoReviewStartEnabled(true);
+        coordinator.UpdateReviewedActionVisible(true);
 
         _settingsService.Settings.LiveLogAutoCloseEnabled.Should().BeFalse();
         _settingsService.Settings.AutoReviewStartEnabled.Should().BeTrue();
+        _settingsService.Settings.ReviewedActionVisible.Should().BeTrue();
     }
 
     public void Dispose()
