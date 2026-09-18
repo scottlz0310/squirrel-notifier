@@ -140,6 +140,48 @@ public sealed class ReviewCycleCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task MarkReviewerStartedAsync_ShouldCompleteOldEventWhenNewEventArrivesDuringExecution()
+    {
+        ReviewCycleCoordinator coordinator = CreateCoordinator();
+        ReviewEvent opened = CreateReviewEvent("opened", "event-opened");
+        ReviewEvent reReview = CreateReviewEvent("re-review-requested", "event-re-review");
+        TaskCompletionSource<ReviewCycleState> completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.StateChanged += (_, args) =>
+        {
+            args.ReviewEvent.ApplyCycleState(args.State);
+            if (ReferenceEquals(args.ReviewEvent, opened)
+                && args.State.Status == ReviewCycleStatus.ReviewerCompleted)
+            {
+                completed.TrySetResult(args.State);
+            }
+        };
+
+        await coordinator.ObserveEventAsync(opened);
+        AgentExecutionSession session = new(TimeProvider.System);
+        await coordinator.MarkReviewerStartedAsync(
+            opened,
+            new ReviewStartLaunch(session, null!, null!, null!));
+
+        await coordinator.ObserveEventAsync(reReview);
+        reReview.CycleStatus.Should().Be(ReviewCycleStatus.ReviewerRunning);
+        reReview.CycleRound.Should().Be(2);
+
+        session.Complete(
+            AgentExecutionOutcome.Succeeded,
+            new LauncherResult { Success = true });
+
+        ReviewCycleState completedState = await completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        completedState.Round.Should().Be(1);
+        opened.CycleStatus.Should().Be(ReviewCycleStatus.ReviewerCompleted);
+        reReview.CycleStatus.Should().Be(ReviewCycleStatus.AwaitingReviewer);
+
+        ReviewCycleState persisted = (await new ReviewCycleStore(_testDirectory).TryGetAsync("owner/repo", 42))!;
+        persisted.Round.Should().Be(2);
+        persisted.Status.Should().Be(ReviewCycleStatus.AwaitingReviewer);
+        persisted.ActiveEventId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ObserveEventAsync_ShouldIgnoreNonReviewerReason()
     {
         ReviewCycleCoordinator coordinator = CreateCoordinator();

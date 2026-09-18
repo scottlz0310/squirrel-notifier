@@ -33,6 +33,7 @@ internal sealed class ReviewCycleCoordinator
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _stateGate = new(1, 1);
     private readonly Dictionary<string, ReviewCycleState> _states = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ReviewEvent> _latestEvents = new(StringComparer.Ordinal);
 
     public ReviewCycleCoordinator(
         IReviewCycleStore store,
@@ -67,7 +68,9 @@ internal sealed class ReviewCycleCoordinator
         {
             string key = CreateKey(reviewEvent);
             ReviewCycleState? existing = await LoadStateAsync(key, reviewEvent).ConfigureAwait(false);
-            if (existing is not null && existing.ProcessedEventIds.Contains(reviewEvent.EventId, StringComparer.Ordinal))
+            bool isDuplicate = existing is not null
+                && existing.ProcessedEventIds.Contains(reviewEvent.EventId, StringComparer.Ordinal);
+            if (isDuplicate)
             {
                 stateToPublish = existing;
             }
@@ -86,18 +89,27 @@ internal sealed class ReviewCycleCoordinator
                     processedEventIds = processedEventIds[^_maxProcessedEventIds..];
                 }
 
+                bool reviewerRunning = existing?.Status == ReviewCycleStatus.ReviewerRunning
+                    && !string.IsNullOrWhiteSpace(existing.ActiveEventId);
+
                 stateToPublish = new ReviewCycleState(
                     reviewEvent.Repository,
                     reviewEvent.PrNumber,
                     round,
                     reviewEvent.EventId,
                     reviewEvent.Reason,
-                    ReviewCycleStatus.AwaitingReviewer,
-                    null,
+                    reviewerRunning ? ReviewCycleStatus.ReviewerRunning : ReviewCycleStatus.AwaitingReviewer,
+                    reviewerRunning ? existing!.ActiveEventId : null,
+                    reviewerRunning ? existing!.ActiveRound ?? existing.Round : null,
                     _timeProvider.GetUtcNow(),
                     processedEventIds);
                 await SaveStateAsync(key, stateToPublish).ConfigureAwait(false);
                 isNewEvent = true;
+            }
+
+            if (!isDuplicate)
+            {
+                _latestEvents[key] = reviewEvent;
             }
         }
         finally
@@ -139,9 +151,15 @@ internal sealed class ReviewCycleCoordinator
             {
                 Status = ReviewCycleStatus.ReviewerRunning,
                 ActiveEventId = reviewEvent.EventId,
+                ActiveRound = state.Round,
                 UpdatedAt = _timeProvider.GetUtcNow(),
             };
             await SaveStateAsync(key, state).ConfigureAwait(false);
+
+            if (existing is null || string.Equals(existing.LastEventId, reviewEvent.EventId, StringComparison.Ordinal))
+            {
+                _latestEvents[key] = reviewEvent;
+            }
         }
         finally
         {
@@ -164,6 +182,8 @@ internal sealed class ReviewCycleCoordinator
         {
             LauncherResult result = await session.Completion.ConfigureAwait(false);
             ReviewCycleState? stateToPublish = null;
+            ReviewCycleState? latestStateToPublish = null;
+            ReviewEvent? latestEventToPublish = null;
             string key = CreateKey(reviewEvent);
 
             await _stateGate.WaitAsync().ConfigureAwait(false);
@@ -171,21 +191,44 @@ internal sealed class ReviewCycleCoordinator
             {
                 ReviewCycleState? current = await LoadStateAsync(key, reviewEvent).ConfigureAwait(false);
                 if (current is null
-                    || current.Round != round
                     || !string.Equals(current.ActiveEventId, eventId, StringComparison.Ordinal))
                 {
                     return;
                 }
 
-                stateToPublish = current with
+                ReviewCycleStatus completionStatus = result.Success
+                    ? ReviewCycleStatus.ReviewerCompleted
+                    : ReviewCycleStatus.ReviewerFailed;
+                int activeRound = current.ActiveRound ?? round;
+                bool newerEventPending = !string.Equals(current.LastEventId, eventId, StringComparison.Ordinal);
+                ReviewCycleState completedState = current with
                 {
-                    Status = result.Success
-                        ? ReviewCycleStatus.ReviewerCompleted
-                        : ReviewCycleStatus.ReviewerFailed,
+                    Round = activeRound,
+                    Status = completionStatus,
                     ActiveEventId = null,
+                    ActiveRound = null,
                     UpdatedAt = _timeProvider.GetUtcNow(),
                 };
-                await SaveStateAsync(key, stateToPublish).ConfigureAwait(false);
+                stateToPublish = completedState;
+
+                ReviewCycleState persistedState = newerEventPending
+                    ? current with
+                    {
+                        Status = ReviewCycleStatus.AwaitingReviewer,
+                        ActiveEventId = null,
+                        ActiveRound = null,
+                        UpdatedAt = _timeProvider.GetUtcNow(),
+                    }
+                    : completedState;
+                await SaveStateAsync(key, persistedState).ConfigureAwait(false);
+
+                if (newerEventPending
+                    && _latestEvents.TryGetValue(key, out ReviewEvent? latestEvent)
+                    && !string.Equals(latestEvent.EventId, eventId, StringComparison.Ordinal))
+                {
+                    latestEventToPublish = latestEvent;
+                    latestStateToPublish = persistedState;
+                }
             }
             finally
             {
@@ -198,6 +241,11 @@ internal sealed class ReviewCycleCoordinator
             }
 
             PublishStateChanged(reviewEvent, stateToPublish);
+            if (latestEventToPublish is not null && latestStateToPublish is not null)
+            {
+                PublishStateChanged(latestEventToPublish, latestStateToPublish);
+            }
+
             string status = result.Success ? "終了しました（結果未確認）" : "失敗しました";
             await _loggingService.WriteAsync(
                 $"[Cycle] {reviewEvent.PrCaption} ラウンド {round} の reviewer 実行が{status}。").ConfigureAwait(false);
@@ -271,6 +319,7 @@ internal sealed class ReviewCycleCoordinator
             reviewEvent.EventId,
             reviewEvent.Reason,
             ReviewCycleStatus.AwaitingReviewer,
+            null,
             null,
             _timeProvider.GetUtcNow(),
             [reviewEvent.EventId]);

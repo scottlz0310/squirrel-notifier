@@ -120,6 +120,7 @@ internal sealed class ReviewCycleStore : IReviewCycleStore
             persisted.LastReason,
             persisted.Status,
             persisted.ActiveEventId,
+            persisted.ActiveRound,
             persisted.UpdatedAt,
             persisted.ProcessedEventIds ?? []);
 
@@ -133,6 +134,7 @@ internal sealed class ReviewCycleStore : IReviewCycleStore
             LastReason = state.LastReason,
             Status = state.Status,
             ActiveEventId = state.ActiveEventId,
+            ActiveRound = state.ActiveRound,
             UpdatedAt = state.UpdatedAt,
             ProcessedEventIds = state.ProcessedEventIds.Distinct(StringComparer.Ordinal).ToList(),
         };
@@ -281,6 +283,9 @@ internal sealed class ReviewCycleStore : IReviewCycleStore
 
         [JsonPropertyName("activeEventId")]
         public string? ActiveEventId { get; set; }
+
+        [JsonPropertyName("activeRound")]
+        public int? ActiveRound { get; set; }
 
         [JsonPropertyName("updatedAt")]
         public DateTimeOffset UpdatedAt { get; set; }

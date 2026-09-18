@@ -146,6 +146,7 @@ public sealed class ReviewCycleStoreTests : IDisposable
             "opened",
             ReviewCycleStatus.AwaitingReviewer,
             null,
+            null,
             _initialTime,
             ["event-opened"]);
 
