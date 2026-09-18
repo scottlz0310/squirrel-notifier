@@ -158,14 +158,18 @@ reviewer が `Status: READY_TO_MERGE` の Verdict を投稿しても、**その�
 「全件 success」を機械的に適用すると、品質ゲート外の失敗で不要に停止する。**required checks が
 `completed` かつ `success`** であることをマージ条件とし、optional checks の結果は記録に留める。
 
-required かどうかは check runs の応答に含まれないため、リポジトリの方針（branch protection、
-workflow の定義）から別途判断する。本リポジトリでは `headless-e2e` が `.github/workflows/ci.yml`
-に non-required と明記されており（#307 の初期導入時の判断）、この job の失敗だけを理由に
-マージ判断を止めることはしない。失敗した場合は記録して原因を追う。
+required かどうかは check runs の応答に含まれないため、**branch protection / ruleset にある
+required status-check の実設定だけを正本として**別途確認する。workflow 内のコメント、job 名、
+過去の判断から required / optional を断定してはならない。設定を取得できない、または required
+判定が不明な場合は `CI: unknown` とし、マージ判断へ進まない。required status-check に含まれない
+job は optional として結果を記録するが、required である可能性を無視してはならない。
 
-check が未返却でも、その workflow が path フィルタで対象外なら失敗ではない。たとえば
-Changelog Guard の `verify` は csproj・CHANGELOG・当該 workflow の変更でしか起動しないため、
-docs のみの PR では実行されない。
+check が未返却でも、それだけで失敗とは判定しない。対象 workflow の path フィルタで起動しない
+ことを確認し、さらに branch protection / ruleset の required status-check に含まれていないことを
+確認する。どちらかを確認できない、または実設定と矛盾する場合は `CI: pending` または
+`CI: unknown` としてマージ判断へ進まない。たとえば Changelog Guard の `verify` は
+csproj・CHANGELOG・当該 workflow の変更でしか起動しないため、docs のみの PR では実行されないが、
+この扱いも required status-check の実設定と照合して判断する。
 
 ## 関連
 
