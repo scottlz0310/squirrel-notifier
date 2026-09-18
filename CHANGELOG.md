@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 全自動レビューサイクルの運用手順を [`docs/review-cycle-automation.md`](docs/review-cycle-automation.md) にまとめた（#87）。責務の分担、前提となる設定と環境変数、自動起動の判定順序、保留と再開の契機、`reason` の使い分け、止まったときに Recent activity から原因を切り分ける手順を、README と `docs/auto-pause.md` に分散していた内容から集約している
+
 ### Fixed
 
 - `AutoPauseResumeScheduler` の、保留が一度も起きないまま破棄される経路と、`RetryDue` の解除後にタイマーが発火する経路をテストで固定した（#342 のレビューで Codecov が未カバーと報告した分岐）。MainWindow は `RetryDue` を解除してから scheduler を破棄するため、どちらも実際に通り得る
