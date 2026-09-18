@@ -133,6 +133,21 @@ queue event を受け取ると、Squirrel Notifier は次の順に判定する�
 reviewer が起動してサマリーが投稿されても実装者側は自動では再開しないため、同じ
 セッションで待機からやり直す。
 
+## Verdict と CI の確認
+
+reviewer が `Status: READY_TO_MERGE` の Verdict を投稿しても、**その時点で CI が完了して
+いるとは限らない**。実測では、7 件の check のうち 5 件（`build-and-test` を含む）が未完了の
+まま Verdict が投稿された例がある。
+
+したがって reviewed 側は、Verdict の有無や内容に関わらず、**自分でレビュー対象 HEAD の
+check runs を取得して全件 success を確認してから**マージ判断へ進む。確認は PR 番号ではなく
+**固定した HEAD SHA** に対して行う。PR 番号を入力とする経路は、応答が対象 SHA を含まないため
+「どのコミットに対する結果か」を照合できない。
+
+check が未返却でも、その workflow が path フィルタで対象外なら失敗ではない。たとえば
+Changelog Guard の `verify` は csproj・CHANGELOG・当該 workflow の変更でしか起動しないため、
+docs のみの PR では実行されない。required かどうかはリポジトリの方針から別途判断する。
+
 ## 関連
 
 - [auto-pause.md](auto-pause.md): Auto-Pause の判定対象・解除条件・トラブルシューティング
