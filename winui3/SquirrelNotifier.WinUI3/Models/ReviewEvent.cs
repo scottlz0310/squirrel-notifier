@@ -3,11 +3,12 @@
 // </copyright>
 
 using System;
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 
 namespace SquirrelNotifier.WinUI3.Models;
 
-internal sealed class ReviewEvent
+internal sealed class ReviewEvent : INotifyPropertyChanged
 {
     [JsonPropertyName("eventId")]
     public string EventId { get; set; } = string.Empty;
@@ -35,6 +36,52 @@ internal sealed class ReviewEvent
 
     [JsonIgnore]
     public string PrCaption => PrNumber > 0 ? $"{Repository} #{PrNumber}" : Repository;
+
+    [JsonIgnore]
+    public int CycleRound { get; private set; }
+
+    [JsonIgnore]
+    public ReviewCycleStatus CycleStatus { get; private set; }
+
+    [JsonIgnore]
+    public string CycleStatusLabel
+        => CycleRound <= 0
+            ? "サイクル状態未確認"
+            : CycleStatus switch
+            {
+                ReviewCycleStatus.AwaitingReviewer => $"ラウンド {CycleRound} — reviewer 起動待ち",
+                ReviewCycleStatus.ReviewerRunning => $"ラウンド {CycleRound} — reviewer 実行中",
+                ReviewCycleStatus.ReviewerCompleted => $"ラウンド {CycleRound} — reviewer 実行完了（結果未確認）",
+                ReviewCycleStatus.ReviewerFailed => $"ラウンド {CycleRound} — reviewer 実行失敗",
+                _ => $"ラウンド {CycleRound} — 状態未確認",
+            };
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    internal void ApplyCycleState(ReviewCycleState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        bool roundChanged = CycleRound != state.Round;
+        bool statusChanged = CycleStatus != state.Status;
+        CycleRound = state.Round;
+        CycleStatus = state.Status;
+
+        if (roundChanged)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CycleRound)));
+        }
+
+        if (statusChanged)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CycleStatus)));
+        }
+
+        if (roundChanged || statusChanged)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CycleStatusLabel)));
+        }
+    }
 
     public void Validate()
     {

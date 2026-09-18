@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Recent review events に PR 単位のレビューラウンドと reviewer のローカル実行状態を表示するようにした（#257）。`re-review-requested` ごとにラウンドを進め、reviewer プロセス終了後は「結果未確認」と表示する。レビュー結果の正本は引き続き thread-owl / GitHub とし、状態は `%LocalAppData%\SquirrelNotifier\review-cycles.json` に短期間だけ保存する
+
 ## [0.11.0] - 2026-09-18
 
 レビュー自動起動の保留・再開、設定可能なレビュー対応 UI、ログインダイアログの競合修正などを含む機能リリースです。
