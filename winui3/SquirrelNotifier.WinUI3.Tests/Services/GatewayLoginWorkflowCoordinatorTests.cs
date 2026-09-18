@@ -277,6 +277,7 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
         private readonly TaskCompletionSource _showStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _dispatchStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _showCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private GatewayLoginDialogPort? _port;
         private GatewayLoginDialogSession? _session;
 
         public int HideCalls { get; private set; }
@@ -292,17 +293,24 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
         public GatewayLoginDialogPort CreatePort(GatewayLoginDialogSession session)
         {
             _session = session;
-            return new GatewayLoginDialogPort(
+            GatewayLoginDialogPort port = new(
                 ShowAsync,
                 Hide,
+                session.OnDialogClosed,
                 Dispatch,
                 Statuses.Add,
                 Verifications.Add);
+            _port = port;
+            return port;
         }
 
         public void Open() => _session!.OnDialogOpened();
 
-        public void CloseByUser() => _showCompletion.TrySetResult();
+        public void CloseByUser()
+        {
+            _port!.NotifyClosed();
+            _showCompletion.TrySetResult();
+        }
 
         public void CopyVerificationUrl(Action<string> copyText) => _session!.CopyVerificationUrl(copyText);
 
@@ -317,6 +325,7 @@ public sealed class GatewayLoginWorkflowCoordinatorTests : IDisposable
         private void Hide()
         {
             HideCalls++;
+            _port!.NotifyClosed();
             _showCompletion.TrySetResult();
         }
 

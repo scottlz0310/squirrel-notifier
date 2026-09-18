@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ログインダイアログをユーザーが閉じた直後にログイン完了の継続処理が競合し、既に閉じ始めたダイアログへ `Hide()` を追加で呼び出すフレーキーを修正した（#349）
 - `AutoPauseResumeScheduler` の、保留が一度も起きないまま破棄される経路と、`RetryDue` の解除後にタイマーが発火する経路をテストで固定した（#342 のレビューで Codecov が未カバーと報告した分岐）。MainWindow は `RetryDue` を解除してから scheduler を破棄するため、どちらも実際に通り得る
 
 ### Changed

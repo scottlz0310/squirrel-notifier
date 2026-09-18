@@ -1292,13 +1292,16 @@ internal sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
         };
 
-        dialog.Opened += (_, _) => session.OnDialogOpened();
-        return new GatewayLoginDialogPort(
+        GatewayLoginDialogPort port = new(
             async () => { await dialog.ShowAsync(ContentDialogPlacement.Popup); },
             dialog.Hide,
+            session.OnDialogClosed,
             action => DispatcherQueue.TryEnqueue(() => action()),
             status => statusText.Text = status,
             view => ApplyDeviceVerification(view, urlLabel, urlValue, urlCopyButton, codeLabel, codeValue, codeCopyButton));
+        dialog.Opened += (_, _) => session.OnDialogOpened();
+        dialog.Closed += (_, _) => port.NotifyClosed();
+        return port;
     }
 
     private static void ApplyDeviceVerification(
