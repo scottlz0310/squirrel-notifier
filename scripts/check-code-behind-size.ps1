@@ -29,7 +29,8 @@ $limits = [ordered]@{
     # #339 の実行終了・起動放棄イベントの購読・UI スレッドへの配送・保留分の起動結果の表示を反映。保留と再評価の判断は Services 側に配置している。
     # #340 の Auto-Pause 解除・再評価予約イベントの購読と、保留理由を通知へ渡す配線を反映。
     # #256 の「レビューに対応」表示トグルの配線を反映。表示状態は ViewModels 側に配置している。
-    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1430
+    # #349 のログインダイアログ Closed 通知を反映。ユーザー閉鎖とプログラム閉鎖の判定は Services 側に配置している。
+    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1433
     # #305 の resume 失敗メッセージを既存 InfoBar に表示する配線を反映。
     "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 318
     # #276 の status client / Coordinator の生成と終了時破棄を反映。

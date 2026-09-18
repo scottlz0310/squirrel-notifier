@@ -34,6 +34,7 @@ internal delegate bool GatewayLoginUiDispatcher(Action action);
 internal sealed record GatewayLoginDialogPort(
     Func<Task> ShowAsync,
     Action Hide,
+    Action NotifyClosed,
     GatewayLoginUiDispatcher DispatchToUi,
     Action<string> SetStatus,
     Action<DeviceVerificationView> SetVerification);
@@ -46,7 +47,7 @@ internal sealed record GatewayLoginUiActions(
     Func<string, string, Task> ShowAlertAsync);
 
 /// <summary>ログイン進行ダイアログを生成する UI 境界.</summary>
-/// <param name="session">ダイアログの Opened とコピー操作を接続するセッション.</param>
+/// <param name="session">ダイアログの Opened / Closed とコピー操作を接続するセッション.</param>
 /// <returns>生成済みダイアログの UI 境界.</returns>
 internal delegate GatewayLoginDialogPort GatewayLoginDialogFactory(GatewayLoginDialogSession session);
 
@@ -129,16 +130,27 @@ internal sealed class GatewayLoginDialogSession(IGatewayLoginService loginServic
     private readonly DeferredDialogCloseGate _closeGate = new();
     private GatewayLoginDialogPort? _dialog;
     private DeviceVerificationView? _latestView;
+    private bool _programmaticCloseRequested;
+    private bool _userClosedDialog;
 
     /// <summary>ダイアログが開き終わったことを通知する.</summary>
     public void OnDialogOpened()
     {
         GatewayLoginDialogPort? dialog = _dialog;
-        if (dialog is not null && _closeGate.MarkOpened())
+        if (dialog is not null && _closeGate.MarkOpened() && !_userClosedDialog)
         {
             _ = loggingService.WriteAsync(
                 "[UI] ログインダイアログの Opened 後に保留中のクローズ要求を実行します。");
             dialog.Hide();
+        }
+    }
+
+    /// <summary>ダイアログが閉じたことを通知する.</summary>
+    public void OnDialogClosed()
+    {
+        if (!_programmaticCloseRequested)
+        {
+            _userClosedDialog = true;
         }
     }
 
@@ -234,6 +246,12 @@ internal sealed class GatewayLoginDialogSession(IGatewayLoginService loginServic
 
         bool enqueued = dialog.DispatchToUi(() =>
         {
+            if (_userClosedDialog)
+            {
+                return;
+            }
+
+            _programmaticCloseRequested = true;
             if (_closeGate.RequestClose())
             {
                 dialog.Hide();
