@@ -5,7 +5,30 @@ PR レビューの開始・通知・修正・再レビューを、人のクリ�
 Squirrel Notifier 単体の設定は README の「Settings」節に、Auto-Pause の判定と解除は
 [auto-pause.md](auto-pause.md) にある。本書はそれらを**サイクル全体の中でどう組み合わせるか**に絞る。
 
-## 全体像
+## 起動モードによる分岐
+
+**手順は thread-owl の起動モードで変わる。先に確認すること。**
+compose 定義の `thread-owl` サービスの `command` を見る（`docker compose config`）。
+queue の観測結果から推測してはならない。webhook はリトライを伴う非同期配送のため、
+ある時点で queue に載っていないことは `--mcp-http` である証拠にならない。
+
+| 起動モード | queue への入口 | 実装 CLI の `enqueue_review` | 完了待機 |
+|---|---|---|---|
+| `--mcp-http`（Mcp-Docker の既定） | 明示 `enqueue_review` のみ | **必須** | できる |
+| `--webhook-mcp-http` | `POST /webhook` からの自動 enqueue | **行わない** | できない |
+
+`--webhook-mcp-http` で明示 `enqueue_review` を重ねてはならない。queue の中身は PR キーで
+dedup されるが、**enqueue のたびに購読者への通知 listener が発火する**ため、`notifications/
+resources/updated` が二重に飛び、自動起動が有効な環境では reviewer が二重起動し得る。
+webhook の delivery-id による重複排除は webhook 受信経路にしか効かない。
+
+また `review://status` を `pending` にリセットするのは `enqueue_review` tool だけで、webhook
+経由の enqueue ではリセットされない。そのため `--webhook-mcp-http` では完了待機の前提が
+成り立たず、待機せずにコメントの投稿をもってサイクルを進める。
+
+以降は **`--mcp-http` を前提**に書く。
+
+## 全体像（`--mcp-http`）
 
 ```text
 1. 実装 CLI エージェントが PR を作成・更新し、enqueue_review を呼ぶ
@@ -20,8 +43,8 @@ Squirrel Notifier 単体の設定は README の「Settings」節に、Auto-Pause
      - 指摘なし: 人にマージ判断を仰いで終了
 ```
 
-`enqueue_review` を呼ばない限り queue には何も載らない。**コメントの投稿だけでは
-サイクルは始まらない**（`--webhook-mcp-http` 構成を除く）。
+このモードでは `enqueue_review` を呼ばない限り queue には何も載らない。**コメントの
+投稿だけではサイクルは始まらない**。
 
 ## 責務の分担
 
@@ -95,11 +118,16 @@ queue event を受け取ると、Squirrel Notifier は次の順に判定する�
 待機が `--timeout-ms` に達した場合、原因は待機側からは分からない。Squirrel Notifier の
 「Recent activity」を見ると、次のどれかが分かる。
 
-- `のレビューを自動起動します` が無い → queue event が届いていない。`enqueue_review` の
-  呼び出しと、購読（`queue://review/queue`）の状態を確認する
 - `のレビューを保留しました: 別のレビューが実行中のため` → 先行するレビューの終了待ち
 - `のレビューを保留しました: Auto-Pause 中のため` → 解除待ち。リセット時刻も同じ行に出る
-- `のレビューを自動起動しませんでした:` → 設定または reason による見送り
+- `のレビューを自動起動しませんでした:` → reason による見送り
+- **どの行も無い** → 「レビュー自動開始」が有効なら、queue event が届いていない可能性が高い。
+  `enqueue_review` の呼び出しと、購読（`queue://review/queue`）の状態を確認する
+
+最後の項目は、先に **「レビュー自動開始」の設定を確認してから**判断する。無効なときは
+イベントを受信しても記録を残さない（上の判定順序の 1）ため、ログの欠落だけでは
+「queue event が届いていない」と「設定が無効」を区別できない。設定が有効であることを
+確かめたうえで、なお記録が無い場合に queue 側を疑う。
 
 解除までの時間が待機のタイムアウトを超えると、実装者側は先にタイムアウトする。その後
 reviewer が起動してサマリーが投稿されても実装者側は自動では再開しないため、同じ
