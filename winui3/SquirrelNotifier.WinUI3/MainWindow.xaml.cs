@@ -211,6 +211,8 @@ internal sealed partial class MainWindow : Window
         LiveLogAutoCloseToggle.IsOn = settings.LiveLogAutoCloseEnabled;
         AutoReviewStartToggle.IsOn = settings.AutoReviewStartEnabled;
         SessionResumeToggle.IsOn = settings.SessionResumeEnabled;
+        ReviewedActionVisibleToggle.IsOn = settings.ReviewedActionVisible;
+        ReviewEventActions.IsReviewedActionVisible = settings.ReviewedActionVisible;
 
         ReviewerPresetComboBox.ItemsSource = Models.LauncherAgentCatalog.AllWithCustomOption;
         ReviewedPresetComboBox.ItemsSource = Models.LauncherAgentCatalog.AllWithCustomOption;
@@ -520,6 +522,16 @@ internal sealed partial class MainWindow : Window
 
     private void OnAutoReviewStartToggled(object sender, RoutedEventArgs e)
         => _settingsInputCoordinator.UpdateAutoReviewStartEnabled(AutoReviewStartToggle.IsOn);
+
+    // 表示状態は共有リソースの ViewModel 経由で各行へ伝わるため、リストの作り直しは要らない（#256）
+    private void OnReviewedActionVisibleToggled(object sender, RoutedEventArgs e)
+    {
+        ReviewEventActions.IsReviewedActionVisible = ReviewedActionVisibleToggle.IsOn;
+        _settingsInputCoordinator.UpdateReviewedActionVisible(ReviewedActionVisibleToggle.IsOn);
+    }
+
+    private ViewModels.ReviewEventActionsViewModel ReviewEventActions
+        => (ViewModels.ReviewEventActionsViewModel)((FrameworkElement)Content).Resources["ReviewEventActions"];
 
     private void OnSessionResumeToggled(object sender, RoutedEventArgs e) => SaveCurrentSettings();
 
