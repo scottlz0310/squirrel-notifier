@@ -6,11 +6,11 @@ Issue #242 の launcher session 引き継ぎを、開発ビルドの Squirrel No
 
 1. `SessionResumeEnabled` を有効にし、reviewer launcher を Claude Code に設定する。
 2. 設定画面の `Reviewer Args` と `Reviewer Resume Args` を、次の完全な引数へ一時変更する。
-   - `Reviewer Args`: `-p "この会話の合言葉を復唱してください。合言葉のみを答えてください。" --session-id {sessionId} --verbose --output-format stream-json`
+   - `Reviewer Args`: `-p "この会話の合言葉は SQUIRREL-4827 です。合言葉を復唱してください。合言葉のみを答えてください。" --session-id {sessionId} --verbose --output-format stream-json`
    - `Reviewer Resume Args`: `-p "この会話の合言葉は何でしたか。合言葉のみを答えてください。" --resume {sessionId} --verbose --output-format stream-json`
 3. 同じ review event で「レビューする」を 1 回実行し、`sessions.json` の `sessionId` と起動コマンドの値が一致することを確認する。
 4. 同じ event で「レビューする」をもう一度実行する。
-5. 2 回目の起動が `--resume <sessionId>` を使い、1 回目の合言葉を答えることを確認する。
+5. 2 回目の起動が `--resume <sessionId>` を使い、1 回目に設定した `SQUIRREL-4827` を答えることを確認する。
 
 確認時は session ID をログや Issue コメントへ全文転記せず、先頭数文字だけを記録します。
 
