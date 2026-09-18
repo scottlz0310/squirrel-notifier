@@ -133,6 +133,44 @@ queue event を受け取ると、Squirrel Notifier は次の順に判定する�
 reviewer が起動してサマリーが投稿されても実装者側は自動では再開しないため、同じ
 セッションで待機からやり直す。
 
+## Verdict と CI の確認
+
+reviewer が `Status: READY_TO_MERGE` の Verdict を投稿しても、**その時点で CI が完了して
+いるとは限らない**。実測では、7 件の check のうち 5 件（`build-and-test` を含む）が未完了の
+まま Verdict が投稿された例がある。
+
+したがって reviewed 側は、Verdict の有無や内容に関わらず、**自分で check runs を取得して
+確認してから**マージ判断へ進む。手順は次のとおり。
+
+1. PR の現在の HEAD SHA を取得し、`reviewedHeadSha` として固定する
+2. **その SHA に対して** check runs を取得する。PR 番号を入力とする経路は、応答が対象 SHA を
+   含まないため「どのコミットに対する結果か」を照合できない。使わない
+3. 各 run の `head_sha` が `reviewedHeadSha` と一致することと、全ページ取得が完了したことを
+   確認する
+4. **マージ判断の直前に PR の HEAD をもう一度取得し、`reviewedHeadSha` と一致することを
+   確認する**
+
+4 を省いてはならない。check runs を取得した後に push が入ると、古い HEAD の結果を根拠に
+新しい HEAD をマージしてしまう。不一致なら取得済みの結果を破棄し、新しい SHA で 1 からやり直す。
+
+### required と optional を分ける
+
+「全件 success」を機械的に適用すると、品質ゲート外の失敗で不要に停止する。**required checks が
+`completed` かつ `success`** であることをマージ条件とし、optional checks の結果は記録に留める。
+
+required かどうかは check runs の応答に含まれないため、**branch protection / ruleset にある
+required status-check の実設定だけを正本として**別途確認する。workflow 内のコメント、job 名、
+過去の判断から required / optional を断定してはならない。設定を取得できない、または required
+判定が不明な場合は `CI: unknown` とし、マージ判断へ進まない。required status-check に含まれない
+job は optional として結果を記録するが、required である可能性を無視してはならない。
+
+check が未返却でも、それだけで失敗とは判定しない。対象 workflow の path フィルタで起動しない
+ことを確認し、さらに branch protection / ruleset の required status-check に含まれていないことを
+確認する。どちらかを確認できない、または実設定と矛盾する場合は `CI: pending` または
+`CI: unknown` としてマージ判断へ進まない。たとえば Changelog Guard の `verify` は
+csproj・CHANGELOG・当該 workflow の変更でしか起動しないため、docs のみの PR では実行されないが、
+この扱いも required status-check の実設定と照合して判断する。
+
 ## 関連
 
 - [auto-pause.md](auto-pause.md): Auto-Pause の判定対象・解除条件・トラブルシューティング
