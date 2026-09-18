@@ -31,6 +31,23 @@ public class CommandLineFormatterTests
     }
 
     [Fact]
+    public void Format_ShouldPreserveSkillInvocationInQuotedPrompt()
+    {
+        string result = CommandLineFormatter.Format(
+            "codex",
+            new[]
+            {
+                "exec",
+                "--skip-git-repo-check",
+                "--json",
+                "/thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください",
+            });
+
+        result.Should().Be(
+            "codex exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください\"");
+    }
+
+    [Fact]
     public void Format_ShouldEscapeEmbeddedQuotes()
     {
         // Act

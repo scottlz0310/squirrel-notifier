@@ -124,8 +124,8 @@ internal static class LauncherAgentCatalog
         null);
 
     // claude はスキル定義への progress スニペット組み込み（docs/samples/skill-progress-snippet.md）
-    // により @squirrel-progress を出力できる。codex / agy / copilot はスキル機構が無く
-    // 構造化イベントの producer 統合が未整備のため None（indeterminate 表示）とする.
+    // により @squirrel-progress を出力できる。codex / agy / copilot は構造化イベントの
+    // producer 統合が未整備のため None（indeterminate 表示）とする.
     //
     // claude の print mode は既定（text）だと最終応答しか stdout へ出力せず、スキルが echo する
     // マーカーを実行中に取得できない（#187）。stream-json でリアルタイムイベントを受け取り、
@@ -147,17 +147,17 @@ internal static class LauncherAgentCatalog
             SessionIdSupply: SessionIdSupply.ClientAssigned,
             OutputFormat: LauncherOutputFormat.ClaudeStreamJson),
 
-        // codex / agy / copilot はスキル呼び出し機構を持たないため、プロンプト全文を
-        // テンプレートに埋め込む（MCP サーバー接続設定自体は Mcp-Docker の責務）.
+        // 各 CLI の skill は Mcp-Docker から配布される。MCP サーバー接続設定と skill の
+        // 配布・更新自体は squirrel-notifier の責務ではなく、ここでは起動プロンプトだけを渡す.
         new LauncherAgentDefinition(
             "codex",
             "codex",
             "codex",
-            "exec --skip-git-repo-check --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "exec --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "exec --json \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
             string.Empty,
-            "exec resume --skip-git-repo-check --json {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "exec resume --json {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "exec resume --skip-git-repo-check --json {sessionId} \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "exec resume --json {sessionId} \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
             "codex",
             SessionIdSupply: SessionIdSupply.ParsedFromOutput,
             OutputFormat: LauncherOutputFormat.CodexJson),
@@ -166,11 +166,11 @@ internal static class LauncherAgentCatalog
             "agy",
             "agy (Antigravity CLI)",
             "agy",
-            "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "--print-timeout 30m --output-format stream-json -p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "--print-timeout 30m --output-format stream-json -p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
             string.Empty,
-            "--print-timeout 30m --output-format stream-json --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "--print-timeout 30m --output-format stream-json --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "--print-timeout 30m --output-format stream-json --conversation {sessionId} -p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "--print-timeout 30m --output-format stream-json --conversation {sessionId} -p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
             "agy",
             SessionIdSupply: SessionIdSupply.ParsedFromOutput,
             OutputFormat: LauncherOutputFormat.AgyStreamJson),
@@ -179,11 +179,11 @@ internal static class LauncherAgentCatalog
             "copilot",
             "copilot (GitHub Copilot CLI)",
             "copilot",
-            "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
             "--session-id {sessionId}",
-            "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --session-id {sessionId}",
-            "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\" --session-id {sessionId}",
+            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --session-id {sessionId}",
+            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --session-id {sessionId}",
             null,
             SessionIdSupply: SessionIdSupply.ClientAssigned),
     ];

@@ -13,11 +13,11 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 | プリセット ID | コマンド | 引数の方式 | rateLimitAgentId |
 |---|---|---|---|
 | `claude` | `claude` | `-p "/thread-owl-pr-reviewer ..." --verbose --output-format stream-json` のようなスキル呼び出し。stream-json は progress event の逐次取得用で、`-p` との併用時は CLI 仕様で `--verbose` が必須（[docs/progress-event-contract.md](progress-event-contract.md) 参照） | `claude-code` |
-| `codex` | `codex` | reviewer は `exec --skip-git-repo-check --json "..."`、reviewed は `exec --json "..."` にプロンプト全文を埋め込み | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
-| `agy` | `agy` | `--print-timeout 30m --output-format stream-json -p "..."` にプロンプト全文を埋め込み | `agy` |
-| `copilot` | `copilot` | `-p "..."` にプロンプト全文を埋め込み | `null`（レートリミット取得手段が無い） |
+| `codex` | `codex` | reviewer は `exec --skip-git-repo-check --json "/thread-owl-pr-reviewer ..."`、reviewed は `exec --json "/review-raven-thread-owl-cycle ..."` | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
+| `agy` | `agy` | `--print-timeout 30m --output-format stream-json -p "/thread-owl-pr-reviewer ..."` または `"/review-raven-thread-owl-cycle ..."` | `agy` |
+| `copilot` | `copilot` | `-p "/thread-owl-pr-reviewer ..."` または `"/review-raven-thread-owl-cycle ..."` | `null`（レートリミット取得手段が無い） |
 
-codex / agy / copilot はスキル呼び出し機構を持たないため、claude 版スキルが行う指示内容（thread-owl MCP のツールを使ったレビュー・対応フロー）をプロンプト全文としてテンプレートに埋め込んでいる。実際に動作させるには、当該エージェントが thread-owl の MCP ツールを利用できるよう接続設定済みであることが前提（前述の責務境界により、この接続設定自体は squirrel-notifier の対象外）。
+全プリセットが正式 skill 名をプロンプトの先頭で呼び出す。skill 本体の配布・更新と MCP 接続設定は Mcp-Docker の責務であり、squirrel-notifier は起動テンプレートだけを管理する。skill が未配布、または CLI が slash skill に未対応の場合は、起動プロセスの stderr と失敗メッセージに原因を残す。
 
 ## Settings UI での挙動
 
@@ -28,6 +28,7 @@ codex / agy / copilot はスキル呼び出し機構を持たないため、clau
 - reviewer は対象 checkout 外の専用ディレクトリから起動するため、#186 より前の Codex reviewer 既定引数だけを `CodexReviewerWorkingDirectoryMigrated` で `--skip-git-repo-check` 付きへ移行する。自由編集された command / arguments と reviewed 側は変更しない
 - #187 より前の `claude` 既定引数は text 出力のため progress event を実行中に取得できなかった。未変更の既定値だけを `ClaudeStreamJsonMigrated` で `--verbose --output-format stream-json` 付きへ移行する。自由編集された command / arguments は変更しない
 - #306 より前の `codex` / `agy` 既定引数は session ID を取得できない出力形式だった。未変更の既定値だけを `CodexJsonOutputMigrated` / `AgyStreamJsonMigrated` で `codex --json` / `agy --output-format stream-json` 付きへ移行する。自由編集された command / arguments は変更しない
+- #353 より前の `codex` / `agy` / `copilot` 既定引数は MCP ツールの使い方を全文へ埋め込んでいた。未変更の既定値だけを `LauncherSkillPromptMigrated` で正式 skill 呼び出しへ移行する。自由編集された command / arguments / resume arguments は変更しない
 
 ## セッション resume
 
@@ -74,4 +75,4 @@ session 情報は `%LOCALAPPDATA%\SquirrelNotifier\sessions.json` に保存す�
 
 ## codex exec のハング対策
 
-codex 等スキル機構を持たないエージェントは、プロンプトを引数で受け取っても標準入力の EOF を待って停止することがある（[openai/codex#20919](https://github.com/openai/codex/issues/20919)）。`ReviewLauncherService` は起動直後に標準入力を即座に閉じ、EOF を通知することでこれを回避している。
+codex 等の非対話 print / exec モードは、プロンプトを引数で受け取っても標準入力の EOF を待って停止することがある（[openai/codex#20919](https://github.com/openai/codex/issues/20919)）。`ReviewLauncherService` は起動直後に標準入力を即座に閉じ、EOF を通知することでこれを回避している。

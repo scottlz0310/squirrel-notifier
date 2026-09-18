@@ -394,6 +394,36 @@ public class ReviewLauncherServiceTests : IDisposable
         log.Should().NotContain(secret);
     }
 
+    [Fact]
+    public async Task LaunchAsync_ShouldExplainSkillInvocationFailure()
+    {
+        LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
+        ConfigureSettings(
+            reviewerCmd: codex.Command,
+            reviewerArgs: codex.ReviewerArgumentsTemplate,
+            reviewerResumeArgs: codex.ReviewerResumeArgumentsTemplate,
+            reviewerPresetId: codex.Id);
+        Mock<IProcessInstance> process = CreateMockProcess(
+            42,
+            string.Empty,
+            "unknown skill: thread-owl-pr-reviewer");
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object);
+
+        LauncherResult result = await service.LaunchAsync(
+            CreateReviewEvent("skill-failure"),
+            LauncherRole.Reviewer,
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("skill が未配布");
+        result.ErrorMessage.Should().Contain("unknown skill: thread-owl-pr-reviewer");
+        string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+        log.Should().Contain("Review process failure:");
+        log.Should().Contain("unknown skill: thread-owl-pr-reviewer");
+    }
+
     [Theory]
     [InlineData("reviewer", "reviewer-cmd", "--reviewer-arg")]
     [InlineData("reviewed", "reviewed-cmd", "--reviewed-arg")]
@@ -452,6 +482,31 @@ public class ReviewLauncherServiceTests : IDisposable
 
         // Assert
         commandLine.Should().Be("claude -p \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\" --verbose --output-format stream-json");
+    }
+
+    [Theory]
+    [InlineData("Reviewer", "codex", "codex exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\"")]
+    [InlineData("Reviewed", "codex", "codex exec --json \"/review-raven-thread-owl-cycle scottlz0310/squirrel-notifier#123 のレビュー指摘に対応してください\"")]
+    public async Task BuildCommandLine_ShouldUseSkillInvocationForCodex(string roleName, string presetId, string expected)
+    {
+        LauncherRole role = Enum.Parse<LauncherRole>(roleName);
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+        ConfigureSettings(
+            reviewerCmd: definition.Command,
+            reviewerArgs: definition.ReviewerArgumentsTemplate,
+            reviewedCmd: definition.Command,
+            reviewedArgs: definition.ReviewedArgumentsTemplate,
+            reviewerPresetId: presetId,
+            reviewedPresetId: presetId);
+        ReviewEvent reviewEvent = CreateReviewEvent("codex-skill-prompt");
+        reviewEvent.Reason = "opened";
+        reviewEvent.PrNumber = 123;
+        reviewEvent.PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/123";
+        var service = new ReviewLauncherService(_settingsService, _loggingService, new Mock<IProcessRunner>().Object);
+
+        string commandLine = await service.BuildCommandLineAsync(reviewEvent, role);
+
+        commandLine.Should().Be(expected);
     }
 
     [Theory]
@@ -709,6 +764,8 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedArguments.Should().HaveCount(2);
         capturedArguments[0].Should().NotContain(resumeOption);
         capturedArguments[1].Should().ContainInOrder(resumeOption, sessionId.ToString("D"));
+        string.Join(" ", capturedArguments[0]).Should().Contain("/thread-owl-pr-reviewer");
+        string.Join(" ", capturedArguments[1]).Should().Contain("/thread-owl-pr-reviewer");
         store.SavedSessionIds.Should().Equal(sessionId, sessionId);
         (first.Stdout.Contains("thread.started", StringComparison.Ordinal)
             || first.Stdout.Contains("step_update", StringComparison.Ordinal)).Should().BeTrue();

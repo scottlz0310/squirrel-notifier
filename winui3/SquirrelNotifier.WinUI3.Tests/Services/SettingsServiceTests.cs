@@ -831,6 +831,7 @@ public class SettingsServiceTests : IDisposable
             LauncherSlotsMigrated = true,
             LauncherPresetsMigrated = true,
             AgyPrintTimeoutMigrated = true,
+            LauncherSkillPromptMigrated = true,
         };
         File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
 
@@ -941,6 +942,7 @@ public class SettingsServiceTests : IDisposable
             LauncherPresetsMigrated = true,
             LauncherResumeTemplatesMigrated = true,
             CodexJsonOutputMigrated = true,
+            LauncherSkillPromptMigrated = true,
         };
         File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
 
@@ -949,6 +951,88 @@ public class SettingsServiceTests : IDisposable
             var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
 
             service.Settings.ReviewerLauncherArguments.Should().Be(legacyArgs);
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("agy")]
+    [InlineData("copilot")]
+    public void LauncherSkillPromptMigration_ShouldRewriteOnlyLegacyDefaults(string presetId)
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierSkillPromptMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = presetId,
+            ReviewerLauncherArguments = BuildLegacySkilllessArguments(presetId, reviewer: true),
+            ReviewerLauncherResumeArguments = BuildLegacySkilllessResumeArguments(presetId, reviewer: true),
+            ReviewedLauncherCommandPath = presetId,
+            ReviewedLauncherArguments = BuildLegacySkilllessArguments(presetId, reviewer: false),
+            ReviewedLauncherResumeArguments = BuildLegacySkilllessResumeArguments(presetId, reviewer: false),
+            LauncherSlotsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            CodexJsonOutputMigrated = true,
+            AgyStreamJsonMigrated = true,
+            LauncherResumeTemplatesMigrated = true,
+            LauncherPresetsMigrated = false,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(definition.ReviewerArgumentsTemplate);
+            service.Settings.ReviewerLauncherResumeArguments.Should().Be(definition.ReviewerResumeArgumentsTemplate);
+            service.Settings.ReviewedLauncherArguments.Should().Be(definition.ReviewedArgumentsTemplate);
+            service.Settings.ReviewedLauncherResumeArguments.Should().Be(definition.ReviewedResumeArgumentsTemplate);
+            service.Settings.ReviewerLauncherPresetId.Should().Be(presetId);
+            service.Settings.ReviewedLauncherPresetId.Should().Be(presetId);
+            service.Settings.LauncherSkillPromptMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Fact]
+    public void LauncherSkillPromptMigration_ShouldPreserveCustomizedResumeArguments()
+    {
+        const string customResumeArguments = "exec resume --custom {sessionId}";
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierSkillPromptMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "codex",
+            ReviewerLauncherArguments = BuildLegacySkilllessArguments("codex", reviewer: true),
+            ReviewerLauncherResumeArguments = customResumeArguments,
+            LauncherSlotsMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            CodexJsonOutputMigrated = true,
+            AgyStreamJsonMigrated = true,
+            LauncherResumeTemplatesMigrated = true,
+            LauncherPresetsMigrated = true,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(seed.ReviewerLauncherArguments);
+            service.Settings.ReviewerLauncherResumeArguments.Should().Be(customResumeArguments);
+            service.Settings.LauncherSkillPromptMigrated.Should().BeTrue();
         }
         finally
         {
@@ -1399,5 +1483,39 @@ public class SettingsServiceTests : IDisposable
 
         _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewer).Should().Be(ProgressEventSupport.None);
         _settingsService.ResolveLauncherProgressEventSupport(LauncherRole.Reviewed).Should().Be(ProgressEventSupport.None);
+    }
+
+    private static string BuildLegacySkilllessArguments(string presetId, bool reviewer)
+    {
+        string prompt = reviewer
+            ? "thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください"
+            : "thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください";
+
+        return presetId switch
+        {
+            "codex" => reviewer
+                ? $"exec --skip-git-repo-check --json \"{prompt}\""
+                : $"exec --json \"{prompt}\"",
+            "agy" => $"--print-timeout 30m --output-format stream-json -p \"{prompt}\"",
+            "copilot" => $"-p \"{prompt}\"",
+            _ => throw new ArgumentOutOfRangeException(nameof(presetId)),
+        };
+    }
+
+    private static string BuildLegacySkilllessResumeArguments(string presetId, bool reviewer)
+    {
+        string prompt = reviewer
+            ? "thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください"
+            : "thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください";
+
+        return presetId switch
+        {
+            "codex" => reviewer
+                ? $"exec resume --skip-git-repo-check --json {{sessionId}} \"{prompt}\""
+                : $"exec resume --json {{sessionId}} \"{prompt}\"",
+            "agy" => $"--print-timeout 30m --output-format stream-json --conversation {{sessionId}} -p \"{prompt}\"",
+            "copilot" => $"-p \"{prompt}\" --session-id {{sessionId}}",
+            _ => throw new ArgumentOutOfRangeException(nameof(presetId)),
+        };
     }
 }
