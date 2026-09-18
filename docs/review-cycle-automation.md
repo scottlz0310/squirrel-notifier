@@ -139,14 +139,33 @@ reviewer が `Status: READY_TO_MERGE` の Verdict を投稿しても、**その�
 いるとは限らない**。実測では、7 件の check のうち 5 件（`build-and-test` を含む）が未完了の
 まま Verdict が投稿された例がある。
 
-したがって reviewed 側は、Verdict の有無や内容に関わらず、**自分でレビュー対象 HEAD の
-check runs を取得して全件 success を確認してから**マージ判断へ進む。確認は PR 番号ではなく
-**固定した HEAD SHA** に対して行う。PR 番号を入力とする経路は、応答が対象 SHA を含まないため
-「どのコミットに対する結果か」を照合できない。
+したがって reviewed 側は、Verdict の有無や内容に関わらず、**自分で check runs を取得して
+確認してから**マージ判断へ進む。手順は次のとおり。
+
+1. PR の現在の HEAD SHA を取得し、`reviewedHeadSha` として固定する
+2. **その SHA に対して** check runs を取得する。PR 番号を入力とする経路は、応答が対象 SHA を
+   含まないため「どのコミットに対する結果か」を照合できない。使わない
+3. 各 run の `head_sha` が `reviewedHeadSha` と一致することと、全ページ取得が完了したことを
+   確認する
+4. **マージ判断の直前に PR の HEAD をもう一度取得し、`reviewedHeadSha` と一致することを
+   確認する**
+
+4 を省いてはならない。check runs を取得した後に push が入ると、古い HEAD の結果を根拠に
+新しい HEAD をマージしてしまう。不一致なら取得済みの結果を破棄し、新しい SHA で 1 からやり直す。
+
+### required と optional を分ける
+
+「全件 success」を機械的に適用すると、品質ゲート外の失敗で不要に停止する。**required checks が
+`completed` かつ `success`** であることをマージ条件とし、optional checks の結果は記録に留める。
+
+required かどうかは check runs の応答に含まれないため、リポジトリの方針（branch protection、
+workflow の定義）から別途判断する。本リポジトリでは `headless-e2e` が `.github/workflows/ci.yml`
+に non-required と明記されており（#307 の初期導入時の判断）、この job の失敗だけを理由に
+マージ判断を止めることはしない。失敗した場合は記録して原因を追う。
 
 check が未返却でも、その workflow が path フィルタで対象外なら失敗ではない。たとえば
 Changelog Guard の `verify` は csproj・CHANGELOG・当該 workflow の変更でしか起動しないため、
-docs のみの PR では実行されない。required かどうかはリポジトリの方針から別途判断する。
+docs のみの PR では実行されない。
 
 ## 関連
 
