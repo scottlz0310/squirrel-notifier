@@ -51,7 +51,7 @@ public class AgentProcessStartInfoFactoryTests
 
         psi.FileName.Should().EndWith("cmd.exe", "cmd.exe（ComSpec）へ委譲すること");
         psi.Arguments.Should().Be(
-            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0% \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_1%\"");
+            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0% \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_1%\"\"");
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_COMMAND"].Should().Be(resolvedPath);
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_0"].Should().Be("exec");
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_1"].Should().Be(
