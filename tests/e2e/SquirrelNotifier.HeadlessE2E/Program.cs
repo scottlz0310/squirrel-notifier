@@ -39,6 +39,7 @@ internal static class Program
     [
         "sanitized.log",
         "command-lines.json",
+        "subscriber-invocations.json",
         "settings-sanitized.json",
         "versions.json",
     ];
@@ -62,6 +63,10 @@ internal static class Program
         catch (E2eFailureException ex)
         {
             failure = ex;
+        }
+        catch (ContractE2EFailureException ex)
+        {
+            failure = new E2eFailureException(ex.Category, ex.Message);
         }
         catch (OperationCanceledException)
         {
@@ -138,7 +143,8 @@ internal static class Program
         string ScenarioFile,
         string RunRoot,
         string ArtifactsDirectory,
-        string DummyLauncherPath)
+        string DummyLauncherPath,
+        string? SubscriberFixturePath)
     {
         public static RunnerOptions Parse(string[] args)
         {
@@ -156,11 +162,17 @@ internal static class Program
                 values[option[2..]] = args[++index];
             }
 
+            string? subscriberFixturePath = values.TryGetValue("subscriber-fixture", out string? subscriberFixture)
+                && !string.IsNullOrWhiteSpace(subscriberFixture)
+                ? Path.GetFullPath(subscriberFixture)
+                : null;
+
             return new RunnerOptions(
                 GetRequired(values, "scenario-file"),
                 GetRequired(values, "run-root"),
                 GetRequired(values, "artifacts-directory"),
-                GetRequired(values, "dummy-launcher")) with
+                GetRequired(values, "dummy-launcher"),
+                subscriberFixturePath) with
             {
                 ScenarioFile = Path.GetFullPath(GetRequired(values, "scenario-file")),
                 RunRoot = Path.GetFullPath(GetRequired(values, "run-root")),
@@ -209,6 +221,7 @@ internal static class Program
 
         private readonly ScenarioManifest _manifest;
         private readonly string _dummyLauncherPath;
+        private readonly string? _subscriberFixturePath;
         private readonly Dictionary<string, string?> _environmentBeforeRun = new(StringComparer.Ordinal);
         private readonly List<string> _assertions = [];
         private static readonly string[] _resourceUris = ["queue://review/queue"];
@@ -224,6 +237,7 @@ internal static class Program
             RunRoot = options.RunRoot;
             ArtifactsDirectory = options.ArtifactsDirectory;
             _dummyLauncherPath = options.DummyLauncherPath;
+            _subscriberFixturePath = options.SubscriberFixturePath;
 
             if (!File.Exists(_dummyLauncherPath))
             {
@@ -303,6 +317,23 @@ internal static class Program
                 case "parsed-output":
                     await RunParsedOutputAsync(timeout.Token).ConfigureAwait(false);
                     break;
+                case "subscriber-gateway-contract":
+                case "gateway-auth-flow":
+                    if (string.IsNullOrWhiteSpace(_subscriberFixturePath))
+                    {
+                        throw new E2eFailureException("TEST_HARNESS_FAILED", "subscriber fixture の実行ファイルが指定されていません。");
+                    }
+
+                    _assertions.AddRange(
+                        await ContractE2ERunner.RunAsync(
+                            _manifest.ScenarioKind,
+                            RunRoot,
+                            SettingsDirectory,
+                            LogDirectory,
+                            ArtifactsDirectory,
+                            _subscriberFixturePath,
+                            timeout.Token).ConfigureAwait(false));
+                    break;
                 default:
                     throw new E2eFailureException("TEST_HARNESS_FAILED", "未登録の scenario kind です。");
             }
@@ -327,6 +358,7 @@ internal static class Program
                     phase = _phase,
                     scenarioId = _manifest.Id,
                     commitSha = Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "local",
+                    components = _manifest.Components,
                     os = Environment.OSVersion.VersionString,
                     runtime = RuntimeInformation.FrameworkDescription,
                     dotnetVersion = Environment.Version.ToString(),

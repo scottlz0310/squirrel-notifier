@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "subscriber-gateway-contract",
+  "phase": "headless",
+  "timeoutSeconds": 120,
+  "components": {
+    "mcp-resource-subscriber": "0.6.0"
+  },
+  "fixture": "subscriber/gateway-contract",
+  "expectedOutcome": "ERROR_AND_SUCCESS_CONTRACTS",
+  "scenarioKind": "subscriber-gateway-contract"
+}

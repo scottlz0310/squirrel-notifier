@@ -822,7 +822,7 @@ public class McpSubscriptionServiceTests : IDisposable
             var result = await service.PreflightCheckAsync(CancellationToken.None);
 
             // Assert
-            result.Should().BeTrue();
+            result.Should().BeTrue(because: service.LastError);
         }
         finally
         {

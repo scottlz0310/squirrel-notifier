@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Recent review events に PR 単位のレビューラウンドと reviewer のローカル実行状態を表示するようにした（#257）。`re-review-requested` ごとにラウンドを進め、reviewer プロセス終了後は「結果未確認」と表示する。レビュー結果の正本は引き続き thread-owl / GitHub とし、状態は `%LocalAppData%\SquirrelNotifier\review-cycles.json` に短期間だけ保存する
+- mcp-resource-subscriber の CLI、loopback fake Gateway、認証 device flow、token cache 後の再購読を実プロセスで検証する Windows headless E2E と、artifact の secret scan を追加した（#222）
 
 ### Changed
 

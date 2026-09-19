@@ -470,17 +470,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         try
         {
             AppSettings settings = _settingsService.Settings;
-            ProcessStartInfo psi = new ProcessStartInfo
-            {
-                FileName = SettingsService.ResolveCommandPath(settings.SubscriberCommandPath),
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = System.Text.Encoding.UTF8,
-                StandardErrorEncoding = System.Text.Encoding.UTF8,
-            };
-            psi.ArgumentList.Add("--help");
+            ProcessStartInfo psi = CreateSubscriberProcessStartInfo(
+                SettingsService.ResolveCommandPath(settings.SubscriberCommandPath),
+                ["--help"]);
 
             using (_activeProcess = _processRunner.Start(psi))
             {
@@ -596,16 +588,24 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
             try
             {
                 AppSettings settings = _settingsService.Settings;
-                ProcessStartInfo psi = new ProcessStartInfo
+                string resolvedPath = SettingsService.ResolveCommandPath(settings.SubscriberCommandPath);
+
+                // Add arguments
+                List<string> arguments = [];
+                if (!string.IsNullOrWhiteSpace(settings.SubscriberArguments))
                 {
-                    FileName = SettingsService.ResolveCommandPath(settings.SubscriberCommandPath),
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    StandardOutputEncoding = System.Text.Encoding.UTF8,
-                    StandardErrorEncoding = System.Text.Encoding.UTF8,
-                };
+                    arguments.AddRange(ParseArguments(settings.SubscriberArguments));
+                }
+
+                arguments.Add("--url");
+                arguments.Add(settings.GatewayUrl);
+                arguments.Add("--uri");
+                arguments.Add(resourceUri);
+                arguments.Add("--timeout-ms");
+                arguments.Add(settings.NotificationTimeoutMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                arguments.Add("--json");
+
+                ProcessStartInfo psi = CreateSubscriberProcessStartInfo(resolvedPath, arguments);
 
                 // Add token env
                 string? tokenValue = Environment.GetEnvironmentVariable("MCP_PROBE_AUTH_TOKEN");
@@ -613,27 +613,6 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 {
                     psi.Environment["MCP_PROBE_AUTH_TOKEN"] = tokenValue;
                 }
-
-                // Add arguments
-                if (!string.IsNullOrWhiteSpace(settings.SubscriberArguments))
-                {
-                    List<string> args = ParseArguments(settings.SubscriberArguments);
-                    foreach (string arg in args)
-                    {
-                        psi.ArgumentList.Add(arg);
-                    }
-                }
-
-                psi.ArgumentList.Add("--url");
-                psi.ArgumentList.Add(settings.GatewayUrl);
-
-                psi.ArgumentList.Add("--uri");
-                psi.ArgumentList.Add(resourceUri);
-
-                psi.ArgumentList.Add("--timeout-ms");
-                psi.ArgumentList.Add(settings.NotificationTimeoutMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
-
-                psi.ArgumentList.Add("--json");
 
                 await LogAsync($"Launching subscriber for resource: {resourceUri}").ConfigureAwait(false);
 
@@ -846,6 +825,20 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         await _loggingService.WriteAsync(message).ConfigureAwait(false);
     }
 
+    private static ProcessStartInfo CreateSubscriberProcessStartInfo(
+        string resolvedPath,
+        IReadOnlyList<string> arguments)
+    {
+        ProcessStartInfo startInfo = ExternalProcessStartInfoFactory.Create(
+            resolvedPath,
+            arguments,
+            redirectStandardInput: false,
+            quotingPolicy: ShellScriptArgumentQuotingPolicy.PreserveUnquotedSafeArguments);
+        startInfo.StandardOutputEncoding = System.Text.Encoding.UTF8;
+        startInfo.StandardErrorEncoding = System.Text.Encoding.UTF8;
+        return startInfo;
+    }
+
     private bool TryMarkAsSeen(string eventId, ReviewEvent? reviewEvent = null)
     {
         if (string.IsNullOrEmpty(eventId))
@@ -1001,18 +994,19 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         _stopCts?.Cancel();
         _activeProcessCts?.Cancel();
 
-        if (_activeProcess != null)
+        IProcessInstance? activeProcess = _activeProcess;
+        if (activeProcess != null)
         {
             try
             {
-                _activeProcess.Kill(entireProcessTree: true);
+                activeProcess.Kill(entireProcessTree: true);
             }
             catch
             {
                 // ignore
             }
 
-            _activeProcess.Dispose();
+            activeProcess.Dispose();
         }
 
         foreach (IProcessInstance process in _activeProcesses.Values)

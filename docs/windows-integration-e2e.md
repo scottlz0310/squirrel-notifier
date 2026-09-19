@@ -84,6 +84,20 @@ fixture は一時 PATH 上の codex.exe として解決するが、実 Codex CLI
 raw の invocation record と sessions.json は専用 root 内だけで assertion に使い、artifact には
 サニタイズ済みのログ・設定・command line だけを出力する。
 
+### #222 subscriber、gateway、認証の headless scenario
+
+Issue #222 は、実 `McpSubscriptionService` / `McpLoginService` が実 subscriber プロセスを
+起動する境界を、loopback の fake Gateway と version pin した dummy subscriber で検証する。
+実 GitHub、実 OAuth provider、実ブラウザ、production の gateway は使用しない。
+
+| Scenario ID | 検証内容 |
+|---|---|
+| subscriber-gateway-contract | `--help` / 購読引数、success、protocol mismatch、401、tool error、接続拒否、認証なし request |
+| gateway-auth-flow | `.cmd` / `.bat` の PATH 解決、`--version`、device flow、verification URL、token cache 後の Authorization 付き再購読 |
+
+認証 fixture は内部用の token marker を生成するが、product log、settings、sanitized artifact へ
+出力しないことも同時に検査する。
+
 ### 非対象
 
 - WinUI 要素のクリックや目視判定
@@ -165,14 +179,14 @@ tests/e2e/
 ```json
 {
   "schemaVersion": 1,
-  "id": "gateway-auth-required",
+  "id": "subscriber-gateway-contract",
   "phase": "headless",
   "timeoutSeconds": 120,
   "components": {
-    "mcp-resource-subscriber": "0.5.0"
+    "mcp-resource-subscriber": "0.6.0"
   },
-  "fixture": "gateway/auth-required",
-  "expectedOutcome": "AUTH_REQUIRED"
+  "fixture": "subscriber/gateway-contract",
+  "expectedOutcome": "ERROR_AND_SUCCESS_CONTRACTS"
 }
 ```
 
@@ -202,8 +216,9 @@ dummy subscriber / launcher は次を満たす。
 - 実 GitHub CLI、AI agent、ブラウザを起動しない。
 
 Issue #307 の launcher fixture は上記契約のうち、引数・working directory・標準入力の状態、
-構造化 stdout、終了コードを実装する。MSI、subscriber、fake endpoint を含む広い Phase 1
-fixture は #221〜#223 で追加する。
+構造化 stdout、終了コードを実装する。Issue #222 の subscriber fixture は CLI 引数、HTTP
+status、認証状態、JSON event を実装する。MSI、silent install、enqueue から通知モデルまでを
+含む残りの Phase 1 fixture は #221 と #223 で追加する。
 
 ## Version pin 契約
 
@@ -343,8 +358,9 @@ pwsh -File .\tests\e2e\scripts\Invoke-E2ECleanup.ps1 `
   -RunRoot <実行時に表示された専用 root>
 ```
 
-Invoke-E2E.ps1 は #307 の resume 境界を対象にした Phase 1 の最小 entrypoint である。
-配布物、subscriber、gateway、認証を跨ぐ広い entrypoint は #221〜#223 で拡張する。
+Invoke-E2E.ps1 は #307 の resume 境界と #222 の subscriber / gateway / 認証契約を対象にした
+Phase 1 の entrypoint である。配布物、MSI、Task Scheduler、enqueue から通知モデルまでを
+跨ぐ広い scenario は #221 と #223 で拡張する。
 
 ローカル実行は管理者権限を暗黙要求しない。MSI install 等で権限が必要な scenario は開始前に
 preflight し、不足時は途中まで実行せず明確な failure reason を返す。

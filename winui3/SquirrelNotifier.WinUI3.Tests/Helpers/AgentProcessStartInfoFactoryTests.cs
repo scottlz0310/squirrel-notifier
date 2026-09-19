@@ -61,6 +61,19 @@ public class AgentProcessStartInfoFactoryTests
     }
 
     [Fact]
+    public void Create_ShouldPreserveUnquotedSafeArguments_WhenBatchCompatibilityIsRequested()
+    {
+        ProcessStartInfo psi = ExternalProcessStartInfoFactory.Create(
+            @"C:\tools\tool.cmd",
+            ["--help"],
+            quotingPolicy: ShellScriptArgumentQuotingPolicy.PreserveUnquotedSafeArguments);
+
+        psi.Arguments.Should().Be(
+            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\"");
+        psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_0"].Should().Be("--help");
+    }
+
+    [Fact]
     public void Create_ShouldPassEmptyArgumentAsLiteralQuotes_ForShellScriptShim()
     {
         // cmd.exe は空の環境変数を保持できないため、空引数はリテラル "" で渡す
@@ -73,9 +86,9 @@ public class AgentProcessStartInfoFactoryTests
     }
 
     [Theory]
-    [InlineData(@"C:\dir\", @"C:\dir\\")]
-    [InlineData(@"C:\dir\\", @"C:\dir\\\\")]
-    [InlineData(@"C:\di\r", @"C:\di\r")]
+    [InlineData(@"C:\dir with space\", @"C:\dir with space\\")]
+    [InlineData(@"C:\dir with space\\", @"C:\dir with space\\\\")]
+    [InlineData(@"C:\di r", @"C:\di r")]
     public void Create_ShouldDoubleTrailingBackslashes_ForShellScriptShim(string argument, string expectedStored)
     {
         // 展開後は引用符で囲まれるため、閉じ引用符直前のバックスラッシュ列を二重化して
