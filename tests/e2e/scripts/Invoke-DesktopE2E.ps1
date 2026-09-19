@@ -31,36 +31,14 @@ $scenarioManifestFile = switch ($Scenario) {
     'DesktopFull' { 'desktop-full.json' }
 }
 $scenarioManifestPath = Join-Path $repoRoot "tests\e2e\scenarios\$scenarioManifestFile"
-try {
-    $scenarioManifest = Get-Content -LiteralPath $scenarioManifestPath -Raw -Encoding utf8 | ConvertFrom-Json
-}
-catch {
-    throw "desktop scenario manifest を読み込めません: $scenarioManifestFile"
-}
-if ($scenarioManifest.schemaVersion -ne 1) {
-    throw "desktop scenario manifest の schemaVersion は 1 である必要があります: $scenarioManifestFile"
-}
-if ($scenarioManifest.phase -ne 'desktop') {
-    throw "desktop scenario manifest の phase が不正です: $scenarioManifestFile"
-}
-$scenarioId = [string]$scenarioManifest.id
 $expectedScenarioId = if ($Scenario -eq 'DesktopSmoke') { 'desktop-smoke' } else { 'desktop-full' }
-if ($scenarioId -ne $expectedScenarioId) {
-    throw "desktop scenario manifest の id が不正です: 期待値=$expectedScenarioId"
-}
-$timeoutSeconds = [int]$scenarioManifest.timeoutSeconds
-if ($timeoutSeconds -le 0) {
-    throw "desktop scenario manifest の timeoutSeconds が不正です: $scenarioId"
-}
+$scenarioId = $expectedScenarioId
+$scenarioManifest = $null
+$scenarioManifestSchemaVersion = $null
+$scenarioManifestExpectedOutcome = $null
+$timeoutSeconds = 60
 $requiredComponentNames = @()
 $requiredDriverSteps = @()
-if ($Scenario -eq 'DesktopFull') {
-    $requiredComponentNames = @($scenarioManifest.requiredComponents | ForEach-Object { [string]$_ })
-    $requiredDriverSteps = @($scenarioManifest.requiredDriverSteps | ForEach-Object { [string]$_ })
-    if ($requiredComponentNames.Count -eq 0 -or $requiredDriverSteps.Count -eq 0) {
-        throw "DesktopFull manifest に requiredComponents または requiredDriverSteps がありません。"
-    }
-}
 
 $resolvedMsiPath = (Resolve-Path -LiteralPath $MsiPath).Path
 $artifactRoot = [System.IO.Path]::GetFullPath($ArtifactsDirectory)
@@ -166,6 +144,82 @@ function New-FailureRecord {
         startedAt = $startedAt.ToString('O')
         completedAt = [DateTimeOffset]::UtcNow.ToString('O')
         artifactHints = $artifactHints
+    }
+}
+
+function Initialize-ScenarioManifest {
+    try {
+        $script:scenarioManifest = Get-Content -LiteralPath $scenarioManifestPath -Raw -Encoding utf8 | ConvertFrom-Json
+    }
+    catch {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw "desktop scenario manifest を読み込めません: $scenarioManifestFile"
+    }
+    if ($null -eq $scenarioManifest) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw "desktop scenario manifest が空です: $scenarioManifestFile"
+    }
+
+    $schemaVersionProperty = $scenarioManifest.PSObject.Properties['schemaVersion']
+    $schemaVersion = if ($null -eq $schemaVersionProperty) { $null } else { $schemaVersionProperty.Value }
+    if ($null -eq $schemaVersion -or $schemaVersion -ne 1) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw "desktop scenario manifest の schemaVersion は 1 である必要があります: $scenarioManifestFile"
+    }
+    $phaseProperty = $scenarioManifest.PSObject.Properties['phase']
+    $phase = if ($null -eq $phaseProperty) { $null } else { [string]$phaseProperty.Value }
+    if ($phase -ne 'desktop') {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw "desktop scenario manifest の phase が不正です: $scenarioManifestFile"
+    }
+    $idProperty = $scenarioManifest.PSObject.Properties['id']
+    $manifestScenarioId = if ($null -eq $idProperty) { '' } else { [string]$idProperty.Value }
+    if ($manifestScenarioId -ne $expectedScenarioId) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw "desktop scenario manifest の id が不正です: 期待値=$expectedScenarioId"
+    }
+    $timeoutProperty = $scenarioManifest.PSObject.Properties['timeoutSeconds']
+    try {
+        if ($null -eq $timeoutProperty) {
+            throw 'timeoutSeconds がありません。'
+        }
+        $manifestTimeoutSeconds = [int]$timeoutProperty.Value
+    }
+    catch {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw "desktop scenario manifest の timeoutSeconds が不正です: $manifestScenarioId"
+    }
+    if ($manifestTimeoutSeconds -le 0) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw "desktop scenario manifest の timeoutSeconds が不正です: $manifestScenarioId"
+    }
+    $expectedOutcomeProperty = $scenarioManifest.PSObject.Properties['expectedOutcome']
+    $manifestExpectedOutcome = if ($null -eq $expectedOutcomeProperty) { '' } else { [string]$expectedOutcomeProperty.Value }
+    if ([string]::IsNullOrWhiteSpace($manifestExpectedOutcome)) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw "desktop scenario manifest の expectedOutcome が不正です: $manifestScenarioId"
+    }
+
+    $script:scenarioId = $manifestScenarioId
+    $script:scenarioManifestSchemaVersion = $schemaVersion
+    $script:scenarioManifestExpectedOutcome = $manifestExpectedOutcome
+    $script:timeoutSeconds = $manifestTimeoutSeconds
+    $script:scenarioDeadline = $startedAt.AddSeconds($manifestTimeoutSeconds)
+    $script:requiredComponentNames = @()
+    $script:requiredDriverSteps = @()
+    if ($Scenario -eq 'DesktopFull') {
+        $requiredComponentsProperty = $scenarioManifest.PSObject.Properties['requiredComponents']
+        $requiredDriverStepsProperty = $scenarioManifest.PSObject.Properties['requiredDriverSteps']
+        if ($null -eq $requiredComponentsProperty -or $null -eq $requiredDriverStepsProperty) {
+            Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+            throw 'DesktopFull manifest に requiredComponents または requiredDriverSteps がありません。'
+        }
+        $script:requiredComponentNames = @($requiredComponentsProperty.Value | ForEach-Object { [string]$_ })
+        $script:requiredDriverSteps = @($requiredDriverStepsProperty.Value | ForEach-Object { [string]$_ })
+        if ($requiredComponentNames.Count -eq 0 -or $requiredDriverSteps.Count -eq 0) {
+            Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+            throw 'DesktopFull manifest に requiredComponents または requiredDriverSteps がありません。'
+        }
     }
 }
 
@@ -795,6 +849,8 @@ $result = [ordered]@{
 }
 
 try {
+    Initialize-ScenarioManifest
+
     if (-not [Environment]::UserInteractive -or [Environment]::UserName -eq 'SYSTEM') {
         throw '対話ログオン済み desktop session が必要です。'
     }
@@ -970,9 +1026,9 @@ finally {
         scenarioId = $scenarioId
         timeoutSeconds = $timeoutSeconds
         scenarioManifest = [ordered]@{
-            schemaVersion = $scenarioManifest.schemaVersion
+            schemaVersion = $scenarioManifestSchemaVersion
             id = $scenarioId
-            expectedOutcome = $scenarioManifest.expectedOutcome
+            expectedOutcome = $scenarioManifestExpectedOutcome
         }
         components = $script:componentManifestForArtifact
         os = [ordered]@{
