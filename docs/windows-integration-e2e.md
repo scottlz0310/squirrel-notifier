@@ -167,7 +167,8 @@ release workflow から同じ reusable workflow を release gate として呼び
 ### AWS EC2 runner の運用契約
 
 - runner は `self-hosted`, `windows`, `squirrel-notifier-desktop` の label を持つ専用 VM とする。
-- EC2 は常時起動せず、検証前に起動し、終了後に停止または terminate する。AMI と EBS snapshot
+- EC2 は常時起動せず、検証前に起動し、終了後に停止または terminate する。現行 workflow は
+  GitHub OIDC で対象 instance の状態を確認し、停止中だった場合だけ起動・停止する。AMI と EBS snapshot
   は、次回に同じ clean user profile、DPI、locale、Docker、browser、Windows App SDK runtime を
   復元できる状態で作成する。
 - Mcp-Docker は Linux container stack のため、Windows runner 内で Docker Desktop / WSL2 を使うか、
@@ -175,8 +176,9 @@ release workflow から同じ reusable workflow を release gate として呼び
 - EBS volume size は固定値を先に決めない。`Measure-DesktopE2EStorage.ps1` を clean image、
   dependency 導入後、最小 scenario 実行後に実行し、測定済み使用量 + 4 GiB の候補のうち最小の
   fit 値を採用する。候補で fit しない場合は runner image を縮小してから再測定する。
-- runner image の初期化、snapshot 復元、runner 登録、終了時 cleanup は AWS 側の runbook に従う。
-  本リポジトリの workflow は VM の作成・削除や AWS credential の取得を行わない。
+- runner image の初期化、snapshot 復元、runner 登録、Windows service 化は AWS 側の runbook に従う。
+  本リポジトリの workflow は VM の作成・削除は行わず、GitHub OIDC の短期 credential で既存 instance
+  の Describe / Start / Stop だけを行う。runner online 待機に失敗した場合は desktop E2E を開始しない。
 
 ## テスト資産の配置契約
 

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - 専用 Windows runner で MSI の install / launch / UI Automation / screenshot / uninstall を検証する Desktop E2E workflow と、release 前 gate、手動検証、runner ストレージ計測を追加した（#224）
+- EC2 desktop runner を GitHub OIDC で起動し、runner online 待機後に E2E を実行し、workflow が起動した instance だけを cleanup で停止する運用を追加した（#361）
 - 購読開始、`enqueue_review`、`InitialText` / `FinalText` の重複排除、通知モデル、dummy launcher のプロセス境界を実プロセスで検証する Phase 1 headless E2E scenario を追加した（#223）
 - release workflow と同じ publish / WiX 経路で実配布物を生成し、MSI と setup ZIP の silent install / uninstall、version、製品登録、Task Scheduler、cleanup を検証する Phase 1 headless E2E scenario を追加した（#221）
 

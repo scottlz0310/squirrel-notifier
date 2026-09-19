@@ -70,6 +70,24 @@ Phase 2 の workflow は `.github/workflows/desktop-e2e.yml` です。定期実�
 実装時の検証は GitHub Actions の `workflow_dispatch` から実行します。release workflow
 は同じ reusable workflow を release 前 gate として呼び出します。
 
+EC2 runner の起動・停止は workflow の GitHub-hosted job が担当します。次の repository または
+`desktop-e2e` environment variables を事前に設定してください。
+
+- `DESKTOP_E2E_AWS_ROLE_ARN`: GitHub OIDC を信頼する最小権限 IAM role の ARN
+- `DESKTOP_E2E_AWS_REGION`: EC2 のリージョン
+- `DESKTOP_E2E_AWS_INSTANCE_ID`: 対象 EC2 instance ID
+- `DESKTOP_E2E_RUNNER_NAME`: self-hosted runner の登録名
+
+IAM role には対象 instance に対する `DescribeInstances`、`DescribeInstanceStatus`、
+`StartInstances`、`StopInstances` だけを許可し、長期 AWS access key は使用しません。
+workflow 開始前から instance が稼働していた場合は、別の運用主体の状態を保護するため停止しません。
+停止中の instance をこの workflow が起動した場合だけ、E2E の成功・失敗・キャンセル後に停止します。
+同一 instance の同時利用は `concurrency` で直列化します。
+
+現段階では runner の Windows サービス登録、依存ツールの導入、AMI / User Data の生成は AWS 側の
+一回限りのセットアップとして扱います。runner が `squirrel-notifier-desktop` label 付きで
+online にならない場合、E2E job を開始せずに失敗します。
+
 手動実行では `DesktopSmoke` を選ぶと、専用の対話ログオン済み Windows runner 上で次を検証します。
 
 - MSI の install、製品 version、WinUI main window の launch

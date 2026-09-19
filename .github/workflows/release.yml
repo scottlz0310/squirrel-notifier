@@ -82,6 +82,10 @@ jobs:
   desktop-e2e:
     needs: build-package
     uses: ./.github/workflows/desktop-e2e.yml
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
     with:
       release_artifact_name: release-payload-x64
       expected_version: ${{ needs.build-package.outputs.version }}
