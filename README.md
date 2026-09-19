@@ -260,8 +260,15 @@ Issue [#307](https://github.com/scottlz0310/squirrel-notifier/issues/307) の la
 
     pwsh -File .\tests\e2e\scripts\Invoke-E2E.ps1 -Phase Headless
 
-この entrypoint は実 CLI、GitHub、gateway、認証、WinUI を使用しません。配布物や外部
-component を跨ぐ E2E は、設計書と #221〜#223 の実装に従って追加します。
+この entrypoint は実 CLI、GitHub、gateway、認証、WinUI を使用しません。配布物を含む
+Phase 1 の全 scenario は同じ entrypoint から実行され、配布物だけを再現する場合は次を
+使用します。
+
+    pwsh -File .\tests\e2e\scripts\Invoke-E2E.ps1 -Phase Headless -Scenario distribution-install
+
+配布物 E2E は実 publish payload、MSI、setup ZIP の生成から silent install / uninstall、
+version、製品登録、Task Scheduler、cleanup までを検証します。既存インストールや
+実行中プロセスを検出した場合は変更せず失敗します。
 
 ### コード品質
 

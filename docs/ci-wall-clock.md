@@ -179,8 +179,8 @@ overlay database も有効化できるため候補に挙げたが、**不採用*
 | 項目 | 予算 | 現状 |
 |---|---:|---|
 | 既存 3 job の critical path | 360 秒 | 368 秒（未達。#220 で継続） |
-| Phase 1 E2E job 単体 | 330 秒 | #222 追加後の CI 実測待ち |
-| E2E 追加後の PR CI 全体の壁時計 | 420 秒 | #222 追加後の CI 実測待ち |
+| Phase 1 E2E job 単体 | 330 秒 | #221/#222/#223 の CI 実測待ち |
+| E2E 追加後の PR CI 全体の壁時計 | 420 秒 | #221/#222/#223 の CI 実測待ち |
 
 予算の根拠は baseline 中央値 518 秒の 30% 短縮（#220 の目標）で、E2E job を既存 job と
 並列に置いても全体を押し上げないことを条件としている。
@@ -192,6 +192,8 @@ overlay database も有効化できるため候補に挙げたが、**不採用*
 
 - E2E job は `needs` で既存 job の後段へ直列化しない。publish payload や MSI が必要な場合は
   E2E job 内で生成するか、artifact 経由で受け取ったうえで全体予算を実測で確認する。
+- #221 の `distribution-e2e` は publish payload、MSI、setup ZIP を job 内で生成し、既存の
+  headless E2E と並列に実行する。実測が完了するまで required check へ昇格させない。
 - 予算超過が観測された場合、Phase 1 を required check へ昇格させない。先に本書の
   「実施した削減」と同じ手順で計測・削減し、超過要因を記録する。
 - 予算を守るために target SDK / runtime / toolchain を下げたり、既存の品質ゲートを

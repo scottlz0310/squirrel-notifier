@@ -9,6 +9,9 @@
 .PARAMETER KeepSettings
     If specified, user settings will be preserved. Otherwise, settings will be deleted.
 
+.PARAMETER NonInteractive
+    headless 検証用に確認を省略します。アプリケーション実行中の場合は失敗します。
+
 .EXAMPLE
     .\uninstall.ps1
     Uninstalls the task and removes all settings.
@@ -21,7 +24,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$false)]
-    [switch]$KeepSettings
+    [switch]$KeepSettings,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +53,10 @@ if (-not $existingTask) {
 
     if ($process) {
         Write-Host "Squirrel Notifier is currently running." -ForegroundColor Yellow
+        if ($NonInteractive) {
+            throw 'Squirrel Notifier is running; non-interactive uninstallation will not stop it.'
+        }
+
         $response = Read-Host "Do you want to stop it? (Y/N)"
 
         if ($response -eq 'Y' -or $response -eq 'y') {
@@ -80,6 +90,8 @@ $settingsPath = "$env:LOCALAPPDATA\SquirrelNotifier"
 
 if (Test-Path $settingsPath) {
     if ($KeepSettings) {
+        Write-Host "User settings preserved at: $settingsPath" -ForegroundColor Cyan
+    } elseif ($NonInteractive) {
         Write-Host "User settings preserved at: $settingsPath" -ForegroundColor Cyan
     } else {
         $response = Read-Host "Do you want to delete user settings? (Y/N)"

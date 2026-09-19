@@ -34,6 +34,7 @@ retry なしで実行します。scenario ごとに RUNNER_TEMP 配下の専用 
 | subscriber-gateway-contract | 実 subscriber の引数、success、404、401、500、接続拒否の契約 |
 | gateway-auth-flow | `.cmd` / `.bat` 解決、device flow、token cache 後の再購読 |
 | review-event-flow | 購読開始、`enqueue_review`、InitialText / FinalText の重複排除、通知モデル、dummy launcher |
+| distribution-install | 実 publish payload、MSI、setup ZIP の build、silent install / uninstall、version、cleanup |
 
 fixture の dummy executable は codex.exe という名前で build されます。ParsedFromOutput
 scenario では一時 PATH から codex として解決し、それ以外では絶対パスで起動します。
@@ -58,5 +59,7 @@ pattern を検査します。
     pwsh -File .\tests\e2e\scripts\Invoke-E2ECleanup.ps1 -RunRoot <scenario-root> -ArtifactsDirectory .\artifacts\e2e-local\headless\<run-id>\<scenario-id>
 
 この Phase 1 の launcher、subscriber、gateway、認証、enqueue から通知モデルまでの
-headless 境界は #307、#222、#223 のスコープです。配布物、MSI、Task Scheduler、
-silent install / uninstall を跨ぐ E2E は #221 の契約に従って追加します。
+headless 境界は #307、#222、#223 のスコープです。`distribution-install` は #221 の
+契約に従い、release workflow と同じ publish / WiX 経路で配布物を検証します。
+既存インストール、製品登録、Task Scheduler タスク、実行中プロセスを開始前に検出した
+場合は変更せず失敗します。

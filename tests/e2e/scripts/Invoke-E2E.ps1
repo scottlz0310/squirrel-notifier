@@ -9,6 +9,8 @@ param(
 
     [string]$Scenario,
 
+    [string[]]$ExcludeScenario = @(),
+
     [string]$ArtifactsDirectory = (Join-Path (Get-Location) 'artifacts\e2e-local')
 )
 
@@ -26,14 +28,27 @@ $dummyProject = Join-Path $repoRoot 'tests\e2e\fixtures\launcher\DummyLauncher\D
 $subscriberProject = Join-Path $repoRoot 'tests\e2e\fixtures\subscriber\DummySubscriber\DummySubscriber.csproj'
 $cleanupScript = Join-Path $PSScriptRoot 'Invoke-E2ECleanup.ps1'
 $artifactCheckScript = Join-Path $PSScriptRoot 'Test-E2EArtifacts.ps1'
+$distributionScript = Join-Path $PSScriptRoot 'Invoke-DistributionE2E.ps1'
 $artifactRunRoot = Join-Path ([System.IO.Path]::GetFullPath($ArtifactsDirectory)) ('headless\' + [Guid]::NewGuid().ToString('N'))
 
 $manifests = @(Get-ChildItem -LiteralPath $scenarioDirectory -Filter '*.json' -File | Sort-Object Name)
 if (-not [string]::IsNullOrWhiteSpace($Scenario)) {
     $manifests = @($manifests | Where-Object { $_.BaseName -eq $Scenario })
 }
+if ($ExcludeScenario.Count -ne 0) {
+    $manifests = @($manifests | Where-Object { $_.BaseName -notin $ExcludeScenario })
+}
 if ($manifests.Count -eq 0) {
     throw '指定された headless E2E scenario manifest が見つかりません。'
+}
+
+$requiresHeadlessRunner = $false
+foreach ($manifest in $manifests) {
+    $scenarioManifest = Get-Content -LiteralPath $manifest.FullName -Raw -Encoding utf8 | ConvertFrom-Json
+    if ($scenarioManifest.scenarioKind -ne 'distribution-install') {
+        $requiresHeadlessRunner = $true
+        break
+    }
 }
 
 New-Item -ItemType Directory -Path $artifactRunRoot -Force | Out-Null
@@ -89,62 +104,68 @@ Write-Host "headless E2E run root: $runRoot"
 Write-Host "headless E2E artifact root: $artifactRunRoot"
 
 try {
-    dotnet restore $dummyProject
-    if ($LASTEXITCODE -ne 0) {
-        throw 'dummy launcher の依存関係復元に失敗しました。'
-    }
+    $dummyLauncher = $null
+    $subscriberFixture = $null
+    $runner = $null
 
-    dotnet restore $subscriberProject
-    if ($LASTEXITCODE -ne 0) {
-        throw 'dummy subscriber の依存関係復元に失敗しました。'
-    }
+    if ($requiresHeadlessRunner) {
+        dotnet restore $dummyProject
+        if ($LASTEXITCODE -ne 0) {
+            throw 'dummy launcher の依存関係復元に失敗しました。'
+        }
 
-    dotnet restore $runnerProject /p:IncludeWindowsSdkBuildTools=false
-    if ($LASTEXITCODE -ne 0) {
-        throw 'headless E2E runner の依存関係復元に失敗しました。'
-    }
+        dotnet restore $subscriberProject
+        if ($LASTEXITCODE -ne 0) {
+            throw 'dummy subscriber の依存関係復元に失敗しました。'
+        }
 
-    dotnet format $dummyProject --verify-no-changes --no-restore
-    if ($LASTEXITCODE -ne 0) {
-        throw 'dummy launcher の format 検証に失敗しました。'
-    }
+        dotnet restore $runnerProject /p:IncludeWindowsSdkBuildTools=false
+        if ($LASTEXITCODE -ne 0) {
+            throw 'headless E2E runner の依存関係復元に失敗しました。'
+        }
 
-    dotnet format $subscriberProject --verify-no-changes --no-restore
-    if ($LASTEXITCODE -ne 0) {
-        throw 'dummy subscriber の format 検証に失敗しました。'
-    }
+        dotnet format $dummyProject --verify-no-changes --no-restore
+        if ($LASTEXITCODE -ne 0) {
+            throw 'dummy launcher の format 検証に失敗しました。'
+        }
 
-    dotnet format $runnerProject --verify-no-changes --no-restore
-    if ($LASTEXITCODE -ne 0) {
-        throw 'headless E2E runner の format 検証に失敗しました。'
-    }
+        dotnet format $subscriberProject --verify-no-changes --no-restore
+        if ($LASTEXITCODE -ne 0) {
+            throw 'dummy subscriber の format 検証に失敗しました。'
+        }
 
-    dotnet build $dummyProject --configuration Release --no-restore /p:Platform=x64 /p:TreatWarningsAsErrors=true
-    if ($LASTEXITCODE -ne 0) {
-        throw 'dummy launcher の build に失敗しました。'
-    }
+        dotnet format $runnerProject --verify-no-changes --no-restore
+        if ($LASTEXITCODE -ne 0) {
+            throw 'headless E2E runner の format 検証に失敗しました。'
+        }
 
-    dotnet build $subscriberProject --configuration Release --no-restore /p:Platform=x64 /p:TreatWarningsAsErrors=true
-    if ($LASTEXITCODE -ne 0) {
-        throw 'dummy subscriber の build に失敗しました。'
-    }
+        dotnet build $dummyProject --configuration Release --no-restore /p:Platform=x64 /p:TreatWarningsAsErrors=true
+        if ($LASTEXITCODE -ne 0) {
+            throw 'dummy launcher の build に失敗しました。'
+        }
 
-    dotnet build $runnerProject --configuration Release --no-restore /p:Platform=x64 /p:IncludeWindowsSdkBuildTools=false /p:TreatWarningsAsErrors=true
-    if ($LASTEXITCODE -ne 0) {
-        throw 'headless E2E runner の build に失敗しました。'
-    }
+        dotnet build $subscriberProject --configuration Release --no-restore /p:Platform=x64 /p:TreatWarningsAsErrors=true
+        if ($LASTEXITCODE -ne 0) {
+            throw 'dummy subscriber の build に失敗しました。'
+        }
 
-    $dummyLauncher = Get-ChildItem -LiteralPath (Join-Path (Split-Path $dummyProject) 'bin') -Recurse -Filter 'codex.exe' -File |
-        Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\codex.exe' } |
-        Select-Object -First 1
-    $subscriberFixture = Get-ChildItem -LiteralPath (Join-Path (Split-Path $subscriberProject) 'bin') -Recurse -Filter 'mcp-resource-subscriber.exe' -File |
-        Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\mcp-resource-subscriber.exe' } |
-        Select-Object -First 1
-    $runner = Get-ChildItem -LiteralPath (Join-Path (Split-Path $runnerProject) 'bin') -Recurse -Filter 'SquirrelNotifier.HeadlessE2E.exe' -File |
-        Where-Object { $_.FullName -like '*\x64\Release\net10.0-windows10.0.26100.0\win-x64\SquirrelNotifier.HeadlessE2E.exe' } |
-        Select-Object -First 1
-    if ($null -eq $dummyLauncher -or $null -eq $subscriberFixture -or $null -eq $runner) {
-        throw 'build output から E2E runner、dummy launcher、または dummy subscriber を解決できません。'
+        dotnet build $runnerProject --configuration Release --no-restore /p:Platform=x64 /p:IncludeWindowsSdkBuildTools=false /p:TreatWarningsAsErrors=true
+        if ($LASTEXITCODE -ne 0) {
+            throw 'headless E2E runner の build に失敗しました。'
+        }
+
+        $dummyLauncher = Get-ChildItem -LiteralPath (Join-Path (Split-Path $dummyProject) 'bin') -Recurse -Filter 'codex.exe' -File |
+            Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\codex.exe' } |
+            Select-Object -First 1
+        $subscriberFixture = Get-ChildItem -LiteralPath (Join-Path (Split-Path $subscriberProject) 'bin') -Recurse -Filter 'mcp-resource-subscriber.exe' -File |
+            Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\mcp-resource-subscriber.exe' } |
+            Select-Object -First 1
+        $runner = Get-ChildItem -LiteralPath (Join-Path (Split-Path $runnerProject) 'bin') -Recurse -Filter 'SquirrelNotifier.HeadlessE2E.exe' -File |
+            Where-Object { $_.FullName -like '*\x64\Release\net10.0-windows10.0.26100.0\win-x64\SquirrelNotifier.HeadlessE2E.exe' } |
+            Select-Object -First 1
+        if ($null -eq $dummyLauncher -or $null -eq $subscriberFixture -or $null -eq $runner) {
+            throw 'build output から E2E runner、dummy launcher、または dummy subscriber を解決できません。'
+        }
     }
 
     $overallExitCode = 0
@@ -158,14 +179,27 @@ try {
         $artifactCheckExitCode = 1
 
         try {
-            $runnerArguments = @(
-                '--scenario-file', $manifest.FullName,
-                '--run-root', $scenarioRoot,
-                '--artifacts-directory', $scenarioArtifacts,
-                '--dummy-launcher', $dummyLauncher.FullName,
-                '--subscriber-fixture', $subscriberFixture.FullName
-            )
-            & $runner.FullName @runnerArguments
+            $scenarioManifest = Get-Content -LiteralPath $manifest.FullName -Raw -Encoding utf8 | ConvertFrom-Json
+            if ($scenarioManifest.scenarioKind -eq 'distribution-install') {
+                $distributionArguments = @(
+                    '-NoProfile',
+                    '-File', $distributionScript,
+                    '-ScenarioFile', $manifest.FullName,
+                    '-RunRoot', $scenarioRoot,
+                    '-ArtifactsDirectory', $scenarioArtifacts
+                )
+                & pwsh @distributionArguments
+            }
+            else {
+                $runnerArguments = @(
+                    '--scenario-file', $manifest.FullName,
+                    '--run-root', $scenarioRoot,
+                    '--artifacts-directory', $scenarioArtifacts,
+                    '--dummy-launcher', $dummyLauncher.FullName,
+                    '--subscriber-fixture', $subscriberFixture.FullName
+                )
+                & $runner.FullName @runnerArguments
+            }
             $scenarioExitCode = $LASTEXITCODE
             if ($scenarioExitCode -ne 0) {
                 $overallExitCode = 1
