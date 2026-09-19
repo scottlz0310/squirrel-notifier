@@ -55,13 +55,18 @@ internal static class Program
 
         if (string.Equals(mode, "--help", StringComparison.Ordinal))
         {
-            if (IsEnabled(_preflightFailureVariable))
+            string? preflightFailure = Environment.GetEnvironmentVariable(_preflightFailureVariable);
+            if (!string.IsNullOrWhiteSpace(preflightFailure))
             {
                 Record(args, "help", null, null, false, 7);
-                await Console.Error.WriteLineAsync("help preflight fixture failed.").ConfigureAwait(false);
+                string message = string.Equals(preflightFailure, "auth", StringComparison.OrdinalIgnoreCase)
+                    ? "AUTH_LOGIN_REQUIRED: authentication is required."
+                    : "help preflight fixture failed.";
+                await Console.Error.WriteLineAsync(message).ConfigureAwait(false);
                 return 7;
             }
 
+            await DelayIfConfiguredAsync().ConfigureAwait(false);
             Record(args, "help", null, null, false, 0);
             await WriteOutputAsync("mcp-resource-subscriber fixture: --version | --help | --login --url <url> | --url <url> --uri <uri> --timeout-ms <ms> --json").ConfigureAwait(false);
             return 0;
@@ -398,9 +403,6 @@ internal static class Program
 
         return null;
     }
-
-    private static bool IsEnabled(string name)
-        => string.Equals(Environment.GetEnvironmentVariable(name), "1", StringComparison.Ordinal);
 
     private static void Record(
         string[] args,

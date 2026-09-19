@@ -10,6 +10,10 @@ namespace SquirrelNotifier.HeadlessE2E;
     "Design",
     "CA1031:Do not catch general exception types",
     Justification = "fixture observation の不正は E2E harness の失敗として扱う。")]
+[SuppressMessage(
+    "Reliability",
+    "CA2007:Consider calling ConfigureAwait on the awaited task",
+    Justification = "await using の初期化で作成した E2E fixture はメソッド終了時に確実に破棄する。")]
 internal static class ReviewEventFlowE2ERunner
 {
     private const string _subscriberObservationVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_OBSERVATION_PATH";
@@ -97,6 +101,16 @@ internal static class ReviewEventFlowE2ERunner
                     assertions,
                     cancellationToken).ConfigureAwait(false);
 
+                await RunFailedRegistrationCasesAsync(
+                    settingsDirectory,
+                    logDirectory,
+                    dummyLauncherPath,
+                    server.Endpoint.ToString(),
+                    subscriberFixturePath,
+                    environment,
+                    assertions,
+                    cancellationToken).ConfigureAwait(false);
+
                 return assertions;
             }
             finally
@@ -130,9 +144,15 @@ internal static class ReviewEventFlowE2ERunner
             caseSettingsDirectory,
             subscriberFixturePath,
             gatewayUrl,
-            dummyLauncherPath);
+            dummyLauncherPath,
+            autoReviewStartEnabled: true);
         var logging = new LoggingService(caseLogDirectory);
-        var notifications = new RecordingNotificationService(_expectedEventCount);
+        var notifications = new NotificationService();
+        await using var processing = new ReviewEventProcessingHarness(
+            settings,
+            logging,
+            notifications,
+            _expectedEventCount);
         var subscription = new McpSubscriptionService(
             settings,
             notifications,
@@ -141,9 +161,11 @@ internal static class ReviewEventFlowE2ERunner
             startTimeoutMs: 5000,
             dependencyWaitBudgetMs: 0);
         int subscriberObservationStart = ReadSubscriberObservations().Count;
+        int launcherObservationStart = ReadLauncherObservations(runRoot).Count;
 
         try
         {
+            environment.Set(_delayVariable, "100");
             if (startAlreadyRunning)
             {
                 SubscriptionStartResult initialStart = await subscription
@@ -156,30 +178,10 @@ internal static class ReviewEventFlowE2ERunner
             }
             else if (induceInitialError)
             {
-                environment.Set(_preflightFailureVariable, "1");
-                try
-                {
-                    SubscriptionStartResult initialStart = await subscription
-                        .StartAsync(cancellationToken)
-                        .ConfigureAwait(false);
-                    Check(
-                        !initialStart.Success && subscription.State == SubscriptionState.Error,
-                        assertions,
-                        "Error 状態の購読を実プロセスの preflight 失敗で再現する");
-
-                    IReadOnlyList<SubscriberObservation> failedStartObservations = ReadSubscriberObservations()
-                        .Skip(subscriberObservationStart)
-                        .ToArray();
-                    Check(
-                        failedStartObservations.All(
-                            observation => observation.Mode is not ("version" or "call" or "subscription")),
-                        assertions,
-                        "購読開始に失敗した場合は enqueue を呼び出さない");
-                }
-                finally
-                {
-                    environment.Set(_preflightFailureVariable, null);
-                }
+                Check(
+                    subscription.State == SubscriptionState.Stopped,
+                    assertions,
+                    "初期状態が Stopped の購読開始を RegisterAsync の中で実行する");
             }
             else
             {
@@ -189,16 +191,49 @@ internal static class ReviewEventFlowE2ERunner
                     "Stopped 状態の購読からレビュー登録を開始する");
             }
 
-            bool confirmationRequested = false;
+            int confirmationCount = 0;
             var registration = new ReviewRegistrationService(
                 subscription,
                 new EnqueueReviewService(settings, logging));
+
+            if (induceInitialError)
+            {
+                environment.Set(_preflightFailureVariable, "1");
+                ReviewRegistrationResult failedRegistration = await registration.RegisterAsync(
+                    new PrReference("fixture-owner", "fixture-repository", _pullRequestNumber),
+                    "opened",
+                    _ =>
+                    {
+                        confirmationCount++;
+                        return Task.FromResult(true);
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                Check(
+                    failedRegistration.Outcome == ReviewRegistrationOutcome.SubscriptionStartFailed,
+                    assertions,
+                    "Error 状態では RegisterAsync が購読開始失敗として終了する");
+                Check(
+                    subscription.State == SubscriptionState.Error,
+                    assertions,
+                    "RegisterAsync の購読開始失敗で購読を Error 状態へ遷移する");
+                IReadOnlyList<SubscriberObservation> failedStartObservations = ReadSubscriberObservations()
+                    .Skip(subscriberObservationStart)
+                    .ToArray();
+                Check(
+                    failedStartObservations.All(
+                        observation => observation.Mode is not ("version" or "call" or "subscription")),
+                    assertions,
+                    "購読開始に失敗した場合は enqueue を呼び出さない");
+                environment.Set(_preflightFailureVariable, null);
+            }
+
             ReviewRegistrationResult registrationResult = await registration.RegisterAsync(
                 new PrReference("fixture-owner", "fixture-repository", _pullRequestNumber),
                 "opened",
                 _ =>
                 {
-                    confirmationRequested = true;
+                    confirmationCount++;
                     return Task.FromResult(true);
                 },
                 cancellationToken).ConfigureAwait(false);
@@ -208,7 +243,7 @@ internal static class ReviewEventFlowE2ERunner
                 assertions,
                 $"{caseId}: 購読開始後に enqueue_review が成功する");
             Check(
-                confirmationRequested == !startAlreadyRunning,
+                confirmationCount == (startAlreadyRunning ? 0 : induceInitialError ? 2 : 1),
                 assertions,
                 $"{caseId}: Stopped / Error の購読開始前に確認を要求する");
             Check(
@@ -216,7 +251,7 @@ internal static class ReviewEventFlowE2ERunner
                 assertions,
                 $"{caseId}: enqueue 前に購読が Running へ到達する");
 
-            IReadOnlyList<ReviewEvent> reviewEvents = await notifications
+            IReadOnlyList<ReviewEvent> reviewEvents = await processing
                 .WaitForEventsAsync(cancellationToken)
                 .ConfigureAwait(false);
             AssertReviewEvents(reviewEvents, caseId, assertions);
@@ -229,21 +264,14 @@ internal static class ReviewEventFlowE2ERunner
 
             await subscription.StopAsync().ConfigureAwait(false);
 
-            int launcherObservationStart = ReadLauncherObservations(runRoot).Count;
-            foreach (ReviewEvent reviewEvent in reviewEvents)
-            {
-                var launcher = new ReviewLauncherService(settings, logging);
-                LauncherResult launchResult = await launcher
-                    .LaunchAsync(reviewEvent, LauncherRole.Reviewer, cancellationToken)
-                    .ConfigureAwait(false);
-                Check(
-                    launchResult.Success,
-                    assertions,
-                    $"{caseId}: 通知モデルから dummy launcher を起動する ({reviewEvent.Repository}#{reviewEvent.PrNumber})");
-            }
-
-            IReadOnlyList<LauncherObservation> launcherObservations = ReadLauncherObservations(runRoot)
+            IReadOnlyList<LauncherObservation> launcherObservations = await WaitForLauncherObservationsAsync(
+                runRoot,
+                launcherObservationStart + _expectedEventCount,
+                cancellationToken).ConfigureAwait(false);
+            await processing.WaitForIdleAsync(cancellationToken).ConfigureAwait(false);
+            launcherObservations = launcherObservations
                 .Skip(launcherObservationStart)
+                .Take(_expectedEventCount)
                 .ToArray();
             Check(
                 launcherObservations.Count == _expectedEventCount,
@@ -267,9 +295,12 @@ internal static class ReviewEventFlowE2ERunner
                     observation.Arguments.SequenceEqual(expectedArguments),
                     assertions,
                     $"{caseId}: owner/repo・PR 番号・reason を launcher 引数へ展開する ({reviewEvent.PrNumber})");
+                string expectedWorkingDirectory = Path.GetFullPath(
+                    Path.Combine(caseSettingsDirectory, "launcher-workspace", "reviewer"));
                 Check(
-                    observation.WorkingDirectory.Contains(
-                        Path.Combine("launcher-workspace", "reviewer"),
+                    string.Equals(
+                        Path.GetFullPath(observation.WorkingDirectory),
+                        expectedWorkingDirectory,
                         StringComparison.OrdinalIgnoreCase),
                     assertions,
                     $"{caseId}: reviewer launcher の working directory を隔離する ({reviewEvent.PrNumber})");
@@ -285,7 +316,8 @@ internal static class ReviewEventFlowE2ERunner
         string settingsDirectory,
         string subscriberFixturePath,
         string gatewayUrl,
-        string dummyLauncherPath)
+        string dummyLauncherPath,
+        bool autoReviewStartEnabled = false)
     {
         const string launcherArguments = "--repository {owner}/{repo} --pull-request {prNumber} --reason {reason}";
         var settings = new SettingsService(settingsDirectory, string.Empty);
@@ -305,7 +337,212 @@ internal static class ReviewEventFlowE2ERunner
             false,
             LauncherAgentCatalog.CustomPresetId,
             LauncherAgentCatalog.CustomPresetId);
+        settings.UpdateAutoReviewStartEnabled(autoReviewStartEnabled);
         return settings;
+    }
+
+    private static async Task RunFailedRegistrationCasesAsync(
+        string settingsDirectory,
+        string logDirectory,
+        string dummyLauncherPath,
+        string successGatewayUrl,
+        string subscriberFixturePath,
+        EnvironmentScope environment,
+        List<string> assertions,
+        CancellationToken cancellationToken)
+    {
+        await RunFailedRegistrationCaseAsync(
+            "authentication-required",
+            successGatewayUrl,
+            settingsDirectory,
+            logDirectory,
+            dummyLauncherPath,
+            subscriberFixturePath,
+            environment,
+            assertions,
+            expectAuthenticationRequired: false,
+            preflightFailureMode: "auth",
+            expectedErrorText: "AUTH_LOGIN_REQUIRED",
+            startTimeoutMs: 5000,
+            delayMs: 100,
+            cancellationToken).ConfigureAwait(false);
+
+        await RunFailedRegistrationCaseAsync(
+            "timeout",
+            successGatewayUrl,
+            settingsDirectory,
+            logDirectory,
+            dummyLauncherPath,
+            subscriberFixturePath,
+            environment,
+            assertions,
+            expectAuthenticationRequired: false,
+            preflightFailureMode: null,
+            expectedErrorText: "時間内",
+            startTimeoutMs: 250,
+            delayMs: 6000,
+            cancellationToken).ConfigureAwait(false);
+
+        await RunCancelledRegistrationCaseAsync(
+            settingsDirectory,
+            logDirectory,
+            dummyLauncherPath,
+            successGatewayUrl,
+            subscriberFixturePath,
+            environment,
+            assertions,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task RunFailedRegistrationCaseAsync(
+        string caseId,
+        string gatewayUrl,
+        string settingsDirectory,
+        string logDirectory,
+        string dummyLauncherPath,
+        string subscriberFixturePath,
+        EnvironmentScope environment,
+        List<string> assertions,
+        bool expectAuthenticationRequired,
+        string? preflightFailureMode,
+        string expectedErrorText,
+        int startTimeoutMs,
+        int delayMs,
+        CancellationToken cancellationToken)
+    {
+        environment.Set(_preflightFailureVariable, preflightFailureMode);
+        environment.Set(_delayVariable, delayMs.ToString(CultureInfo.InvariantCulture));
+
+        string caseSettingsDirectory = Path.Combine(settingsDirectory, $"registration-{caseId}");
+        string caseLogDirectory = Path.Combine(logDirectory, $"registration-{caseId}");
+        SettingsService settings = CreateSettings(caseSettingsDirectory, subscriberFixturePath, gatewayUrl, dummyLauncherPath);
+        var logging = new LoggingService(caseLogDirectory);
+        var notifications = new NotificationService();
+        var subscription = new McpSubscriptionService(
+            settings,
+            notifications,
+            logging,
+            maxRetries: 0,
+            startTimeoutMs: startTimeoutMs,
+            dependencyWaitBudgetMs: 0);
+        int subscriberObservationStart = ReadSubscriberObservations().Count;
+
+        try
+        {
+            var registration = new ReviewRegistrationService(
+                subscription,
+                new EnqueueReviewService(settings, logging));
+            int confirmationCount = 0;
+            ReviewRegistrationResult result = await registration.RegisterAsync(
+                new PrReference("fixture-owner", "fixture-repository", _pullRequestNumber),
+                "opened",
+                _ =>
+                {
+                    confirmationCount++;
+                    return Task.FromResult(true);
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            Check(
+                result.Outcome == ReviewRegistrationOutcome.SubscriptionStartFailed,
+                assertions,
+                $"{caseId}: RegisterAsync が購読開始失敗として終了する");
+            Check(
+                confirmationCount == 1,
+                assertions,
+                $"{caseId}: 停止中の購読開始確認を RegisterAsync から一度だけ要求する");
+            Check(
+                result.IsAuthenticationRequired == expectAuthenticationRequired,
+                assertions,
+                $"{caseId}: 認証要求状態を RegisterAsync の結果へ反映する");
+            Check(
+                result.ErrorMessage.Contains(expectedErrorText, StringComparison.Ordinal),
+                assertions,
+                $"{caseId}: 購読開始失敗の原因を RegisterAsync の結果へ反映する");
+
+            IReadOnlyList<SubscriberObservation> observations = ReadSubscriberObservations()
+                .Skip(subscriberObservationStart)
+                .ToArray();
+            Check(
+                observations.All(observation => observation.Mode is not "call"),
+                assertions,
+                $"{caseId}: 購読開始が失敗した場合は enqueue_review を呼び出さない");
+        }
+        finally
+        {
+            await subscription.StopAsync().ConfigureAwait(false);
+            await subscription.DisposeAsync().ConfigureAwait(false);
+            environment.Set(_delayVariable, "100");
+            environment.Set(_preflightFailureVariable, null);
+        }
+    }
+
+    private static async Task RunCancelledRegistrationCaseAsync(
+        string settingsDirectory,
+        string logDirectory,
+        string dummyLauncherPath,
+        string gatewayUrl,
+        string subscriberFixturePath,
+        EnvironmentScope environment,
+        List<string> assertions,
+        CancellationToken cancellationToken)
+    {
+        environment.Set(_preflightFailureVariable, null);
+        environment.Set(_delayVariable, "100");
+
+        string caseSettingsDirectory = Path.Combine(settingsDirectory, "registration-cancelled");
+        string caseLogDirectory = Path.Combine(logDirectory, "registration-cancelled");
+        SettingsService settings = CreateSettings(caseSettingsDirectory, subscriberFixturePath, gatewayUrl, dummyLauncherPath);
+        var logging = new LoggingService(caseLogDirectory);
+        var notifications = new NotificationService();
+        var subscription = new McpSubscriptionService(
+            settings,
+            notifications,
+            logging,
+            maxRetries: 0,
+            startTimeoutMs: 5000,
+            dependencyWaitBudgetMs: 0);
+        int subscriberObservationStart = ReadSubscriberObservations().Count;
+
+        try
+        {
+            var registration = new ReviewRegistrationService(
+                subscription,
+                new EnqueueReviewService(settings, logging));
+            using var registrationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            await registrationCancellation.CancelAsync().ConfigureAwait(false);
+            int confirmationCount = 0;
+            ReviewRegistrationResult result = await registration.RegisterAsync(
+                new PrReference("fixture-owner", "fixture-repository", _pullRequestNumber),
+                "opened",
+                _ =>
+                {
+                    confirmationCount++;
+                    return Task.FromResult(true);
+                },
+                registrationCancellation.Token).ConfigureAwait(false);
+
+            Check(
+                result.Outcome == ReviewRegistrationOutcome.Cancelled,
+                assertions,
+                "cancelled: RegisterAsync のキャンセルを成功登録に変換しない");
+            Check(
+                confirmationCount == 0,
+                assertions,
+                "cancelled: キャンセル済みの登録では購読開始確認を要求しない");
+            IReadOnlyList<SubscriberObservation> observations = ReadSubscriberObservations()
+                .Skip(subscriberObservationStart)
+                .ToArray();
+            Check(
+                observations.All(observation => observation.Mode is not "call"),
+                assertions,
+                "cancelled: キャンセル時は enqueue_review を呼び出さない");
+        }
+        finally
+        {
+            await subscription.StopAsync().ConfigureAwait(false);
+            await subscription.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     private static void AssertReviewEvents(
@@ -423,6 +660,28 @@ internal static class ReviewEventFlowE2ERunner
             $"{caseId}: preflight 失敗時に retry せず、必要な開始だけを実行する");
     }
 
+    private static async Task<IReadOnlyList<LauncherObservation>> WaitForLauncherObservationsAsync(
+        string runRoot,
+        int expectedCount,
+        CancellationToken cancellationToken)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            IReadOnlyList<LauncherObservation> observations = ReadLauncherObservations(runRoot);
+            if (observations.Count >= expectedCount)
+            {
+                return observations;
+            }
+
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new ContractE2EFailureException(
+            "PRODUCT_CONTRACT_MISMATCH",
+            $"dummy launcher の観測が {expectedCount} 件に到達しませんでした。");
+    }
+
     private static string? GetOptionValue(string[] arguments, string option)
     {
         for (int index = 0; index < arguments.Length - 1; index++)
@@ -434,6 +693,204 @@ internal static class ReviewEventFlowE2ERunner
         }
 
         return null;
+    }
+
+    private sealed class ReviewEventProcessingHarness : IAsyncDisposable
+    {
+        private readonly ReviewEventProcessingCoordinator _processingCoordinator;
+        private readonly ReviewStartCoordinator _reviewStartCoordinator;
+        private readonly ReviewEventCleanupCoordinator _cleanupCoordinator;
+        private readonly AutoPauseResumeScheduler _resumeScheduler;
+        private readonly PendingReviewStartQueue _pendingQueue;
+        private readonly SemaphoreSlim _processingGate = new(1, 1);
+        private readonly TaskCompletionSource<IReadOnlyList<ReviewEvent>> _eventsCompletion = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly object _lock = new();
+        private readonly List<ReviewEvent> _events = [];
+        private readonly List<Task> _backgroundTasks = [];
+        private readonly int _expectedEventCount;
+        private Exception? _backgroundException;
+
+        public ReviewEventProcessingHarness(
+            SettingsService settings,
+            LoggingService logging,
+            NotificationService notifications,
+            int expectedEventCount)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+            ArgumentNullException.ThrowIfNull(logging);
+            ArgumentNullException.ThrowIfNull(notifications);
+            _expectedEventCount = expectedEventCount;
+
+            var launcherService = new ReviewLauncherService(settings, logging);
+            _pendingQueue = new PendingReviewStartQueue();
+            _resumeScheduler = new AutoPauseResumeScheduler();
+            var autoPauseGate = new AutoPauseGate();
+            var rateLimitSnapshotService = new RateLimitSnapshotService(new RateLimitFileService(settings.SettingsDirectory));
+            _cleanupCoordinator = new ReviewEventCleanupCoordinator(
+                new AlwaysOpenPullRequestStatusClient(),
+                logging);
+            var cycleCoordinator = new ReviewCycleCoordinator(
+                new ReviewCycleStore(settings.SettingsDirectory),
+                logging);
+            _reviewStartCoordinator = new ReviewStartCoordinator(
+                launcherService,
+                settings,
+                rateLimitSnapshotService,
+                autoPauseGate,
+                _pendingQueue,
+                _resumeScheduler,
+                logging,
+                cycleCoordinator);
+            _processingCoordinator = new ReviewEventProcessingCoordinator(
+                new ReviewEventCollectionCoordinator(),
+                _cleanupCoordinator,
+                _pendingQueue,
+                logging,
+                _reviewStartCoordinator.TryStartAutomaticallyAsync,
+                cycleCoordinator);
+
+            notifications.ReviewEventReceived += OnReviewEventReceived;
+            launcherService.RunCompleted += OnLauncherRunCompleted;
+            _reviewStartCoordinator.StartAbandoned += OnLauncherRunCompleted;
+        }
+
+        public async Task<IReadOnlyList<ReviewEvent>> WaitForEventsAsync(CancellationToken cancellationToken)
+            => await _eventsCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        public async Task WaitForIdleAsync(CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                Exception? backgroundException;
+                lock (_lock)
+                {
+                    backgroundException = _backgroundException;
+                }
+
+                if (backgroundException is not null)
+                {
+                    throw new ContractE2EFailureException(
+                        "PRODUCT_CONTRACT_MISMATCH",
+                        $"通知から reviewer 起動までの処理に失敗しました: {backgroundException.Message}");
+                }
+
+                if (!_reviewStartCoordinator.IsBusy && _pendingQueue.Count == 0)
+                {
+                    return;
+                }
+
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Task[] backgroundTasks;
+            lock (_lock)
+            {
+                backgroundTasks = [.. _backgroundTasks];
+            }
+
+            try
+            {
+                await Task.WhenAll(backgroundTasks).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                lock (_lock)
+                {
+                    _backgroundException ??= ex;
+                }
+            }
+
+            await _cleanupCoordinator.DisposeAsync().ConfigureAwait(false);
+            _resumeScheduler.Dispose();
+            _processingGate.Dispose();
+        }
+
+        private void OnReviewEventReceived(object? sender, ReviewEvent reviewEvent)
+        {
+            Task task = ProcessEventAsync(reviewEvent);
+            lock (_lock)
+            {
+                _backgroundTasks.Add(task);
+            }
+        }
+
+        private async Task ProcessEventAsync(ReviewEvent reviewEvent)
+        {
+            await _processingGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _ = await _processingCoordinator.ProcessAsync(reviewEvent).ConfigureAwait(false);
+                IReadOnlyList<ReviewEvent>? snapshot = null;
+                lock (_lock)
+                {
+                    _events.Add(reviewEvent);
+                    if (_events.Count >= _expectedEventCount)
+                    {
+                        snapshot = _events.ToArray();
+                    }
+                }
+
+                if (snapshot is not null)
+                {
+                    _ = _eventsCompletion.TrySetResult(snapshot);
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (_lock)
+                {
+                    _backgroundException ??= ex;
+                }
+
+                _ = _eventsCompletion.TrySetException(ex);
+            }
+            finally
+            {
+                _processingGate.Release();
+            }
+        }
+
+        private void OnLauncherRunCompleted(object? sender, EventArgs e)
+        {
+            Task task = ProcessPendingAsync();
+            lock (_lock)
+            {
+                _backgroundTasks.Add(task);
+            }
+        }
+
+        private async Task ProcessPendingAsync()
+        {
+            await _processingGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _ = await _processingCoordinator.ProcessPendingAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                lock (_lock)
+                {
+                    _backgroundException ??= ex;
+                }
+            }
+            finally
+            {
+                _processingGate.Release();
+            }
+        }
+    }
+
+    private sealed class AlwaysOpenPullRequestStatusClient : IPullRequestStatusClient
+    {
+        public Task<PullRequestLifecycleState> GetStateAsync(
+            string repository,
+            int prNumber,
+            CancellationToken cancellationToken)
+            => Task.FromResult(PullRequestLifecycleState.Open);
     }
 
     private static List<SubscriberObservation> ReadSubscriberObservations()
@@ -534,50 +991,6 @@ internal static class ReviewEventFlowE2ERunner
         }
 
         assertions.Add(description);
-    }
-
-    private sealed class RecordingNotificationService : INotificationService
-    {
-        private readonly int _expectedCount;
-        private readonly List<ReviewEvent> _events = [];
-        private readonly TaskCompletionSource<IReadOnlyList<ReviewEvent>> _completion = new(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly object _lock = new();
-
-        public RecordingNotificationService(int expectedCount)
-        {
-            _expectedCount = expectedCount;
-        }
-
-        public event EventHandler<ReviewEvent>? ReviewEventReceived;
-
-        public event EventHandler<NotificationMessage>? NotificationRequested;
-
-        public void NotifyReviewEvent(ReviewEvent reviewEvent)
-        {
-            IReadOnlyList<ReviewEvent>? snapshot = null;
-            lock (_lock)
-            {
-                _events.Add(reviewEvent);
-                if (_events.Count >= _expectedCount)
-                {
-                    snapshot = _events.ToArray();
-                }
-            }
-
-            if (snapshot is not null)
-            {
-                _ = _completion.TrySetResult(snapshot);
-            }
-
-            ReviewEventReceived?.Invoke(this, reviewEvent);
-        }
-
-        public void NotifyRateLimitReset(string label)
-            => NotificationRequested?.Invoke(this, new NotificationMessage("fixture", label));
-
-        public Task<IReadOnlyList<ReviewEvent>> WaitForEventsAsync(CancellationToken cancellationToken)
-            => _completion.Task.WaitAsync(cancellationToken);
     }
 
     private sealed class EnvironmentScope : IDisposable
