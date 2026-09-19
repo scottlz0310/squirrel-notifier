@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-19
+
+レビューサイクルの可視化、skill ベースの launcher、subscriber・gateway・認証の headless E2E を含む機能リリースです。
+
 ### Added
 
 - Recent review events に PR 単位のレビューラウンドと reviewer のローカル実行状態を表示するようにした（#257）。`re-review-requested` ごとにラウンドを進め、reviewer プロセス終了後は「結果未確認」と表示する。レビュー結果の正本は引き続き thread-owl / GitHub とし、状態は `%LocalAppData%\SquirrelNotifier\review-cycles.json` に短期間だけ保存する
@@ -457,7 +461,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.9.0...v0.10.0
