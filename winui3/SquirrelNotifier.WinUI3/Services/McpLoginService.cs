@@ -79,19 +79,9 @@ internal sealed class McpLoginService : IGatewayLoginService
                 return new McpLoginResult { Outcome = McpLoginOutcome.Failed, ErrorMessage = versionError };
             }
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = resolvedPath,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
-            psi.ArgumentList.Add("--login");
-            psi.ArgumentList.Add("--url");
-            psi.ArgumentList.Add(settings.GatewayUrl);
+            ProcessStartInfo psi = CreateSubscriberProcessStartInfo(
+                resolvedPath,
+                ["--login", "--url", settings.GatewayUrl]);
 
             RaiseStatus("mcp-gateway に接続し、device flow 認証を開始しています...");
             await LogAsync("mcp-gateway login started.").ConfigureAwait(false);
@@ -277,17 +267,7 @@ internal sealed class McpLoginService : IGatewayLoginService
     // 問題なければ null、問題があれば案内メッセージを返す（EnqueueReviewService と同方針）。
     private async Task<string?> CheckSubscriberVersionAsync(string resolvedPath, CancellationToken cancellationToken)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = resolvedPath,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-        };
-        psi.ArgumentList.Add("--version");
+        ProcessStartInfo psi = CreateSubscriberProcessStartInfo(resolvedPath, ["--version"]);
 
         IProcessInstance? process = null;
         try
@@ -380,5 +360,15 @@ internal sealed class McpLoginService : IGatewayLoginService
     private async Task LogAsync(string message)
     {
         await _loggingService.WriteAsync(message).ConfigureAwait(false);
+    }
+
+    private static ProcessStartInfo CreateSubscriberProcessStartInfo(
+        string resolvedPath,
+        IReadOnlyList<string> arguments)
+    {
+        ProcessStartInfo startInfo = ExternalProcessStartInfoFactory.Create(resolvedPath, arguments);
+        startInfo.StandardOutputEncoding = Encoding.UTF8;
+        startInfo.StandardErrorEncoding = Encoding.UTF8;
+        return startInfo;
     }
 }

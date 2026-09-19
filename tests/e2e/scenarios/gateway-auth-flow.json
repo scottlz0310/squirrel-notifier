@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "gateway-auth-flow",
+  "phase": "headless",
+  "timeoutSeconds": 120,
+  "components": {
+    "mcp-resource-subscriber": "0.6.0"
+  },
+  "fixture": "subscriber/authentication-flow",
+  "expectedOutcome": "AUTH_REQUIRED_LOGIN_AND_RESUBSCRIBE",
+  "scenarioKind": "gateway-auth-flow"
+}

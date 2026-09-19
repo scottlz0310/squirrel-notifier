@@ -46,7 +46,7 @@ critical path は `security-scan` で、`Install Windows SDK` と `Setup .NET` �
 ## 現行 baseline の再計測（2026-09-14 / #220 継続）
 
 v0.10.0 リリース前後の成功した `pull_request` CI を、同じ job API と
-`scripts/report-ci-timings.ps1` の算出方法で再集計した。#307 の headless E2E は既存 job と
+`scripts/report-ci-timings.ps1` の算出方法で再集計した。#307/#222 の headless E2E は既存 job と
 並列で追加され、#319 は version bump により NuGet cache key が変わっているため、#226 の
 baseline と同条件ではない。したがって、この表は現行の観測値であり、#220 の 30% 短縮達成判定には
 使用しない。
@@ -179,8 +179,8 @@ overlay database も有効化できるため候補に挙げたが、**不採用*
 | 項目 | 予算 | 現状 |
 |---|---:|---|
 | 既存 3 job の critical path | 360 秒 | 368 秒（未達。#220 で継続） |
-| Phase 1 E2E job 単体 | 330 秒 | 未実装 |
-| E2E 追加後の PR CI 全体の壁時計 | 420 秒 | 未実装 |
+| Phase 1 E2E job 単体 | 330 秒 | #222 追加後の CI 実測待ち |
+| E2E 追加後の PR CI 全体の壁時計 | 420 秒 | #222 追加後の CI 実測待ち |
 
 予算の根拠は baseline 中央値 518 秒の 30% 短縮（#220 の目標）で、E2E job を既存 job と
 並列に置いても全体を押し上げないことを条件としている。

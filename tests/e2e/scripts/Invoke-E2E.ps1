@@ -23,6 +23,7 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $scenarioDirectory = Join-Path $repoRoot 'tests\e2e\scenarios'
 $runnerProject = Join-Path $repoRoot 'tests\e2e\SquirrelNotifier.HeadlessE2E\SquirrelNotifier.HeadlessE2E.csproj'
 $dummyProject = Join-Path $repoRoot 'tests\e2e\fixtures\launcher\DummyLauncher\DummyLauncher.csproj'
+$subscriberProject = Join-Path $repoRoot 'tests\e2e\fixtures\subscriber\DummySubscriber\DummySubscriber.csproj'
 $cleanupScript = Join-Path $PSScriptRoot 'Invoke-E2ECleanup.ps1'
 $artifactCheckScript = Join-Path $PSScriptRoot 'Test-E2EArtifacts.ps1'
 $artifactRunRoot = Join-Path ([System.IO.Path]::GetFullPath($ArtifactsDirectory)) ('headless\' + [Guid]::NewGuid().ToString('N'))
@@ -93,6 +94,11 @@ try {
         throw 'dummy launcher の依存関係復元に失敗しました。'
     }
 
+    dotnet restore $subscriberProject
+    if ($LASTEXITCODE -ne 0) {
+        throw 'dummy subscriber の依存関係復元に失敗しました。'
+    }
+
     dotnet restore $runnerProject /p:IncludeWindowsSdkBuildTools=false
     if ($LASTEXITCODE -ne 0) {
         throw 'headless E2E runner の依存関係復元に失敗しました。'
@@ -101,6 +107,11 @@ try {
     dotnet format $dummyProject --verify-no-changes --no-restore
     if ($LASTEXITCODE -ne 0) {
         throw 'dummy launcher の format 検証に失敗しました。'
+    }
+
+    dotnet format $subscriberProject --verify-no-changes --no-restore
+    if ($LASTEXITCODE -ne 0) {
+        throw 'dummy subscriber の format 検証に失敗しました。'
     }
 
     dotnet format $runnerProject --verify-no-changes --no-restore
@@ -113,6 +124,11 @@ try {
         throw 'dummy launcher の build に失敗しました。'
     }
 
+    dotnet build $subscriberProject --configuration Release --no-restore /p:Platform=x64 /p:TreatWarningsAsErrors=true
+    if ($LASTEXITCODE -ne 0) {
+        throw 'dummy subscriber の build に失敗しました。'
+    }
+
     dotnet build $runnerProject --configuration Release --no-restore /p:Platform=x64 /p:IncludeWindowsSdkBuildTools=false /p:TreatWarningsAsErrors=true
     if ($LASTEXITCODE -ne 0) {
         throw 'headless E2E runner の build に失敗しました。'
@@ -121,11 +137,14 @@ try {
     $dummyLauncher = Get-ChildItem -LiteralPath (Join-Path (Split-Path $dummyProject) 'bin') -Recurse -Filter 'codex.exe' -File |
         Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\codex.exe' } |
         Select-Object -First 1
+    $subscriberFixture = Get-ChildItem -LiteralPath (Join-Path (Split-Path $subscriberProject) 'bin') -Recurse -Filter 'mcp-resource-subscriber.exe' -File |
+        Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\mcp-resource-subscriber.exe' } |
+        Select-Object -First 1
     $runner = Get-ChildItem -LiteralPath (Join-Path (Split-Path $runnerProject) 'bin') -Recurse -Filter 'SquirrelNotifier.HeadlessE2E.exe' -File |
         Where-Object { $_.FullName -like '*\x64\Release\net10.0-windows10.0.26100.0\win-x64\SquirrelNotifier.HeadlessE2E.exe' } |
         Select-Object -First 1
-    if ($null -eq $dummyLauncher -or $null -eq $runner) {
-        throw 'build output から E2E runner または dummy launcher を解決できません。'
+    if ($null -eq $dummyLauncher -or $null -eq $subscriberFixture -or $null -eq $runner) {
+        throw 'build output から E2E runner、dummy launcher、または dummy subscriber を解決できません。'
     }
 
     $overallExitCode = 0
@@ -143,7 +162,8 @@ try {
                 '--scenario-file', $manifest.FullName,
                 '--run-root', $scenarioRoot,
                 '--artifacts-directory', $scenarioArtifacts,
-                '--dummy-launcher', $dummyLauncher.FullName
+                '--dummy-launcher', $dummyLauncher.FullName,
+                '--subscriber-fixture', $subscriberFixture.FullName
             )
             & $runner.FullName @runnerArguments
             $scenarioExitCode = $LASTEXITCODE
