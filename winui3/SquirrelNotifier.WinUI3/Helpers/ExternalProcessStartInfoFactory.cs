@@ -23,7 +23,10 @@ internal static class ExternalProcessStartInfoFactory
 
     private static readonly string[] _shellScriptExtensions = [".cmd", ".bat"];
 
-    public static ProcessStartInfo Create(string resolvedPath, IReadOnlyList<string> arguments)
+    public static ProcessStartInfo Create(
+        string resolvedPath,
+        IReadOnlyList<string> arguments,
+        bool redirectStandardInput = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(resolvedPath);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -32,7 +35,7 @@ internal static class ExternalProcessStartInfoFactory
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardInput = true,
+            RedirectStandardInput = redirectStandardInput,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };

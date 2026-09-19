@@ -366,7 +366,10 @@ internal sealed class McpLoginService : IGatewayLoginService
         string resolvedPath,
         IReadOnlyList<string> arguments)
     {
-        ProcessStartInfo startInfo = ExternalProcessStartInfoFactory.Create(resolvedPath, arguments);
+        ProcessStartInfo startInfo = ExternalProcessStartInfoFactory.Create(
+            resolvedPath,
+            arguments,
+            redirectStandardInput: false);
         startInfo.StandardOutputEncoding = Encoding.UTF8;
         startInfo.StandardErrorEncoding = Encoding.UTF8;
         return startInfo;

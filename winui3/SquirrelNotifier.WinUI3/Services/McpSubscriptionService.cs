@@ -829,7 +829,10 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         string resolvedPath,
         IReadOnlyList<string> arguments)
     {
-        ProcessStartInfo startInfo = ExternalProcessStartInfoFactory.Create(resolvedPath, arguments);
+        ProcessStartInfo startInfo = ExternalProcessStartInfoFactory.Create(
+            resolvedPath,
+            arguments,
+            redirectStandardInput: false);
         startInfo.StandardOutputEncoding = System.Text.Encoding.UTF8;
         startInfo.StandardErrorEncoding = System.Text.Encoding.UTF8;
         return startInfo;
