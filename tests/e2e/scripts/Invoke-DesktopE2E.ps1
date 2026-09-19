@@ -165,8 +165,17 @@ function Ensure-WindowCaptureType {
     }
 
     Add-Type -AssemblyName System.Drawing.Common
-    $drawingAssemblyPath = ([System.Drawing.Bitmap].Assembly).Location
-    Add-Type -ReferencedAssemblies $drawingAssemblyPath -TypeDefinition @'
+    $drawingAssembly = [System.Drawing.Bitmap].Assembly
+    $referenceAssemblies = [System.Collections.Generic.List[string]]::new()
+    $referenceAssemblies.Add($drawingAssembly.Location)
+    foreach ($referenceName in $drawingAssembly.GetReferencedAssemblies()) {
+        $referenceAssembly = [System.Reflection.Assembly]::Load($referenceName)
+        if (-not [string]::IsNullOrWhiteSpace($referenceAssembly.Location)) {
+            $referenceAssemblies.Add($referenceAssembly.Location)
+        }
+    }
+
+    Add-Type -ReferencedAssemblies $referenceAssemblies.ToArray() -TypeDefinition @'
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
