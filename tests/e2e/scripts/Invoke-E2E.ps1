@@ -32,6 +32,12 @@ $distributionScript = Join-Path $PSScriptRoot 'Invoke-DistributionE2E.ps1'
 $artifactRunRoot = Join-Path ([System.IO.Path]::GetFullPath($ArtifactsDirectory)) ('headless\' + [Guid]::NewGuid().ToString('N'))
 
 $manifests = @(Get-ChildItem -LiteralPath $scenarioDirectory -Filter '*.json' -File | Sort-Object Name)
+if ($Phase -eq 'Headless') {
+    $manifests = @($manifests | Where-Object {
+        $manifestContent = Get-Content -LiteralPath $_.FullName -Raw -Encoding utf8 | ConvertFrom-Json
+        $manifestContent.phase -eq 'headless'
+    })
+}
 if (-not [string]::IsNullOrWhiteSpace($Scenario)) {
     $manifests = @($manifests | Where-Object { $_.BaseName -eq $Scenario })
 }
