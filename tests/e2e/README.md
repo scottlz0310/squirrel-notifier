@@ -63,3 +63,34 @@ headless 境界は #307、#222、#223 のスコープです。`distribution-inst
 契約に従い、release workflow と同じ publish / WiX 経路で配布物を検証します。
 既存インストール、製品登録、Task Scheduler タスク、実行中プロセスを開始前に検出した
 場合は変更せず失敗します。
+
+## Phase 2 実デスクトップ E2E
+
+Phase 2 の workflow は `.github/workflows/desktop-e2e.yml` です。定期実行は行わず、
+実装時の検証は GitHub Actions の `workflow_dispatch` から実行します。release workflow
+は同じ reusable workflow を release 前 gate として呼び出します。
+
+手動実行では `DesktopSmoke` を選ぶと、専用の対話ログオン済み Windows runner 上で次を検証します。
+
+- MSI の install、製品 version、WinUI main window の launch
+- `AutomationProperties.AutomationId` による主要 UI 要素の検出
+- main window の screenshot
+- MSI uninstall、process、Task Scheduler、registry、install directory の残留確認
+
+`DesktopFull` は `DESKTOP_E2E_GATEWAY_URL`、`DESKTOP_E2E_RESOURCE_URIS`、component manifest、
+外部 stack の停止・復旧、device flow、queue、通知、sleep/resume を実行する
+`DESKTOP_E2E_FULL_DRIVER` を runner image に登録した場合だけ使用します。未設定の場合は
+成功扱いにせず、runner 契約違反として失敗します。token、device code、settings の内容は
+artifact へ出力しません。
+
+ローカルの対話 desktop で MSI を直接検証する場合:
+
+    pwsh -File .\tests\e2e\scripts\Invoke-DesktopE2E.ps1 `
+      -MsiPath .\release-output\SquirrelNotifier-Setup-0.12.0-x64.msi `
+      -Scenario DesktopSmoke `
+      -ArtifactsDirectory .\artifacts\e2e-local\desktop
+
+runner の EBS 容量を決める前に、次を実行して測定結果を保存します。
+
+    pwsh -File .\tests\e2e\scripts\Measure-DesktopE2EStorage.ps1 `
+      -OutputPath .\artifacts\e2e-local\desktop\storage.json

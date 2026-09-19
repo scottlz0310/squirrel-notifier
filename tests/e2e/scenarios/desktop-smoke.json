@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "desktop-smoke",
+  "phase": "desktop",
+  "timeoutSeconds": 300,
+  "components": {},
+  "fixture": "desktop/msi-ui-automation",
+  "expectedOutcome": "INSTALL_LAUNCH_UI_SCREENSHOT_UNINSTALL_AND_CLEANUP",
+  "scenarioKind": "desktop-smoke",
+  "requiresInteractiveDesktop": true,
+  "requiresCleanRunner": true
+}

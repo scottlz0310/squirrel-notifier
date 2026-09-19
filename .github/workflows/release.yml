@@ -13,136 +13,121 @@ on:
 
 env:
   DOTNET_VERSION: '10.0.x'
-  PROJECT_PATH: 'winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj'
 
 jobs:
-  build-and-release:
+  build-package:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $version = '${{ inputs.version }}'
+          }
+          else {
+            $version = '${{ github.ref_name }}'
+          }
+          $version = $version -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "version が SemVer の 3 要素形式ではありません: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: Install WiX 7
+        shell: pwsh
+        run: dotnet tool install --global wix --version 7.0.0
+
+      - name: Build release package
+        shell: pwsh
+        run: >-
+          .\scripts\Build-ReleasePackage.ps1
+          -Version '${{ steps.version.outputs.version }}'
+          -OutputDirectory .\release-output
+
+      - name: Upload release package for desktop gate
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-payload-x64
+          path: |
+            release-output/*.zip
+            release-output/*.msi
+            release-output/checksums-x64.txt
+            release-output/release-package.json
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop-e2e:
+    needs: build-package
+    uses: ./.github/workflows/desktop-e2e.yml
+    with:
+      release_artifact_name: release-payload-x64
+      expected_version: ${{ needs.build-package.outputs.version }}
+      scenario: DesktopFull
+      artifact_retention_days: 90
+    secrets: inherit
+
+  publish:
+    needs: [build-package, desktop-e2e]
+    if: startsWith(github.ref, 'refs/tags/') && needs.desktop-e2e.result == 'success'
     runs-on: windows-latest
     permissions:
       contents: write
 
-    strategy:
-      matrix:
-        platform: [x64]
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v7
-      with:
-        fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v6
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Download release package
+        uses: actions/download-artifact@v7
+        with:
+          name: release-payload-x64
+          path: release-output
 
-    - name: Get version
-      id: version
-      shell: pwsh
-      run: |
-        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-          $version = "${{ github.event.inputs.version }}"
-        } else {
-          $version = "${{ github.ref_name }}"
-        }
-        $version = $version -replace '^v', ''
-        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
-        echo "Version: $version"
+      - name: Compose release notes from CHANGELOG
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.build-package.outputs.version }}
+        run: .\scripts\extract-release-notes.ps1 -Version $env:VERSION
 
-    - name: Install WiX 7
-      run: dotnet tool install --global wix --version 7.0.0
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            release-output/*.zip
+            release-output/*.msi
+            release-output/checksums-x64.txt
+          draft: false
+          prerelease: false
+          body_path: release-notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Restore dependencies
-      run: dotnet restore ${{ env.PROJECT_PATH }}
-
-    - name: Build
-      run: |
-        dotnet publish ${{ env.PROJECT_PATH }} `
-          --configuration Release `
-          --runtime win-${{ matrix.platform }} `
-          --self-contained true `
-          --output ./publish/${{ matrix.platform }} `
-          /p:Platform=${{ matrix.platform }} `
-          /p:Version=${{ steps.version.outputs.VERSION }} `
-          /p:PublishSingleFile=false `
-          /p:IncludeNativeLibrariesForSelfExtract=true
-
-    - name: Build MSI installer
-      id: msi
-      shell: pwsh
-      run: |
-        $version = "${{ steps.version.outputs.VERSION }}"
-        $platform = "${{ matrix.platform }}"
-        $harvestPath = (Resolve-Path "./publish/$platform").Path
-        $msiOutDir = (New-Item -ItemType Directory -Path "./msi/$platform" -Force).FullName
-        dotnet build winui3/SquirrelNotifier.Installer/SquirrelNotifier.Installer.wixproj `
-          --configuration Release `
-          /p:Platform=$platform `
-          /p:HarvestPath="$harvestPath" `
-          /p:PackageVersion=$version `
-          /p:OutputPath="$msiOutDir"
-        $msi = Get-ChildItem -Path $msiOutDir -Filter "*.msi" -Recurse | Select-Object -First 1
-        if (-not $msi) { throw "MSI ファイルが見つかりませんでした: $msiOutDir" }
-        ./scripts/test-msi-major-upgrade.ps1 -MsiPath $msi.FullName
-        $msiName = "SquirrelNotifier-Setup-$version-$platform.msi"
-        Copy-Item -Path $msi.FullName -Destination "./$msiName"
-        echo "MSI_NAME=$msiName" >> $env:GITHUB_OUTPUT
-        Write-Host "MSI: $msiName"
-
-    - name: Create installer bundle
-      shell: pwsh
-      run: |
-        $version = "${{ steps.version.outputs.VERSION }}"
-        $platform = "${{ matrix.platform }}"
-        $bundleDir = Join-Path -Path "." -ChildPath "installer/$platform"
-        New-Item -ItemType Directory -Path $bundleDir -Force | Out-Null
-        Copy-Item -Path "./publish/$platform/*" -Destination $bundleDir -Recurse -Force
-        Copy-Item -Path "scripts/install.ps1","scripts/install.cmd","scripts/uninstall.ps1","scripts/uninstall.cmd","scripts/create-shortcuts.ps1","scripts/create-shortcuts.cmd" -Destination $bundleDir -Force
-        $installerArchive = "SquirrelNotifier-Setup-$version-$platform.zip"
-        Compress-Archive -Path "$bundleDir/*" -DestinationPath "./$installerArchive" -Force
-        echo "INSTALLER_ARCHIVE=$installerArchive" >> $env:GITHUB_OUTPUT
-      id: installer
-
-    - name: Generate checksums
-      shell: pwsh
-      run: |
-        $archives = @(
-          "${{ steps.installer.outputs.INSTALLER_ARCHIVE }}",
-          "${{ steps.msi.outputs.MSI_NAME }}"
-        )
-        $lines = foreach ($name in $archives) {
-          $hash = Get-FileHash -Path "./$name" -Algorithm SHA256
-          "$($hash.Hash)  $name"
-        }
-        $lines | Out-File -FilePath "./checksums-${{ matrix.platform }}.txt" -Encoding ASCII
-
-    - name: Compose release notes from CHANGELOG
-      if: startsWith(github.ref, 'refs/tags/')
-      shell: pwsh
-      env:
-        VERSION: ${{ steps.version.outputs.VERSION }}
-      run: ./scripts/extract-release-notes.ps1 -Version $env:VERSION
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v3
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        files: |
-          ${{ steps.installer.outputs.INSTALLER_ARCHIVE }}
-          ${{ steps.msi.outputs.MSI_NAME }}
-          checksums-${{ matrix.platform }}.txt
-        draft: false
-        prerelease: false
-        body_path: release-notes.md
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v7
-      with:
-        name: SquirrelNotifier-${{ matrix.platform }}
-        path: |
-          ${{ steps.installer.outputs.INSTALLER_ARCHIVE }}
-          ${{ steps.msi.outputs.MSI_NAME }}
-          checksums-${{ matrix.platform }}.txt
-        retention-days: 30
+      - name: Upload release package artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: SquirrelNotifier-x64
+          path: |
+            release-output/*.zip
+            release-output/*.msi
+            release-output/checksums-x64.txt
+          if-no-files-found: error
+          retention-days: 30

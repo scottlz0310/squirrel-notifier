@@ -11,7 +11,7 @@ mcp-gateway、thread-owl、認証、通知購読、WinUI の組み合わせに�
 | Phase | 用途 | Runner | 実行契機 | PR gate |
 |---|---|---|---|---|
 | Phase 1 | 決定的な headless 統合 E2E | GitHub-hosted `windows-2025` | pull request / `workflow_dispatch` | 安定化後に required |
-| Phase 2 | 実デスクトップを含むシステム E2E | snapshot 復元可能な専用 Windows VM | nightly / `workflow_dispatch` / release 前 | required にしない |
+| Phase 2 | 実デスクトップを含むシステム E2E | snapshot 復元可能な専用 Windows VM | `workflow_dispatch` / release 前 | PR required にしない |
 
 Phase 1 は外部ネットワークや本番レビュー基盤に依存させない。Phase 2 は実際の WinUI、
 既定ブラウザ、固定バージョンの test stack を扱うが、常用開発 PC や本番資格情報は
@@ -160,8 +160,23 @@ VM は実行前後に snapshot から復元でき、対話ログオン済み des
 - runner の OS build、Windows App SDK Runtime、既定ブラウザ、DPI、locale を
   version manifest に記録する。
 
-Phase 2 は PR required check にしない。nightly で安定性を観測し、release 前は
-`workflow_dispatch` で明示的に実行する。
+Phase 2 は PR required check にしない。実装時の検証は `workflow_dispatch` で行い、
+release workflow から同じ reusable workflow を release gate として呼び出す。定期実行は
+行わず、runner と EBS の常時稼働コストを発生させない。
+
+### AWS EC2 runner の運用契約
+
+- runner は `self-hosted`, `windows`, `squirrel-notifier-desktop` の label を持つ専用 VM とする。
+- EC2 は常時起動せず、検証前に起動し、終了後に停止または terminate する。AMI と EBS snapshot
+  は、次回に同じ clean user profile、DPI、locale、Docker、browser、Windows App SDK runtime を
+  復元できる状態で作成する。
+- Mcp-Docker は Linux container stack のため、Windows runner 内で Docker Desktop / WSL2 を使うか、
+  stack を別の専用 Linux host に分離する。採用方式と image digest は version manifest に記録する。
+- EBS volume size は固定値を先に決めない。`Measure-DesktopE2EStorage.ps1` を clean image、
+  dependency 導入後、最小 scenario 実行後に実行し、測定済み使用量 + 4 GiB の候補のうち最小の
+  fit 値を採用する。候補で fit しない場合は runner image を縮小してから再測定する。
+- runner image の初期化、snapshot 復元、runner 登録、終了時 cleanup は AWS 側の runbook に従う。
+  本リポジトリの workflow は VM の作成・削除や AWS credential の取得を行わない。
 
 ## テスト資産の配置契約
 
@@ -310,8 +325,8 @@ artifacts/e2e/<phase>/<scenario-id>/
 - `cleanup.json`: cleanup 対象ごとの実行結果と残留確認
 
 Phase 1 の成功時は job summary と `versions.json` だけを残し、失敗時 artifact は 14 日保持する。
-Phase 2 は screenshot、必要に応じて動画、Windows Event Log、component log を加え、
-nightly は 30 日、release 前実行は 90 日保持する。
+Phase 2 は screenshot、必要に応じて動画、Windows Event Log、component log を加える。
+`workflow_dispatch` は 14 日、release 前実行は 90 日保持する。定期実行用の retention は設けない。
 
 artifact は成功判定の正本にしない。workflow の exit code と `result.json` が一致しない場合は
 `TEST_HARNESS_FAILED` とする。
@@ -407,8 +422,8 @@ Phase 1 を required check にするには、次をすべて満たす。
 - branch protection へ追加する check 名が固定されている。
 - rollback 手順と一時的に required から外す判断基準が文書化されている。
 
-導入順は `workflow_dispatch`、non-required PR check、required PR check とする。Phase 2 は
-この昇格条件の対象外で、nightly / release 前 gate のまま運用する。
+導入順は `workflow_dispatch`、release gate とする。Phase 2 は PR required check への昇格対象外で、
+手動検証と release 前 gate のみで運用する。
 
 ## 依存順
 
