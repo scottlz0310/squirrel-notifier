@@ -137,12 +137,42 @@ function Assert-InstalledVersion {
     }
 }
 
+function Ensure-WindowStateType {
+    if ($null -ne ('DesktopE2E.WindowState' -as [type])) {
+        return
+    }
+
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace DesktopE2E
+{
+    public static class WindowState
+    {
+        [DllImport("user32.dll")]
+        public static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int command);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(IntPtr hWnd);
+    }
+}
+'@
+}
+
 function Wait-MainWindow {
     param(
         [Parameter(Mandatory)]
         [System.Diagnostics.Process]$Process
     )
 
+    Ensure-WindowStateType
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         $Process.Refresh()
@@ -150,8 +180,14 @@ function Wait-MainWindow {
             throw "アプリケーションが main window 作成前に終了しました。終了コード=$($Process.ExitCode)"
         }
 
-        if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
-            return $Process.MainWindowHandle
+        $handle = $Process.MainWindowHandle
+        if ($handle -ne [IntPtr]::Zero) {
+            [DesktopE2E.WindowState]::ShowWindow($handle, 5) | Out-Null
+            if ([DesktopE2E.WindowState]::IsWindowVisible($handle) -and -not [DesktopE2E.WindowState]::IsIconic($handle)) {
+                [DesktopE2E.WindowState]::SetForegroundWindow($handle) | Out-Null
+                Start-Sleep -Milliseconds 500
+                return $handle
+            }
         }
         Start-Sleep -Milliseconds 500
     }
