@@ -98,6 +98,19 @@ Issue #222 は、実 `McpSubscriptionService` / `McpLoginService` が実 subscri
 認証 fixture は内部用の token marker を生成するが、product log、settings、sanitized artifact へ
 出力しないことも同時に検査する。
 
+### #223 enqueue、通知モデル、dummy launcher の headless scenario
+
+Issue #223 は、実 `ReviewRegistrationService` / `EnqueueReviewService` が、購読開始を確認してから
+`mcp-resource-subscriber call --tool enqueue_review` を実行し、queue のイベントを通知モデルと
+launcher へ渡すプロセス境界を検証する。停止中と preflight 失敗後の Error 状態からの開始、
+`InitialText` / `FinalText` にまたがる重複排除、複数 PR と reason の分離、launcher の引数・
+working directory を loopback fake Gateway、dummy subscriber、dummy launcher で固定する。
+実 GitHub、実 queue、実 AI agent、production の資格情報は使用しない。
+
+| Scenario ID | 検証内容 |
+|---|---|
+| review-event-flow | Running / Stopped / Error からの `enqueue_review`、5 件の重複排除済み通知、複数 URI の分離、dummy launcher の引数・作業ディレクトリ |
+
 ### 非対象
 
 - WinUI 要素のクリックや目視判定
@@ -114,7 +127,7 @@ Issue #222 は、実 `McpSubscriptionService` / `McpLoginService` が実 subscri
 | #220 | 現行 CI の壁時計計測、重複処理削減、Phase 1 用の時間予算 |
 | #221 | 配布物 build、silent install / uninstall、version、cleanup |
 | #222 | CLI、gateway、認証の Windows headless 契約 |
-| #223 | enqueue から通知モデル、dummy launcher までのプロセス境界 |
+| #223 | enqueue から通知モデル、dummy launcher までのプロセス境界（実装済み） |
 
 ## Phase 2: self-hosted Windows 実デスクトップ E2E
 
@@ -217,8 +230,8 @@ dummy subscriber / launcher は次を満たす。
 
 Issue #307 の launcher fixture は上記契約のうち、引数・working directory・標準入力の状態、
 構造化 stdout、終了コードを実装する。Issue #222 の subscriber fixture は CLI 引数、HTTP
-status、認証状態、JSON event を実装する。MSI、silent install、enqueue から通知モデルまでを
-含む残りの Phase 1 fixture は #221 と #223 で追加する。
+status、認証状態、JSON event を実装する。Issue #223 の fixture は enqueue、重複排除済み通知、
+dummy launcher の境界を実装する。MSI、silent install、配布物の残りは #221 で追加する。
 
 ## Version pin 契約
 
@@ -358,9 +371,9 @@ pwsh -File .\tests\e2e\scripts\Invoke-E2ECleanup.ps1 `
   -RunRoot <実行時に表示された専用 root>
 ```
 
-Invoke-E2E.ps1 は #307 の resume 境界と #222 の subscriber / gateway / 認証契約を対象にした
-Phase 1 の entrypoint である。配布物、MSI、Task Scheduler、enqueue から通知モデルまでを
-跨ぐ広い scenario は #221 と #223 で拡張する。
+Invoke-E2E.ps1 は #307 の resume 境界、#222 の subscriber / gateway / 認証契約、#223 の
+enqueue / 通知モデル / dummy launcher 境界を対象にした Phase 1 の entrypoint である。
+配布物、MSI、Task Scheduler、silent install / uninstall を跨ぐ scenario は #221 で拡張する。
 
 ローカル実行は管理者権限を暗黙要求しない。MSI install 等で権限が必要な scenario は開始前に
 preflight し、不足時は途中まで実行せず明確な failure reason を返す。

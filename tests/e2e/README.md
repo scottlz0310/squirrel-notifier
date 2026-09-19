@@ -2,7 +2,8 @@
 
 このディレクトリは、WinUI の起動や xUnit の in-process test では検証できない
 cross-process E2E を管理します。Issue #307 では launcher の session resume 境界を、
-Issue #222 では subscriber、gateway、認証の契約を検証します。実 GitHub、実 gateway、
+Issue #222 では subscriber、gateway、認証の契約を、Issue #223 では enqueue から
+通知モデル・dummy launcher までのプロセス境界を検証します。実 GitHub、実 gateway、
 実 OAuth provider、実ブラウザ、実 PR は使用しません。
 
 ## 実行
@@ -32,6 +33,7 @@ retry なしで実行します。scenario ごとに RUNNER_TEMP 配下の専用 
 | session-resume-parsed-output | Codex JSONL からの ParsedFromOutput と resume |
 | subscriber-gateway-contract | 実 subscriber の引数、success、404、401、500、接続拒否の契約 |
 | gateway-auth-flow | `.cmd` / `.bat` 解決、device flow、token cache 後の再購読 |
+| review-event-flow | 購読開始、`enqueue_review`、InitialText / FinalText の重複排除、通知モデル、dummy launcher |
 
 fixture の dummy executable は codex.exe という名前で build されます。ParsedFromOutput
 scenario では一時 PATH から codex として解決し、それ以外では絶対パスで起動します。
@@ -40,7 +42,9 @@ dummy は引数、working directory、標準入力のリダイレクト状態、
 
 dummy subscriber は `mcp-resource-subscriber.exe` として build され、loopback の fake Gateway
 だけへ接続します。`gateway-auth-flow` では実製品の `McpLoginService` と
-`McpSubscriptionService` がこのプロセスを起動し、token marker は artifact へ出力しません。
+`McpSubscriptionService` がこのプロセスを起動し、`review-event-flow` では
+`ReviewRegistrationService` / `EnqueueReviewService` も同じ実プロセス境界を通ります。
+token marker は artifact へ出力しません。
 
 ## Artifact と cleanup
 
@@ -53,6 +57,6 @@ pattern を検査します。
 
     pwsh -File .\tests\e2e\scripts\Invoke-E2ECleanup.ps1 -RunRoot <scenario-root> -ArtifactsDirectory .\artifacts\e2e-local\headless\<run-id>\<scenario-id>
 
-この Phase 1 の launcher、subscriber、gateway、認証の headless 境界は #307 と #222 の
-スコープです。配布物、MSI、Task Scheduler、enqueue から通知モデルまでを跨ぐ E2E は
-#221 と #223 の契約に従って追加します。
+この Phase 1 の launcher、subscriber、gateway、認証、enqueue から通知モデルまでの
+headless 境界は #307、#222、#223 のスコープです。配布物、MSI、Task Scheduler、
+silent install / uninstall を跨ぐ E2E は #221 の契約に従って追加します。

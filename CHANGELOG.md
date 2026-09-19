@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 購読開始、`enqueue_review`、`InitialText` / `FinalText` の重複排除、通知モデル、dummy launcher のプロセス境界を実プロセスで検証する Phase 1 headless E2E scenario を追加した（#223）
+
 ## [0.12.0] - 2026-09-19
 
 レビューサイクルの可視化、skill ベースの launcher、subscriber・gateway・認証の headless E2E を含む機能リリースです。
