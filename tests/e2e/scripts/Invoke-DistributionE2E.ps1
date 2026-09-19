@@ -623,19 +623,6 @@ function Invoke-TestCleanup {
     }
 }
 
-function Copy-FailureArtifacts {
-    if ($null -eq $failureCategory) {
-        return
-    }
-
-    foreach ($source in @($msiPath, $zipPath)) {
-        if ($null -ne $source -and (Test-Path -LiteralPath $source -PathType Leaf)) {
-            $destinationName = if ([System.IO.Path]::GetExtension($source) -eq '.msi') { 'generated-installer.msi' } else { 'generated-setup.zip' }
-            Copy-Item -LiteralPath $source -Destination (Join-Path $artifactsFullPath $destinationName) -Force
-        }
-    }
-}
-
 try {
     New-Item -ItemType Directory -Path $runRootFullPath, $artifactsFullPath, (Join-Path $runRootFullPath 'logs') -Force | Out-Null
     Write-Phase '配布物 E2E を開始しました。'
@@ -862,7 +849,6 @@ finally {
             assertions = @($assertions)
         })
         if ($null -ne $failureCategory) {
-            Copy-FailureArtifacts
             Write-ArtifactJson -Name 'failure.json' -Value ([ordered]@{
                 schemaVersion = 1
                 phase = 'headless'
@@ -873,7 +859,7 @@ finally {
                 startedAt = $startedAt
                 completedAt = $completedAt
                 durationMilliseconds = [Math]::Max(0, ($completedAt - $startedAt).TotalMilliseconds)
-                artifactHints = @('sanitized.log', 'distribution.json', 'distribution-cleanup.json', 'versions.json', 'msi-msi-install.log', 'msi-msi-uninstall.log', 'generated-installer.msi', 'generated-setup.zip')
+                artifactHints = @('sanitized.log', 'distribution.json', 'distribution-cleanup.json', 'versions.json', 'msi-msi-install.log', 'msi-msi-uninstall.log')
             })
         }
     }
