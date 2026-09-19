@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "review-event-flow",
+  "phase": "headless",
+  "timeoutSeconds": 120,
+  "components": {
+    "mcp-resource-subscriber": "0.6.0"
+  },
+  "fixture": "review-registration/event-flow",
+  "expectedOutcome": "ENQUEUE_NOTIFICATION_AND_DUMMY_LAUNCHER",
+  "scenarioKind": "review-event-flow"
+}

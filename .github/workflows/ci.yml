@@ -101,8 +101,8 @@ jobs:
           flags: unittests
           name: codecov-umbrella
 
-  # #307/#222: launcher resume と subscriber/gateway/auth の Phase 1 headless E2E。#220 と
-  # #221/#223 の昇格条件が
+  # #307/#222/#223: launcher resume、subscriber/gateway/auth、enqueue/通知モデルの Phase 1 headless E2E。#220 と
+  # #221 の昇格条件が
   # 未完了のため、初期導入では non-required の並列 job として実行する。
   headless-e2e:
     runs-on: windows-2025

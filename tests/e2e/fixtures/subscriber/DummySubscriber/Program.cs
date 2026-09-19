@@ -19,6 +19,11 @@ internal static class Program
     private const string _fixtureToken = "fixture-token-never-written-to-artifacts";
     private const string _observationPathVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_OBSERVATION_PATH";
     private const string _tokenCachePathVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_TOKEN_CACHE_PATH";
+    private const string _flowVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_FLOW";
+    private const string _preflightFailureVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_PREFLIGHT_FAILURE";
+    private const string _delayVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_DELAY_MS";
+    private const string _secondaryResourceUri = "queue://review/secondary";
+    private const string _observationMutexName = "SquirrelNotifier.E2E.DummySubscriber.Observation";
 
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -50,6 +55,13 @@ internal static class Program
 
         if (string.Equals(mode, "--help", StringComparison.Ordinal))
         {
+            if (IsEnabled(_preflightFailureVariable))
+            {
+                Record(args, "help", null, null, false, 7);
+                await Console.Error.WriteLineAsync("help preflight fixture failed.").ConfigureAwait(false);
+                return 7;
+            }
+
             Record(args, "help", null, null, false, 0);
             await WriteOutputAsync("mcp-resource-subscriber fixture: --version | --help | --login --url <url> | --url <url> --uri <uri> --timeout-ms <ms> --json").ConfigureAwait(false);
             return 0;
@@ -60,7 +72,47 @@ internal static class Program
             return await RunLoginAsync(args, gatewayUrl).ConfigureAwait(false);
         }
 
+        if (string.Equals(mode, "call", StringComparison.Ordinal))
+        {
+            return await RunCallAsync(args, gatewayUrl).ConfigureAwait(false);
+        }
+
         return await RunSubscriptionAsync(args, gatewayUrl, resourceUri).ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunCallAsync(string[] args, string? gatewayUrl)
+    {
+        string? tool = GetOption(args, "--tool");
+        string? toolArguments = GetOption(args, "--args");
+        if (string.IsNullOrWhiteSpace(gatewayUrl)
+            || !string.Equals(tool, "enqueue_review", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(toolArguments))
+        {
+            Record(args, "call", gatewayUrl, null, false, 2);
+            await WriteOutputAsync("{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"CALL_ARGUMENTS_INVALID\"}]}").ConfigureAwait(false);
+            return 2;
+        }
+
+        try
+        {
+            using HttpResponseMessage response = await SendRequestAsync(gatewayUrl, ReadTokenCache()).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                Record(args, "call", gatewayUrl, null, false, 1);
+                await WriteOutputAsync("{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"ENQUEUE_FAILED\"}]}").ConfigureAwait(false);
+                return 1;
+            }
+
+            Record(args, "call", gatewayUrl, null, false, 0);
+            await WriteOutputAsync("{\"isError\":false,\"content\":[]}").ConfigureAwait(false);
+            return 0;
+        }
+        catch (HttpRequestException)
+        {
+            Record(args, "call", gatewayUrl, null, false, 3);
+            await WriteOutputAsync("{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"CONNECTION_REFUSED\"}]}").ConfigureAwait(false);
+            return 3;
+        }
     }
 
     private static async Task<int> RunLoginAsync(string[] args, string? gatewayUrl)
@@ -157,16 +209,123 @@ internal static class Program
             }
         }
 
+        await DelayIfConfiguredAsync().ConfigureAwait(false);
+
+        string initialText = IsReviewEventFlow()
+            ? BuildReviewEventFlowInitialText(resourceUri)
+            : "[{\"owner\":\"fixture-owner\",\"repo\":\"fixture-repository\",\"prNumber\":307,\"reason\":\"initial-review\",\"queuedAt\":\"2026-01-01T00:00:00Z\",\"requestedBy\":\"fixture\"}]";
+        string finalText = IsReviewEventFlow()
+            ? BuildReviewEventFlowFinalText(resourceUri)
+            : "[]";
+
         Record(args, "subscription", gatewayUrl, resourceUri, hasAuthorization, 0);
         await WriteOutputAsync(JsonSerializer.Serialize(new
         {
             route = "subscription",
             notificationReceived = true,
-            initialText = "[{\"owner\":\"fixture-owner\",\"repo\":\"fixture-repository\",\"prNumber\":307,\"reason\":\"initial-review\",\"queuedAt\":\"2026-01-01T00:00:00Z\",\"requestedBy\":\"fixture\"}]",
-            finalText = "[]",
+            initialText,
+            finalText,
             serverUrl = gatewayUrl,
         }, _jsonOptions)).ConfigureAwait(false);
         return 0;
+    }
+
+    private static bool IsReviewEventFlow()
+        => string.Equals(
+            Environment.GetEnvironmentVariable(_flowVariable),
+            "review-event-flow",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static async Task DelayIfConfiguredAsync()
+    {
+        string? value = Environment.GetEnvironmentVariable(_delayVariable);
+        if (int.TryParse(value, out int delayMs) && delayMs > 0)
+        {
+            await Task.Delay(delayMs).ConfigureAwait(false);
+        }
+    }
+
+    private static string BuildReviewEventFlowInitialText(string? resourceUri)
+        => BuildReviewEventFlowText(resourceUri, includeNewCandidate: false);
+
+    private static string BuildReviewEventFlowFinalText(string? resourceUri)
+        => BuildReviewEventFlowText(resourceUri, includeNewCandidate: true);
+
+    private static string BuildReviewEventFlowText(string? resourceUri, bool includeNewCandidate)
+    {
+        ReviewEventPayload[] payloads = string.Equals(resourceUri, _secondaryResourceUri, StringComparison.Ordinal)
+            ? includeNewCandidate
+                ?
+                [
+                    new ReviewEventPayload(
+                        "secondary-owner",
+                        "secondary-repository",
+                        310,
+                        "opened",
+                        "2026-01-01T00:00:10Z",
+                        "secondary-fixture"),
+                    new ReviewEventPayload(
+                        "fourth-owner",
+                        "fourth-repository",
+                        311,
+                        "synchronized",
+                        "2026-01-01T00:00:11Z",
+                        "secondary-fixture"),
+                ]
+                :
+                [
+                    new ReviewEventPayload(
+                        "secondary-owner",
+                        "secondary-repository",
+                        310,
+                        "opened",
+                        "2026-01-01T00:00:10Z",
+                        "secondary-fixture"),
+                ]
+            : includeNewCandidate
+                ?
+                [
+                    new ReviewEventPayload(
+                        "fixture-owner",
+                        "fixture-repository",
+                        307,
+                        "opened",
+                        "2026-01-01T00:00:01Z",
+                        "fixture"),
+                    new ReviewEventPayload(
+                        "second-owner",
+                        "second-repository",
+                        308,
+                        "synchronized",
+                        "2026-01-01T00:00:02Z",
+                        "fixture"),
+                    new ReviewEventPayload(
+                        "third-owner",
+                        "third-repository",
+                        309,
+                        "re-review-requested",
+                        "2026-01-01T00:00:03Z",
+                        "fixture"),
+                ]
+                :
+                [
+                    new ReviewEventPayload(
+                        "fixture-owner",
+                        "fixture-repository",
+                        307,
+                        "opened",
+                        "2026-01-01T00:00:01Z",
+                        "fixture"),
+                    new ReviewEventPayload(
+                        "second-owner",
+                        "second-repository",
+                        308,
+                        "synchronized",
+                        "2026-01-01T00:00:02Z",
+                        "fixture"),
+                ];
+
+        return JsonSerializer.Serialize(payloads, _jsonOptions);
     }
 
     private static async Task<HttpResponseMessage> SendRequestAsync(string gatewayUrl, string? token)
@@ -240,6 +399,9 @@ internal static class Program
         return null;
     }
 
+    private static bool IsEnabled(string name)
+        => string.Equals(Environment.GetEnvironmentVariable(name), "1", StringComparison.Ordinal);
+
     private static void Record(
         string[] args,
         string mode,
@@ -259,7 +421,33 @@ internal static class Program
             hasAuthorization,
             exitCode,
         };
-        File.AppendAllText(path, JsonSerializer.Serialize(observation, _jsonOptions) + Environment.NewLine);
+        using var mutex = new Mutex(false, _observationMutexName);
+        bool acquired = false;
+        try
+        {
+            try
+            {
+                acquired = mutex.WaitOne(TimeSpan.FromSeconds(5));
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
+
+            if (!acquired)
+            {
+                throw new IOException("subscriber observation の mutex を取得できませんでした。");
+            }
+
+            File.AppendAllText(path, JsonSerializer.Serialize(observation, _jsonOptions) + Environment.NewLine);
+        }
+        finally
+        {
+            if (acquired)
+            {
+                mutex.ReleaseMutex();
+            }
+        }
     }
 
     private static string GetRequiredEnvironmentVariable(string name)
@@ -269,4 +457,12 @@ internal static class Program
             ? throw new InvalidOperationException($"環境変数 {name} が設定されていません。")
             : value;
     }
+
+    private sealed record ReviewEventPayload(
+        string Owner,
+        string Repo,
+        int PrNumber,
+        string Reason,
+        string QueuedAt,
+        string RequestedBy);
 }

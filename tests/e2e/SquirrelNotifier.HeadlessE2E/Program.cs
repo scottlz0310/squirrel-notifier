@@ -334,6 +334,22 @@ internal static class Program
                             _subscriberFixturePath,
                             timeout.Token).ConfigureAwait(false));
                     break;
+                case "review-event-flow":
+                    if (string.IsNullOrWhiteSpace(_subscriberFixturePath))
+                    {
+                        throw new E2eFailureException("TEST_HARNESS_FAILED", "subscriber fixture の実行ファイルが指定されていません。");
+                    }
+
+                    _assertions.AddRange(
+                        await ReviewEventFlowE2ERunner.RunAsync(
+                            RunRoot,
+                            SettingsDirectory,
+                            LogDirectory,
+                            ArtifactsDirectory,
+                            _dummyLauncherPath,
+                            _subscriberFixturePath,
+                            timeout.Token).ConfigureAwait(false));
+                    break;
                 default:
                     throw new E2eFailureException("TEST_HARNESS_FAILED", "未登録の scenario kind です。");
             }
