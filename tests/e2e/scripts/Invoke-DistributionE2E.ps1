@@ -194,7 +194,15 @@ function Invoke-Msi {
         throw [DistributionE2EException]::new('TEST_HARNESS_FAILED', "msiexec.exe が見つかりません: $msiexecPath")
     }
 
-    $arguments = "/$Action $(Quote-ProcessArgument $PackagePath) /qn /norestart /L*v $(Quote-ProcessArgument $LogPath)"
+    $actionSwitch = if ($Action -eq 'install') { '/i' } else { '/x' }
+    $arguments = @(
+        $actionSwitch,
+        (Quote-ProcessArgument $PackagePath),
+        '/qn',
+        '/norestart',
+        '/L*v',
+        (Quote-ProcessArgument $LogPath)
+    )
     Write-Phase "MSI $Action を実行します。timeout=${msiTimeoutSeconds}秒"
     $msiLogPaths.Add($LogPath)
     $process = $null
