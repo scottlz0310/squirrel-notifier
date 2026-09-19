@@ -82,10 +82,12 @@ $settingsDirectory = Join-Path $env:LOCALAPPDATA 'SquirrelNotifier'
 $taskName = 'Squirrel Notifier'
 $applicationProcessName = 'SquirrelNotifier.WinUI3'
 $applicationProcessId = $null
+$script:fullDriverProcessId = $null
 $installStarted = $false
 $script:runnerWasDirty = $false
 $settingsExistedBefore = Test-Path -LiteralPath $settingsDirectory -PathType Container
 $startedAt = [DateTimeOffset]::UtcNow
+$scenarioDeadline = $startedAt.AddSeconds($timeoutSeconds)
 $logLines = [System.Collections.Generic.List[string]]::new()
 $failure = $null
 $cleanupErrors = [System.Collections.Generic.List[string]]::new()
@@ -167,6 +169,30 @@ function New-FailureRecord {
     }
 }
 
+function Get-ScenarioRemainingMilliseconds {
+    $remainingMilliseconds = [Math]::Floor(($scenarioDeadline - [DateTimeOffset]::UtcNow).TotalMilliseconds)
+    if ($remainingMilliseconds -le 0) {
+        Set-FailureCategory -Category 'TIMEOUT'
+        throw "scenario の timeoutSeconds を超過しました: $scenarioId"
+    }
+
+    return [int][Math]::Min($remainingMilliseconds, [int]::MaxValue)
+}
+
+function ConvertTo-ReleaseVersion {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    $match = [regex]::Match($Value.Trim(), '^v?(\d+)\.(\d+)\.(\d+)(?:\.0)?(?:[-+][0-9A-Za-z.-]+)?$')
+    if (-not $match.Success) {
+        return $null
+    }
+
+    return '{0}.{1}.{2}' -f $match.Groups[1].Value, $match.Groups[2].Value, $match.Groups[3].Value
+}
+
 function Invoke-Msi {
     param(
         [Parameter(Mandatory)]
@@ -174,7 +200,9 @@ function Invoke-Msi {
         [string]$Operation,
 
         [Parameter(Mandatory)]
-        [string]$LogPath
+        [string]$LogPath,
+
+        [switch]$UseScenarioDeadline
     )
 
     $arguments = if ($Operation -eq 'Install') {
@@ -184,21 +212,38 @@ function Invoke-Msi {
         @('/x', ('"{0}"' -f $resolvedMsiPath), '/qn', '/norestart', '/L*v', ('"{0}"' -f $LogPath))
     }
 
-    $process = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\msiexec.exe') -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+    $process = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\msiexec.exe') -ArgumentList $arguments -PassThru -WindowStyle Hidden
+    $timeoutMilliseconds = if ($UseScenarioDeadline) {
+        Get-ScenarioRemainingMilliseconds
+    }
+    else {
+        120000
+    }
+    if (-not $process.WaitForExit($timeoutMilliseconds)) {
+        try {
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        }
+        catch {
+        }
+        if ($UseScenarioDeadline) {
+            Set-FailureCategory -Category 'TIMEOUT'
+        }
+        throw "MSI $Operation が timeout 内に終了しませんでした。"
+    }
     if ($process.ExitCode -ne 0) {
         throw "MSI $Operation が終了コード $($process.ExitCode) で失敗しました。"
     }
 }
 
 function Wait-InstalledExecutable {
-    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
+    while ([DateTimeOffset]::UtcNow -lt $scenarioDeadline) {
         if (Test-Path -LiteralPath $installedExecutable -PathType Leaf) {
             return
         }
         Start-Sleep -Milliseconds 500
     }
 
+    Set-FailureCategory -Category 'TIMEOUT'
     throw "インストール後の実行ファイルが見つかりません: $installedExecutable"
 }
 
@@ -208,8 +253,9 @@ function Assert-InstalledVersion {
     }
 
     $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($installedExecutable)
-    $actualVersion = $versionInfo.ProductVersion
-    if ([string]::IsNullOrWhiteSpace($actualVersion) -or -not $actualVersion.StartsWith($ExpectedVersion, [StringComparison]::Ordinal)) {
+    $expectedVersionKey = ConvertTo-ReleaseVersion -Value $ExpectedVersion
+    $actualVersionKey = ConvertTo-ReleaseVersion -Value $versionInfo.ProductVersion
+    if ($null -eq $expectedVersionKey -or $null -eq $actualVersionKey -or $actualVersionKey -cne $expectedVersionKey) {
         throw "インストールされた製品 version が期待値と異なります。期待値=$ExpectedVersion"
     }
 }
@@ -250,8 +296,7 @@ function Wait-MainWindow {
     )
 
     Ensure-WindowStateType
-    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
+    while ([DateTimeOffset]::UtcNow -lt $scenarioDeadline) {
         $Process.Refresh()
         if ($Process.HasExited) {
             throw "アプリケーションが main window 作成前に終了しました。終了コード=$($Process.ExitCode)"
@@ -269,6 +314,7 @@ function Wait-MainWindow {
         Start-Sleep -Milliseconds 500
     }
 
+    Set-FailureCategory -Category 'TIMEOUT'
     throw 'アプリケーションの main window が timeout 内に作成されませんでした。'
 }
 
@@ -371,8 +417,7 @@ function Wait-UiElementByAutomationId {
         [string]$AutomationId
     )
 
-    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
+    while ([DateTimeOffset]::UtcNow -lt $scenarioDeadline) {
         $element = Get-UiElementByAutomationId -Root $Root -AutomationId $AutomationId
         if ($null -ne $element) {
             return $element
@@ -380,6 +425,7 @@ function Wait-UiElementByAutomationId {
         Start-Sleep -Milliseconds 200
     }
 
+    Set-FailureCategory -Category 'TIMEOUT'
     throw "UI Automation element が見つかりません: $AutomationId"
 }
 
@@ -586,16 +632,66 @@ function Invoke-FullScenarioDriver {
         throw 'DESKTOP_E2E_FULL_DRIVER が見つかりません。'
     }
 
-    & pwsh -NoProfile -File $env:DESKTOP_E2E_FULL_DRIVER `
-        -MsiPath $resolvedMsiPath `
-        -ArtifactDirectory $scenarioArtifactDirectory `
-        -WindowHandle $windowHandle.ToInt64() `
-        -ScenarioManifestPath $scenarioManifestPath `
-        -ExpectedOutcome $scenarioManifest.expectedOutcome `
-        -ResultPath $fullDriverResultPath
-    if ($LASTEXITCODE -ne 0) {
-        Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
-        throw 'DesktopFull driver が失敗しました。'
+    $pwshCommand = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $pwshCommand) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw 'DesktopFull driver を実行する pwsh が見つかりません。'
+    }
+
+    $driverArguments = @(
+        '-NoProfile',
+        '-File', $env:DESKTOP_E2E_FULL_DRIVER,
+        '-MsiPath', $resolvedMsiPath,
+        '-ArtifactDirectory', $scenarioArtifactDirectory,
+        '-WindowHandle', [string]$windowHandle.ToInt64(),
+        '-ScenarioManifestPath', $scenarioManifestPath,
+        '-ExpectedOutcome', [string]$scenarioManifest.expectedOutcome,
+        '-ResultPath', $fullDriverResultPath
+    )
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $pwshCommand.Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    foreach ($argument in $driverArguments) {
+        $startInfo.ArgumentList.Add([string]$argument)
+    }
+
+    $driverProcess = [System.Diagnostics.Process]::new()
+    $driverProcess.StartInfo = $startInfo
+    $driverStarted = $false
+    try {
+        if (-not $driverProcess.Start()) {
+            Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
+            throw 'DesktopFull driver を起動できません。'
+        }
+        $driverStarted = $true
+        $script:fullDriverProcessId = $driverProcess.Id
+        $remainingMilliseconds = Get-ScenarioRemainingMilliseconds
+        if (-not $driverProcess.WaitForExit($remainingMilliseconds)) {
+            try {
+                Stop-Process -Id $driverProcess.Id -Force -ErrorAction Stop
+            }
+            catch {
+            }
+            Set-FailureCategory -Category 'TIMEOUT'
+            throw 'DesktopFull driver が scenario timeout 内に終了しませんでした。'
+        }
+        if ($driverProcess.ExitCode -ne 0) {
+            Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
+            throw 'DesktopFull driver が失敗しました。'
+        }
+    }
+    catch {
+        if ($null -eq $script:failureCategoryOverride) {
+            Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
+        }
+        throw
+    }
+    finally {
+        if ($driverStarted -and $driverProcess.HasExited) {
+            $script:fullDriverProcessId = $null
+        }
+        $driverProcess.Dispose()
     }
 
     if (-not (Test-Path -LiteralPath $fullDriverResultPath -PathType Leaf)) {
@@ -718,7 +814,7 @@ try {
     $msiHash = (Get-FileHash -LiteralPath $resolvedMsiPath -Algorithm SHA256).Hash
     $result.steps.msiSha256 = $msiHash
     $installStarted = $true
-    Invoke-Msi -Operation Install -LogPath $installLogPath
+    Invoke-Msi -Operation Install -LogPath $installLogPath -UseScenarioDeadline
     Wait-InstalledExecutable
     Assert-InstalledVersion
     $result.steps.install = 'passed'
@@ -766,6 +862,20 @@ catch {
     Write-ScenarioLog "Desktop E2E に失敗しました: $($failure.category)"
 }
 finally {
+    if ($null -ne $script:fullDriverProcessId) {
+        try {
+            $driverProcess = Get-Process -Id $script:fullDriverProcessId -ErrorAction SilentlyContinue
+            if ($null -ne $driverProcess) {
+                Stop-Process -Id $script:fullDriverProcessId -Force -ErrorAction Stop
+                $driverProcess.WaitForExit(5000) | Out-Null
+            }
+            $script:fullDriverProcessId = $null
+        }
+        catch {
+            $cleanupErrors.Add('DesktopFull driver プロセスを停止できませんでした。')
+        }
+    }
+
     if ($null -ne $applicationProcessId) {
         try {
             $process = Get-Process -Id $applicationProcessId -ErrorAction SilentlyContinue

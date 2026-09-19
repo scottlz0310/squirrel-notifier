@@ -376,6 +376,9 @@ DesktopFull の `DESKTOP_E2E_FULL_DRIVER` は、次の引数を受け取り、`R
 および `requiredDriverSteps` の全 step が `passed` であることを要求する。不足または不一致は
 `PRODUCT_CONTRACT_MISMATCH` として扱う。artifact scan に失敗した場合は upload を行わず、
 `SECURITY_SECRET_EXPOSURE` の failure record を生成する。
+MSI install と driver process は scenario manifest の `timeoutSeconds` で定義する全体 deadline 内に
+終了し、超過時は `TIMEOUT` として cleanup と failure artifact を実行する。cleanup の MSI uninstall
+には、artifact を残すための独立した上限を設ける。
 
 Phase 1 の成功時は job summary と `versions.json` だけを残し、失敗時 artifact は 14 日保持する。
 Phase 2 は screenshot、必要に応じて動画、Windows Event Log、component log を加える。
