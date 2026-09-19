@@ -993,18 +993,19 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         _stopCts?.Cancel();
         _activeProcessCts?.Cancel();
 
-        if (_activeProcess != null)
+        IProcessInstance? activeProcess = _activeProcess;
+        if (activeProcess != null)
         {
             try
             {
-                _activeProcess.Kill(entireProcessTree: true);
+                activeProcess.Kill(entireProcessTree: true);
             }
             catch
             {
                 // ignore
             }
 
-            _activeProcess.Dispose();
+            activeProcess.Dispose();
         }
 
         foreach (IProcessInstance process in _activeProcesses.Values)
