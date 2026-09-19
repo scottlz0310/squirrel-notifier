@@ -554,7 +554,12 @@ function Test-ComponentManifest {
         $digestProperty = $component.PSObject.Properties['digest']
         $version = if ($null -eq $versionProperty) { '' } else { [string]$versionProperty.Value }
         $digest = if ($null -eq $digestProperty) { '' } else { [string]$digestProperty.Value }
-        $validVersion = $version -match '^(?:[0-9a-fA-F]{40}|v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$'
+        $validVersion = if ($componentName -eq 'mcp-resource-subscriber') {
+            $version -match '^(?:[0-9a-fA-F]{40}|v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$'
+        }
+        else {
+            $version -match '^[0-9a-fA-F]{40}$'
+        }
         $validDigest = $digest -match '^sha256:[0-9a-fA-F]{64}$'
         if (-not $validVersion -or -not $validDigest) {
             Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
@@ -760,17 +765,31 @@ function Invoke-FullScenarioDriver {
         Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
         throw 'DesktopFull driver result が JSON として解釈できません。'
     }
-    if ($driverResult.schemaVersion -ne 1 -or
-        $driverResult.scenarioId -ne $scenarioId -or
-        $driverResult.expectedOutcome -ne $scenarioManifest.expectedOutcome -or
-        $driverResult.outcome -ne $scenarioManifest.expectedOutcome -or
-        $null -eq $driverResult.steps) {
+    if ($null -eq $driverResult) {
+        Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
+        throw 'DesktopFull driver result が空です。'
+    }
+    $driverSchemaVersionProperty = $driverResult.PSObject.Properties['schemaVersion']
+    $driverScenarioIdProperty = $driverResult.PSObject.Properties['scenarioId']
+    $driverExpectedOutcomeProperty = $driverResult.PSObject.Properties['expectedOutcome']
+    $driverOutcomeProperty = $driverResult.PSObject.Properties['outcome']
+    $driverStepsProperty = $driverResult.PSObject.Properties['steps']
+    $driverSchemaVersion = if ($null -eq $driverSchemaVersionProperty) { $null } else { $driverSchemaVersionProperty.Value }
+    $driverScenarioId = if ($null -eq $driverScenarioIdProperty) { '' } else { [string]$driverScenarioIdProperty.Value }
+    $driverExpectedOutcome = if ($null -eq $driverExpectedOutcomeProperty) { '' } else { [string]$driverExpectedOutcomeProperty.Value }
+    $driverOutcome = if ($null -eq $driverOutcomeProperty) { '' } else { [string]$driverOutcomeProperty.Value }
+    $driverSteps = if ($null -eq $driverStepsProperty) { $null } else { $driverStepsProperty.Value }
+    if ($driverSchemaVersion -ne 1 -or
+        $driverScenarioId -ne $scenarioId -or
+        $driverExpectedOutcome -ne $scenarioManifestExpectedOutcome -or
+        $driverOutcome -ne $scenarioManifestExpectedOutcome -or
+        $null -eq $driverSteps) {
         Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
         throw 'DesktopFull driver result の scenario、expectedOutcome、outcome、または schemaVersion が不正です。'
     }
 
     foreach ($requiredStep in $requiredDriverSteps) {
-        $stepProperty = $driverResult.steps.PSObject.Properties[$requiredStep]
+        $stepProperty = $driverSteps.PSObject.Properties[$requiredStep]
         if ($null -eq $stepProperty -or [string]$stepProperty.Value -ne 'passed') {
             Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
             throw "DesktopFull driver result の必須 step が成功していません: $requiredStep"
