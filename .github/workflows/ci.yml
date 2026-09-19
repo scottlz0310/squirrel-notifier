@@ -101,9 +101,8 @@ jobs:
           flags: unittests
           name: codecov-umbrella
 
-  # #307/#222/#223: launcher resume、subscriber/gateway/auth、enqueue/通知モデルの Phase 1 headless E2E。#220 と
-  # #221 の昇格条件が
-  # 未完了のため、初期導入では non-required の並列 job として実行する。
+  # #307/#222/#223: launcher resume、subscriber/gateway/auth、enqueue/通知モデルの Phase 1 headless E2E。
+  # 配布物 E2E（#221）は別 job で実行し、両方とも初期導入では non-required とする。
   headless-e2e:
     runs-on: windows-2025
     timeout-minutes: 6
@@ -118,7 +117,7 @@ jobs:
       - name: Run Phase 1 headless E2E
         id: headless_e2e
         shell: pwsh
-        run: ./tests/e2e/scripts/Invoke-E2E.ps1 -Phase Headless -ArtifactsDirectory ./artifacts/e2e
+        run: ./tests/e2e/scripts/Invoke-E2E.ps1 -Phase Headless -ExcludeScenario distribution-install -ArtifactsDirectory ./artifacts/e2e
 
       - name: Upload versions
         if: always()
@@ -135,6 +134,42 @@ jobs:
         with:
           name: e2e-headless-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/e2e/headless
+          if-no-files-found: error
+          retention-days: 14
+
+  # #221: 実 publish payload、MSI、setup ZIP の build / silent install / uninstall。
+  # 既存の headless E2E と並列に実行し、Phase 1 の壁時計を直列化で増加させない。
+  distribution-e2e:
+    runs-on: windows-2025
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: ./.github/actions/dotnet-setup
+
+      - name: Run distribution E2E
+        id: distribution_e2e
+        shell: pwsh
+        run: ./tests/e2e/scripts/Invoke-E2E.ps1 -Phase Headless -Scenario distribution-install -ArtifactsDirectory ./artifacts/e2e-distribution
+
+      - name: Upload versions
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-distribution-versions-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/e2e-distribution/headless/**/versions.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload failure artifacts
+        if: ${{ always() && steps.distribution_e2e.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-distribution-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/e2e-distribution/headless
           if-no-files-found: error
           retention-days: 14
 

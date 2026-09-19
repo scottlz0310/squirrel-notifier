@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - 購読開始、`enqueue_review`、`InitialText` / `FinalText` の重複排除、通知モデル、dummy launcher のプロセス境界を実プロセスで検証する Phase 1 headless E2E scenario を追加した（#223）
+- release workflow と同じ publish / WiX 経路で実配布物を生成し、MSI と setup ZIP の silent install / uninstall、version、製品登録、Task Scheduler、cleanup を検証する Phase 1 headless E2E scenario を追加した（#221）
 
 ## [0.12.0] - 2026-09-19
 

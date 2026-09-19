@@ -13,6 +13,9 @@
 .PARAMETER StartMinimized
     If specified, the application will start minimized to the system tray.
 
+.PARAMETER NonInteractive
+    headless 検証用に確認を省略します。既存タスクは上書きせず、アプリケーションも起動しません。
+
 .EXAMPLE
     .\install.ps1
     Installs using auto-detected executable path.
@@ -32,7 +35,10 @@ param(
     [string]$ExePath,
 
     [Parameter(Mandatory=$false)]
-    [switch]$StartMinimized
+    [switch]$StartMinimized,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = "Stop"
@@ -134,6 +140,10 @@ $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyConti
 
 if ($existingTask) {
     Write-Host "WARNING: Task '$TaskName' already exists." -ForegroundColor Yellow
+    if ($NonInteractive) {
+        throw "Task '$TaskName' already exists; non-interactive installation will not overwrite it."
+    }
+
     $response = Read-Host "Do you want to overwrite it? (Y/N)"
 
     if ($response -ne 'Y' -and $response -ne 'y') {
@@ -197,7 +207,7 @@ try {
     Write-Host ""
 
     # Ask if user wants to start the task now
-    $response = Read-Host "Do you want to start Squirrel Notifier now? (Y/N)"
+    $response = if ($NonInteractive) { 'N' } else { Read-Host "Do you want to start Squirrel Notifier now? (Y/N)" }
 
     if ($response -eq 'Y' -or $response -eq 'y') {
         Write-Host "Starting task..." -ForegroundColor Yellow

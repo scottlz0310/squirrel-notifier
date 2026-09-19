@@ -110,6 +110,7 @@ working directory を loopback fake Gateway、dummy subscriber、dummy launcher 
 | Scenario ID | 検証内容 |
 |---|---|
 | review-event-flow | Running / Stopped / Error からの `enqueue_review`、5 件の重複排除済み通知、複数 URI の分離、dummy launcher の引数・作業ディレクトリ |
+| distribution-install | 実 publish payload、MSI、setup ZIP の build、silent install / uninstall、version、cleanup |
 
 ### 非対象
 
@@ -125,7 +126,7 @@ working directory を loopback fake Gateway、dummy subscriber、dummy launcher 
 | Issue | 対象 |
 |---|---|
 | #220 | 現行 CI の壁時計計測、重複処理削減、Phase 1 用の時間予算 |
-| #221 | 配布物 build、silent install / uninstall、version、cleanup |
+| #221 | 配布物 build、silent install / uninstall、version、cleanup（実装済み） |
 | #222 | CLI、gateway、認証の Windows headless 契約 |
 | #223 | enqueue から通知モデル、dummy launcher までのプロセス境界（実装済み） |
 
@@ -373,7 +374,9 @@ pwsh -File .\tests\e2e\scripts\Invoke-E2ECleanup.ps1 `
 
 Invoke-E2E.ps1 は #307 の resume 境界、#222 の subscriber / gateway / 認証契約、#223 の
 enqueue / 通知モデル / dummy launcher 境界を対象にした Phase 1 の entrypoint である。
-配布物、MSI、Task Scheduler、silent install / uninstall を跨ぐ scenario は #221 で拡張する。
+配布物、MSI、Task Scheduler、silent install / uninstall を跨ぐ `distribution-install`
+scenario は #221 で実装した。release workflow と同じ publish / WiX 経路を使い、既存の
+インストール状態を変更しない preflight と、失敗時の MSI / setup ZIP artifact を備える。
 
 ローカル実行は管理者権限を暗黙要求しない。MSI install 等で権限が必要な scenario は開始前に
 preflight し、不足時は途中まで実行せず明確な failure reason を返す。
@@ -416,7 +419,9 @@ Phase 1 を required check にするには、次をすべて満たす。
 ```
 
 - #219 と #220 は並行着手できる。
-- #221 / #222 は本書を実装契約として使用し、#220 完了後に required 化する。
+- #221 / #222 は本書を実装契約として使用し、#220 完了後に required 化する。#221 は
+  `distribution-e2e` として既存の headless E2E と並列実行するが、安定性・wall clock の
+  実測が完了するまで required にはしない。
 - #223 は #221 / #222 の fixture、artifact、failure reason を再利用する。
 - #224 は Phase 1 が安定し、Mcp-Docker の固定 test stack を利用できる状態で着手する。
 
