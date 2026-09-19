@@ -51,7 +51,7 @@ public class AgentProcessStartInfoFactoryTests
 
         psi.FileName.Should().EndWith("cmd.exe", "cmd.exe（ComSpec）へ委譲すること");
         psi.Arguments.Should().Be(
-            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_1%\"\"");
+            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0% \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_1%\"");
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_COMMAND"].Should().Be(resolvedPath);
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_0"].Should().Be("exec");
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_1"].Should().Be(
@@ -67,15 +67,15 @@ public class AgentProcessStartInfoFactoryTests
         ProcessStartInfo psi = AgentProcessStartInfoFactory.Create(@"C:\tools\tool.cmd", ["a", string.Empty, "b"]);
 
         psi.Arguments.Should().Be(
-            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\" \"\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_2%\"\"");
+            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0% \"\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_2%\"");
         psi.Environment.Should().NotContainKey("SQUIRREL_NOTIFIER_LAUNCHER_ARG_1");
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_2"].Should().Be("b");
     }
 
     [Theory]
-    [InlineData(@"C:\dir\", @"C:\dir\\")]
-    [InlineData(@"C:\dir\\", @"C:\dir\\\\")]
-    [InlineData(@"C:\di\r", @"C:\di\r")]
+    [InlineData(@"C:\dir with space\", @"C:\dir with space\\")]
+    [InlineData(@"C:\dir with space\\", @"C:\dir with space\\\\")]
+    [InlineData(@"C:\di r", @"C:\di r")]
     public void Create_ShouldDoubleTrailingBackslashes_ForShellScriptShim(string argument, string expectedStored)
     {
         // 展開後は引用符で囲まれるため、閉じ引用符直前のバックスラッシュ列を二重化して

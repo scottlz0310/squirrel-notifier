@@ -13,8 +13,8 @@ namespace SquirrelNotifier.WinUI3.Helpers;
 /// <remarks>
 /// ネイティブ実行形式は <see cref="ProcessStartInfo.ArgumentList"/> を使う。
 /// <c>.cmd</c> / <c>.bat</c> は <c>cmd.exe</c> へ明示的に委譲し、引数を環境変数経由で
-/// 一度だけ展開する。これにより、shell script shim のメタ文字を command line の再解釈へ
-/// 渡さずに、subscriber と launcher で同じ起動契約を共有できる.
+/// 一度だけ展開する。引用符なしで安全に渡せる引数は通常の batch shim 契約を維持し、
+/// それ以外は引用符内で渡すことで、subscriber と launcher で同じ起動契約を共有できる.
 /// </remarks>
 internal static class ExternalProcessStartInfoFactory
 {
@@ -75,12 +75,45 @@ internal static class ExternalProcessStartInfoFactory
             }
 
             string variableName = ArgumentEnvironmentVariablePrefix + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            startInfo.Environment[variableName] = EscapeTrailingBackslashes(argument);
-            command.Append(" \"").Append('%').Append(variableName).Append("%\"");
+            bool canPassWithoutQuotes = CanPassWithoutQuotes(argument);
+            startInfo.Environment[variableName] = canPassWithoutQuotes
+                ? argument
+                : EscapeTrailingBackslashes(argument);
+            if (canPassWithoutQuotes)
+            {
+                command.Append(' ').Append('%').Append(variableName).Append('%');
+            }
+            else
+            {
+                command.Append(" \"").Append('%').Append(variableName).Append("%\"");
+            }
         }
 
         startInfo.Arguments = $"/d /s /v:off /c \"{command}\"";
         return startInfo;
+    }
+
+    private static bool CanPassWithoutQuotes(string value)
+    {
+        if (value.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (char character in value)
+        {
+            if ((character >= 'a' && character <= 'z')
+                || (character >= 'A' && character <= 'Z')
+                || (character >= '0' && character <= '9')
+                || character is '-' or '_' or '.' or ':' or '/' or '\\')
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     private static string EscapeTrailingBackslashes(string value)

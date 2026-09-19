@@ -808,7 +808,7 @@ public class McpSubscriptionServiceTests : IDisposable
         Directory.CreateDirectory(tempDir);
 
         var testCmd = Path.Combine(tempDir, "test-helper.cmd");
-        await File.WriteAllTextAsync(testCmd, "@echo off\r\nif \"%~1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\nexit /b 1\r\n", Encoding.ASCII);
+        await File.WriteAllTextAsync(testCmd, "@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\nexit /b 1\r\n", Encoding.ASCII);
 
         var settingsService = new SettingsService(tempDir);
         settingsService.UpdateSettings(testCmd, "", "http://localhost:3000", new[] { "queue://res" }, 30000, "review-raven", "", "", "review-raven", "", "", 300000, false, "custom", "custom");
@@ -861,7 +861,7 @@ public class McpSubscriptionServiceTests : IDisposable
             RecommendedNextAction = "Check reviews"
         });
 
-        var scriptContent = $"@echo off\r\nif \"%~1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\necho {resultJson}\r\nping 127.0.0.1 -n 10 > nul\r\nexit /b 0\r\n";
+        var scriptContent = $"@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\necho {resultJson}\r\nping 127.0.0.1 -n 10 > nul\r\nexit /b 0\r\n";
         await File.WriteAllTextAsync(cmdPath, scriptContent, Encoding.ASCII);
 
         var shimPath = Path.Combine(testDir, "mcp-resource-subscriber");
