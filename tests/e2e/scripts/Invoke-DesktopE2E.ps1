@@ -72,6 +72,7 @@ $cleanupErrors = [System.Collections.Generic.List[string]]::new()
 $windowHandle = [IntPtr]::Zero
 $script:failureCategoryOverride = $null
 $script:componentManifestForArtifact = [ordered]@{}
+$artifactDirectoryReady = $false
 
 function Write-ScenarioLog {
     param(
@@ -523,16 +524,26 @@ function Test-ComponentManifest {
         [object]$Manifest
     )
 
-    if ($Manifest.schemaVersion -ne 1) {
+    if ($null -eq $Manifest) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw 'component manifest が空です。'
+    }
+
+    $schemaVersionProperty = $Manifest.PSObject.Properties['schemaVersion']
+    $schemaVersion = if ($null -eq $schemaVersionProperty) { $null } else { $schemaVersionProperty.Value }
+    if ($null -eq $schemaVersion -or $schemaVersion -ne 1) {
         Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'component manifest の schemaVersion は 1 である必要があります。'
     }
-    if ($null -eq $Manifest.components) {
+
+    $componentsProperty = $Manifest.PSObject.Properties['components']
+    $components = if ($null -eq $componentsProperty) { $null } else { $componentsProperty.Value }
+    if ($null -eq $components) {
         Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'component manifest に components がありません。'
     }
 
-    $componentProperties = @($Manifest.components.PSObject.Properties)
+    $componentProperties = @($components.PSObject.Properties)
     $actualComponentNames = @($componentProperties | ForEach-Object { $_.Name })
     $missingComponents = @($requiredComponentNames | Where-Object { $_ -notin $actualComponentNames })
     $unexpectedComponents = @($actualComponentNames | Where-Object { $_ -notin $requiredComponentNames })
@@ -543,7 +554,7 @@ function Test-ComponentManifest {
 
     $safeComponents = [ordered]@{}
     foreach ($componentName in $requiredComponentNames) {
-        $componentProperty = $Manifest.components.PSObject.Properties[$componentName]
+        $componentProperty = $components.PSObject.Properties[$componentName]
         $component = if ($null -eq $componentProperty) { $null } else { $componentProperty.Value }
         if ($null -eq $component) {
             Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
@@ -844,8 +855,6 @@ function Get-ToolVersion {
     }
 }
 
-New-Item -ItemType Directory -Path $runRoot, $scenarioArtifactDirectory -Force | Out-Null
-
 $result = [ordered]@{
     schemaVersion = 1
     phase = 'desktop'
@@ -868,6 +877,19 @@ $result = [ordered]@{
 }
 
 try {
+    try {
+        New-Item -ItemType Directory -Path $runRoot -Force -ErrorAction Stop | Out-Null
+        New-Item -ItemType Directory -Path $scenarioArtifactDirectory -Force -ErrorAction Stop | Out-Null
+        if (-not (Test-Path -LiteralPath $scenarioArtifactDirectory -PathType Container)) {
+            throw 'E2E artifact directory が作成されませんでした。'
+        }
+        $artifactDirectoryReady = $true
+    }
+    catch {
+        Set-FailureCategory -Category 'INFRA_RUNNER_FAILED'
+        throw 'Desktop E2E の temporary root または artifact directory を初期化できません。'
+    }
+
     Initialize-ScenarioManifest
 
     if (-not [Environment]::UserInteractive -or [Environment]::UserName -eq 'SYSTEM') {
@@ -1015,6 +1037,19 @@ finally {
         $cleanupErrors.Add('専用 temporary root を削除できませんでした。')
     }
 
+    try {
+        if (-not (Test-Path -LiteralPath $scenarioArtifactDirectory -PathType Container)) {
+            New-Item -ItemType Directory -Path $scenarioArtifactDirectory -Force -ErrorAction Stop | Out-Null
+        }
+        $artifactDirectoryReady = Test-Path -LiteralPath $scenarioArtifactDirectory -PathType Container
+        if (-not $artifactDirectoryReady) {
+            throw 'E2E artifact directory が利用できません。'
+        }
+    }
+    catch {
+        $artifactDirectoryReady = $false
+    }
+
     $cleanup = [ordered]@{
         schemaVersion = 1
         phase = 'desktop'
@@ -1026,66 +1061,73 @@ finally {
         runRootRemoved = $runRootRemoved
         completedAt = [DateTimeOffset]::UtcNow.ToString('O')
     }
-    Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'cleanup.json') -Value $cleanup
+    if ($artifactDirectoryReady) {
+        Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'cleanup.json') -Value $cleanup
 
-    if ($cleanupErrors.Count -ne 0) {
-        $failure = New-FailureRecord `
-            -Category 'CLEANUP_FAILED' `
-            -Component 'desktop-e2e-harness' `
-            -Message "cleanup に失敗しました: $($cleanupErrors -join ' ')"
-        $result.status = 'failed'
-        $result.failureCategory = $failure.category
-        Write-ScenarioLog 'Desktop E2E の cleanup に失敗しました。'
-    }
-
-    $versions = [ordered]@{
-        schemaVersion = 1
-        phase = 'desktop'
-        measuredAt = [DateTimeOffset]::UtcNow.ToString('O')
-        scenarioId = $scenarioId
-        timeoutSeconds = $timeoutSeconds
-        scenarioManifest = [ordered]@{
-            schemaVersion = $scenarioManifestSchemaVersion
-            id = $scenarioId
-            expectedOutcome = $scenarioManifestExpectedOutcome
+        if ($cleanupErrors.Count -ne 0) {
+            $failure = New-FailureRecord `
+                -Category 'CLEANUP_FAILED' `
+                -Component 'desktop-e2e-harness' `
+                -Message "cleanup に失敗しました: $($cleanupErrors -join ' ')"
+            $result.status = 'failed'
+            $result.failureCategory = $failure.category
+            Write-ScenarioLog 'Desktop E2E の cleanup に失敗しました。'
         }
-        components = $script:componentManifestForArtifact
-        os = [ordered]@{
-            caption = (Get-CimInstance Win32_OperatingSystem).Caption
-            version = [Environment]::OSVersion.Version.ToString()
-            build = (Get-CimInstance Win32_OperatingSystem).BuildNumber
-        }
-        powershell = $PSVersionTable.PSVersion.ToString()
-        dotnet = Get-ToolVersion -Name 'dotnet'
-        docker = Get-ToolVersion -Name 'docker'
-        wix = Get-ToolVersion -Name 'wix'
-        githubSha = if ([string]::IsNullOrWhiteSpace($env:GITHUB_SHA)) { $null } else { $env:GITHUB_SHA }
-        scenario = $Scenario
-    }
-    Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'versions.json') -Value $versions
 
-    $logLines | Set-Content -LiteralPath (Join-Path $scenarioArtifactDirectory 'sanitized.log') -Encoding utf8
-    $result.completedAt = [DateTimeOffset]::UtcNow.ToString('O')
-    $result.cleanupStatus = $cleanup.status
-    Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'result.json') -Value $result
-    if ($null -ne $failure) {
-        Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'failure.json') -Value $failure
+        $versions = [ordered]@{
+            schemaVersion = 1
+            phase = 'desktop'
+            measuredAt = [DateTimeOffset]::UtcNow.ToString('O')
+            scenarioId = $scenarioId
+            timeoutSeconds = $timeoutSeconds
+            scenarioManifest = [ordered]@{
+                schemaVersion = $scenarioManifestSchemaVersion
+                id = $scenarioId
+                expectedOutcome = $scenarioManifestExpectedOutcome
+            }
+            components = $script:componentManifestForArtifact
+            os = [ordered]@{
+                caption = (Get-CimInstance Win32_OperatingSystem).Caption
+                version = [Environment]::OSVersion.Version.ToString()
+                build = (Get-CimInstance Win32_OperatingSystem).BuildNumber
+            }
+            powershell = $PSVersionTable.PSVersion.ToString()
+            dotnet = Get-ToolVersion -Name 'dotnet'
+            docker = Get-ToolVersion -Name 'docker'
+            wix = Get-ToolVersion -Name 'wix'
+            githubSha = if ([string]::IsNullOrWhiteSpace($env:GITHUB_SHA)) { $null } else { $env:GITHUB_SHA }
+            scenario = $Scenario
+        }
+        Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'versions.json') -Value $versions
+
+        $logLines | Set-Content -LiteralPath (Join-Path $scenarioArtifactDirectory 'sanitized.log') -Encoding utf8
+        $result.completedAt = [DateTimeOffset]::UtcNow.ToString('O')
+        $result.cleanupStatus = $cleanup.status
+        Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'result.json') -Value $result
+        if ($null -ne $failure) {
+            Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'failure.json') -Value $failure
+        }
     }
 }
 
 $artifactScanFailed = $false
-& (Join-Path $PSScriptRoot 'Test-E2EArtifacts.ps1') -ArtifactsDirectory $scenarioArtifactDirectory
-if ($LASTEXITCODE -ne 0) {
+if ($artifactDirectoryReady) {
+    & (Join-Path $PSScriptRoot 'Test-E2EArtifacts.ps1') -ArtifactsDirectory $scenarioArtifactDirectory
+    if ($LASTEXITCODE -ne 0) {
+        $artifactScanFailed = $true
+        $failure = New-FailureRecord `
+            -Category 'SECURITY_SECRET_EXPOSURE' `
+            -Component 'desktop-e2e-harness' `
+            -Message 'E2E artifact の必須ファイルまたは secret scan の検査に失敗しました。'
+        $result.status = 'failed'
+        $result.failureCategory = $failure.category
+        $result.completedAt = [DateTimeOffset]::UtcNow.ToString('O')
+        Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'result.json') -Value $result
+        Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'failure.json') -Value $failure
+    }
+}
+else {
     $artifactScanFailed = $true
-    $failure = New-FailureRecord `
-        -Category 'SECURITY_SECRET_EXPOSURE' `
-        -Component 'desktop-e2e-harness' `
-        -Message 'E2E artifact の必須ファイルまたは secret scan の検査に失敗しました。'
-    $result.status = 'failed'
-    $result.failureCategory = $failure.category
-    $result.completedAt = [DateTimeOffset]::UtcNow.ToString('O')
-    Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'result.json') -Value $result
-    Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'failure.json') -Value $failure
 }
 
 if ($null -ne $failure -or $cleanupErrors.Count -ne 0 -or $artifactScanFailed) {
