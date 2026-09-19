@@ -311,6 +311,7 @@ function Assert-InstalledVersion {
     $expectedVersionKey = ConvertTo-ReleaseVersion -Value $ExpectedVersion
     $actualVersionKey = ConvertTo-ReleaseVersion -Value $versionInfo.ProductVersion
     if ($null -eq $expectedVersionKey -or $null -eq $actualVersionKey -or $actualVersionKey -cne $expectedVersionKey) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw "インストールされた製品 version が期待値と異なります。期待値=$ExpectedVersion"
     }
 }
