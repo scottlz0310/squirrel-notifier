@@ -249,6 +249,27 @@ function Get-UiElementByAutomationId {
     return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Wait-UiElementByAutomationId {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Root,
+
+        [Parameter(Mandatory)]
+        [string]$AutomationId
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $element = Get-UiElementByAutomationId -Root $Root -AutomationId $AutomationId
+        if ($null -ne $element) {
+            return $element
+        }
+        Start-Sleep -Milliseconds 200
+    }
+
+    throw "UI Automation element が見つかりません: $AutomationId"
+}
+
 function Assert-UiContract {
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
@@ -260,17 +281,26 @@ function Assert-UiContract {
 
     # WinUI 3 の Panel は UI Automation ツリーへ必ず公開されるとは限らないため、
     # window handle から取得した root で main window の存在を確認し、子コントロールだけを検証する。
+    $settingsExpander = Wait-UiElementByAutomationId -Root $root -AutomationId 'SettingsExpander'
+    $expandCollapsePattern = $null
+    if (-not $settingsExpander.TryGetCurrentPattern(
+            [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+            [ref]$expandCollapsePattern)) {
+        throw 'SettingsExpander の ExpandCollapsePattern を取得できません。'
+    }
+
+    if ($expandCollapsePattern.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Collapsed) {
+        $expandCollapsePattern.Expand()
+    }
+
     $requiredElements = @(
-        'SettingsExpander',
         'GatewayUrlBox',
         'ResourceUrisBox',
         'GatewayLoginButton',
         'EnqueueReviewButton'
     )
     foreach ($automationId in $requiredElements) {
-        if ($null -eq (Get-UiElementByAutomationId -Root $root -AutomationId $automationId)) {
-            throw "UI Automation element が見つかりません: $automationId"
-        }
+        Wait-UiElementByAutomationId -Root $root -AutomationId $automationId | Out-Null
     }
 }
 
