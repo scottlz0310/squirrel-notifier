@@ -346,7 +346,7 @@ public class CodexAppServerRateLimitClientTests
         snapshot.Should().NotBeNull();
         runner.Verify(r => r.Start(It.Is<ProcessStartInfo>(p =>
             p.FileName.EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
-            && p.Arguments == "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\""
+            && p.Arguments == "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\"\""
             && p.Environment["SQUIRREL_NOTIFIER_LAUNCHER_COMMAND"] == fakeScriptPath
             && p.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_0"] == "app-server")), Times.Once);
     }

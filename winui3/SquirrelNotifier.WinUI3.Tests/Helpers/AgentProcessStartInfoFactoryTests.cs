@@ -51,7 +51,7 @@ public class AgentProcessStartInfoFactoryTests
 
         psi.FileName.Should().EndWith("cmd.exe", "cmd.exe（ComSpec）へ委譲すること");
         psi.Arguments.Should().Be(
-            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0% \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_1%\"\"");
+            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_1%\"\"");
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_COMMAND"].Should().Be(resolvedPath);
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_0"].Should().Be("exec");
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_1"].Should().Be(
@@ -61,13 +61,26 @@ public class AgentProcessStartInfoFactoryTests
     }
 
     [Fact]
+    public void Create_ShouldPreserveUnquotedSafeArguments_WhenBatchCompatibilityIsRequested()
+    {
+        ProcessStartInfo psi = ExternalProcessStartInfoFactory.Create(
+            @"C:\tools\tool.cmd",
+            ["--help"],
+            quotingPolicy: ShellScriptArgumentQuotingPolicy.PreserveUnquotedSafeArguments);
+
+        psi.Arguments.Should().Be(
+            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\"");
+        psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_0"].Should().Be("--help");
+    }
+
+    [Fact]
     public void Create_ShouldPassEmptyArgumentAsLiteralQuotes_ForShellScriptShim()
     {
         // cmd.exe は空の環境変数を保持できないため、空引数はリテラル "" で渡す
         ProcessStartInfo psi = AgentProcessStartInfoFactory.Create(@"C:\tools\tool.cmd", ["a", string.Empty, "b"]);
 
         psi.Arguments.Should().Be(
-            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_0% \"\" %SQUIRREL_NOTIFIER_LAUNCHER_ARG_2%\"");
+            "/d /s /v:off /c \"\"%SQUIRREL_NOTIFIER_LAUNCHER_COMMAND%\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_0%\" \"\" \"%SQUIRREL_NOTIFIER_LAUNCHER_ARG_2%\"\"");
         psi.Environment.Should().NotContainKey("SQUIRREL_NOTIFIER_LAUNCHER_ARG_1");
         psi.Environment["SQUIRREL_NOTIFIER_LAUNCHER_ARG_2"].Should().Be("b");
     }

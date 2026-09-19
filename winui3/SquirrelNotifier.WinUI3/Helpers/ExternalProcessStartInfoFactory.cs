@@ -8,13 +8,29 @@ using System.Text;
 namespace SquirrelNotifier.WinUI3.Helpers;
 
 /// <summary>
+/// shell script shim に渡す引数の引用ポリシー.
+/// </summary>
+internal enum ShellScriptArgumentQuotingPolicy
+{
+    /// <summary>
+    /// 既存の agent/Codex 起動契約どおり、空でない引数を引用符で囲む.
+    /// </summary>
+    QuoteAllArguments,
+
+    /// <summary>
+    /// 安全なトークンだけ引用符なしで渡し、batch の %1 契約を維持する.
+    /// </summary>
+    PreserveUnquotedSafeArguments,
+}
+
+/// <summary>
 /// 外部 CLI を安全に起動するための <see cref="ProcessStartInfo"/> を組み立てる.
 /// </summary>
 /// <remarks>
 /// ネイティブ実行形式は <see cref="ProcessStartInfo.ArgumentList"/> を使う。
 /// <c>.cmd</c> / <c>.bat</c> は <c>cmd.exe</c> へ明示的に委譲し、引数を環境変数経由で
-/// 一度だけ展開する。引用符なしで安全に渡せる引数は通常の batch shim 契約を維持し、
-/// それ以外は引用符内で渡すことで、subscriber と launcher で同じ起動契約を共有できる.
+/// 一度だけ展開する。既定では引数を引用符内で渡し、呼び出し元が選択した場合だけ
+/// 引用符なしで安全に渡せる引数を通常の batch shim 契約に合わせて展開する.
 /// </remarks>
 internal static class ExternalProcessStartInfoFactory
 {
@@ -26,7 +42,8 @@ internal static class ExternalProcessStartInfoFactory
     public static ProcessStartInfo Create(
         string resolvedPath,
         IReadOnlyList<string> arguments,
-        bool redirectStandardInput = true)
+        bool redirectStandardInput = true,
+        ShellScriptArgumentQuotingPolicy quotingPolicy = ShellScriptArgumentQuotingPolicy.QuoteAllArguments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(resolvedPath);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -75,7 +92,8 @@ internal static class ExternalProcessStartInfoFactory
             }
 
             string variableName = ArgumentEnvironmentVariablePrefix + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            bool canPassWithoutQuotes = CanPassWithoutQuotes(argument);
+            bool canPassWithoutQuotes = quotingPolicy == ShellScriptArgumentQuotingPolicy.PreserveUnquotedSafeArguments
+                && CanPassWithoutQuotes(argument);
             startInfo.Environment[variableName] = canPassWithoutQuotes
                 ? argument
                 : EscapeTrailingBackslashes(argument);

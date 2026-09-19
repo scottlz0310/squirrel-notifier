@@ -92,9 +92,10 @@ public class AgentProcessLaunchRegressionTests : IDisposable
         stdout.Should().Contain($"CWD={workDir}");
         stdout.Should().Contain($"ARG1=\"{metaArg}\"", "引数が verbatim で届くこと");
 
-        // 安全なトークンは引用符なしで渡すため、batch の %~2 でも末尾バックスラッシュを
-        // そのまま受け取れる。
-        stdout.Should().Contain($"ARG2=\"{trailingBackslashArg}\"", "末尾バックスラッシュが保持されること");
+        // 末尾バックスラッシュは CommandLineToArgvW 規約（shim が最終的に native 実行形式へ
+        // %* を委譲する経路）向けに二重化される。batch の %~2 は引用符除去のみで
+        // バックスラッシュ規約を解釈しないため、batch 視点では二重化された形が見える
+        stdout.Should().Contain($"ARG2=\"{trailingBackslashArg}\\\"", "末尾バックスラッシュが引用符を破壊しないこと");
         stdout.Split('\n').Select(line => line.Trim()).Should().NotContain("pwned", "& がコマンド区切りとして実行されないこと");
     }
 
