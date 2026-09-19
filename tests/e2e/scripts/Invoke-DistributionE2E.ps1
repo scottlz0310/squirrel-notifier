@@ -86,6 +86,7 @@ $bundleScenarioStarted = $false
 $bundleInstallAttempted = $false
 $failureState = $null
 $finalState = $null
+$msiTimeoutSeconds = 180
 
 function Add-Log {
     param(
@@ -94,6 +95,16 @@ function Add-Log {
     )
 
     $logLines.Add("$([DateTimeOffset]::UtcNow.ToString('O')) $Message")
+}
+
+function Write-Phase {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Message
+    )
+
+    Add-Log $Message
+    Write-Host "distribution E2E: $Message"
 }
 
 function Sanitize-Text {
@@ -184,17 +195,33 @@ function Invoke-Msi {
     }
 
     $arguments = "/$Action $(Quote-ProcessArgument $PackagePath) /qn /norestart /L*v $(Quote-ProcessArgument $LogPath)"
-    Add-Log "MSI $Action を実行します: msiexec.exe $arguments"
+    Write-Phase "MSI $Action を実行します。timeout=${msiTimeoutSeconds}秒"
+    $msiLogPaths.Add($LogPath)
+    $process = $null
     try {
-        $process = Start-Process -FilePath $msiexecPath -ArgumentList $arguments -Wait -PassThru
+        $process = Start-Process -FilePath $msiexecPath -ArgumentList $arguments -PassThru
+        if (-not $process.WaitForExit($msiTimeoutSeconds * 1000)) {
+            try {
+                $process.Kill($true)
+                $process.WaitForExit(5000) | Out-Null
+            }
+            catch {
+                Add-Log "MSI $Action の timeout 後のプロセス終了に失敗しました: $($_.Exception.Message)"
+            }
+
+            throw [DistributionE2EException]::new('TIMEOUT', "MSI $Action が $msiTimeoutSeconds 秒以内に終了しませんでした。")
+        }
+
         $exitCode = $process.ExitCode
+    }
+    catch [DistributionE2EException] {
+        throw
     }
     catch {
         Add-Log "MSI $Action の起動に失敗しました: $($_.Exception.Message)"
         throw [DistributionE2EException]::new('PRODUCT_INSTALL_FAILED', "MSI $Action の起動に失敗しました。")
     }
 
-    $msiLogPaths.Add($LogPath)
     Add-Log "MSI $Action の終了コード: $exitCode"
     if ($exitCode -ne 0) {
         throw [DistributionE2EException]::new('PRODUCT_INSTALL_FAILED', "MSI $Action が終了コード $exitCode で失敗しました。")
@@ -611,13 +638,16 @@ function Copy-FailureArtifacts {
 
 try {
     New-Item -ItemType Directory -Path $runRootFullPath, $artifactsFullPath, (Join-Path $runRootFullPath 'logs') -Force | Out-Null
-    Add-Log '配布物 E2E を開始しました。'
+    Write-Phase '配布物 E2E を開始しました。'
     $expectedVersion = Get-ProjectVersion
+    Write-Phase "期待 version=$expectedVersion"
     $dotnetVersionOutput = Invoke-ExternalCommand -FilePath 'dotnet' -Arguments @('--version') -Label 'dotnet version' -FailureCategory 'DEPENDENCY_ACQUISITION_FAILED'
     $dotnetVersion = $dotnetVersionOutput.Output.Trim()
 
+    Write-Phase '既存インストール状態の preflight を開始します。'
     Assert-NoPreexistingInstallation
 
+    Write-Phase 'アプリケーション restore を開始します。'
     Invoke-ExternalCommand `
         -FilePath 'dotnet' `
         -Arguments @('restore', $publishProject, '/p:IncludeWindowsSdkBuildTools=false') `
@@ -640,6 +670,7 @@ try {
         ) `
         -Label '実 publish payload build' `
         -FailureCategory 'PRODUCT_BUILD_FAILED' | Out-Null
+    Write-Phase '実 publish payload build が完了しました。'
 
     $publishExecutable = Join-Path $publishDirectory 'SquirrelNotifier.WinUI3.exe'
     if (-not (Test-Path -LiteralPath $publishExecutable -PathType Leaf)) {
@@ -649,6 +680,7 @@ try {
     Assert-PublishedVersion -ExecutablePath $publishExecutable
 
     New-Item -ItemType Directory -Path $msiOutputDirectory -Force | Out-Null
+    Write-Phase 'MSI build を開始します。'
     Invoke-ExternalCommand `
         -FilePath 'dotnet' `
         -Arguments @(
@@ -661,6 +693,7 @@ try {
         ) `
         -Label 'MSI build' `
         -FailureCategory 'PRODUCT_BUILD_FAILED' | Out-Null
+    Write-Phase 'MSI build が完了しました。'
 
     $msiFiles = @(Get-ChildItem -LiteralPath $msiOutputDirectory -Filter '*.msi' -File -Recurse | Sort-Object FullName)
     if ($msiFiles.Count -eq 0) {
@@ -678,6 +711,7 @@ try {
     }
     $assertions.Add("MSI の ProductVersion が $expectedVersion と一致した。")
 
+    Write-Phase 'setup ZIP の生成と内容検証を開始します。'
     New-Item -ItemType Directory -Path $bundleSourceDirectory, $bundleDirectory -Force | Out-Null
     Copy-Item -Path (Join-Path $publishDirectory '*') -Destination $bundleSourceDirectory -Recurse -Force
     Copy-Item -LiteralPath @(
@@ -691,17 +725,22 @@ try {
     Compress-Archive -Path (Join-Path $bundleSourceDirectory '*') -DestinationPath $zipPath -Force
     Expand-Archive -LiteralPath $zipPath -DestinationPath $bundleDirectory -Force
     Assert-BundleContents
+    Write-Phase 'setup ZIP の内容検証が完了しました。'
 
     $msiScenarioStarted = $true
     $msiInstallAttempted = $true
+    Write-Phase 'MSI silent install の検証を開始します。'
     Invoke-Msi -Action 'install' -PackagePath $msiPath -LogPath (Join-Path $runRootFullPath 'logs\msi-install.log')
     Assert-MsiInstalled
+    Write-Phase 'MSI silent install の検証が完了しました。'
     Invoke-Msi -Action 'uninstall' -PackagePath $msiPath -LogPath (Join-Path $runRootFullPath 'logs\msi-uninstall.log')
     Assert-MsiUninstalled
+    Write-Phase 'MSI silent uninstall の検証が完了しました。'
     $msiInstallAttempted = $false
 
     $bundleScenarioStarted = $true
     $bundleInstallAttempted = $true
+    Write-Phase 'setup ZIP install.ps1 の検証を開始します。'
     Invoke-ExternalCommand `
         -FilePath 'pwsh' `
         -Arguments @(
@@ -714,6 +753,7 @@ try {
         -Label 'setup ZIP install.ps1' `
         -FailureCategory 'PRODUCT_INSTALL_FAILED' | Out-Null
     Assert-BundleInstalled
+    Write-Phase 'setup ZIP install.ps1 の検証が完了しました。'
     Invoke-ExternalCommand `
         -FilePath 'pwsh' `
         -Arguments @(
@@ -727,6 +767,7 @@ try {
         -FailureCategory 'PRODUCT_INSTALL_FAILED' | Out-Null
     $bundleInstallAttempted = $false
     Assert-BundleUninstalled
+    Write-Phase 'setup ZIP uninstall.ps1 の検証が完了しました。'
 }
 catch [DistributionE2EException] {
     $failureCategory = $_.Exception.Category
