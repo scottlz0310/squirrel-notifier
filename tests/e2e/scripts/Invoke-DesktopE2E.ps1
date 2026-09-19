@@ -258,8 +258,9 @@ function Assert-UiContract {
         throw 'UI Automation の root element を取得できません。'
     }
 
+    # WinUI 3 の Panel は UI Automation ツリーへ必ず公開されるとは限らないため、
+    # window handle から取得した root で main window の存在を確認し、子コントロールだけを検証する。
     $requiredElements = @(
-        'MainWindowRoot',
         'SettingsExpander',
         'GatewayUrlBox',
         'ResourceUrisBox',
