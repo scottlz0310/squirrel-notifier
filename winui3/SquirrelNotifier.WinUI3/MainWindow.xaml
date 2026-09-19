@@ -10,7 +10,9 @@
     xmlns:tb="using:H.NotifyIcon"
     mc:Ignorable="d"
     Title="Squirrel Notifier">
-    <Grid Padding="16"
+    <Grid x:Name="MainWindowRoot"
+          AutomationProperties.AutomationId="MainWindowRoot"
+          Padding="16"
           RowDefinitions="Auto,Auto,*,Auto"
           RowSpacing="12">
         <Grid.Resources>
@@ -91,7 +93,10 @@
                              PlaceholderText="https://github.com/owner/repo/pull/123 または owner/repo#123"/>
                     <ComboBox Grid.Column="1" x:Name="ReasonComboBox" MinWidth="180"
                               AutomationProperties.Name="レビュー開始理由（reason）"/>
-                    <Button Grid.Column="2" x:Name="EnqueueReviewButton" Content="レビュー開始" Click="OnEnqueueReviewClick"/>
+                    <Button Grid.Column="2" x:Name="EnqueueReviewButton"
+                            AutomationProperties.AutomationId="EnqueueReviewButton"
+                            Content="レビュー開始"
+                            Click="OnEnqueueReviewClick"/>
                 </Grid>
             </StackPanel>
         </Border>
@@ -111,6 +116,7 @@
                 </Grid.RowDefinitions>
                 <Expander Grid.Row="0"
                           x:Name="SettingsExpander"
+                          AutomationProperties.AutomationId="SettingsExpander"
                           Header="Settings"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Stretch">
@@ -131,18 +137,24 @@
                             <Grid Grid.Row="2" Grid.ColumnSpan="2" RowDefinitions="Auto,Auto"
                                   ColumnDefinitions="Auto,*" RowSpacing="4" ColumnSpacing="8">
                                 <TextBlock Text="Gateway URL:" VerticalAlignment="Center"/>
-                                <TextBox Grid.Column="1" x:Name="GatewayUrlBox" TextChanged="OnSettingChanged"
+                                <TextBox Grid.Column="1" x:Name="GatewayUrlBox"
+                                         AutomationProperties.AutomationId="GatewayUrlBox"
+                                         TextChanged="OnSettingChanged"
                                          PlaceholderText="http://localhost:8080/mcp/thread-owl"/>
                                 <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal"
                                             HorizontalAlignment="Right" Spacing="4">
                                     <Button Content="コンテナから自動設定" Click="OnAutoDetectGatewayUrlClick"/>
-                                    <Button x:Name="GatewayLoginButton" Content="ログイン" Click="OnLoginToGatewayClick"/>
+                                    <Button x:Name="GatewayLoginButton"
+                                            AutomationProperties.AutomationId="GatewayLoginButton"
+                                            Content="ログイン"
+                                            Click="OnLoginToGatewayClick"/>
                                 </StackPanel>
                             </Grid>
 
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="Resource URIs:" VerticalAlignment="Top" Margin="0,4,0,0"/>
                             <StackPanel Grid.Row="3" Grid.Column="1" Spacing="4">
                                 <TextBox x:Name="ResourceUrisBox"
+                                         AutomationProperties.AutomationId="ResourceUrisBox"
                                          AcceptsReturn="True"
                                          Height="60"
                                          TextWrapping="Wrap"

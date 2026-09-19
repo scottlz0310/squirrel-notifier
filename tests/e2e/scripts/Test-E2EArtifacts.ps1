@@ -5,7 +5,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [string]$ArtifactsDirectory
+    [string]$ArtifactsDirectory,
+
+    [switch]$ScanOnly
 )
 
 Set-StrictMode -Version Latest
@@ -22,11 +24,14 @@ $requiredFiles = @(
     'sanitized.log',
     'cleanup.json'
 )
-$missingFiles = @(
-    $requiredFiles | Where-Object {
-        -not (Test-Path -LiteralPath (Join-Path $directory $_) -PathType Leaf)
+$missingFiles = [System.Collections.Generic.List[string]]::new()
+if (-not $ScanOnly) {
+    foreach ($requiredFile in $requiredFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $directory $requiredFile) -PathType Leaf)) {
+            $missingFiles.Add($requiredFile)
+        }
     }
-)
+}
 
 $guidPattern = '(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
 $secretPatterns = @(

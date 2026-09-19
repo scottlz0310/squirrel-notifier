@@ -11,7 +11,7 @@ mcp-gateway、thread-owl、認証、通知購読、WinUI の組み合わせに�
 | Phase | 用途 | Runner | 実行契機 | PR gate |
 |---|---|---|---|---|
 | Phase 1 | 決定的な headless 統合 E2E | GitHub-hosted `windows-2025` | pull request / `workflow_dispatch` | 安定化後に required |
-| Phase 2 | 実デスクトップを含むシステム E2E | snapshot 復元可能な専用 Windows VM | nightly / `workflow_dispatch` / release 前 | required にしない |
+| Phase 2 | 実デスクトップを含むシステム E2E | snapshot 復元可能な専用 Windows VM | `workflow_dispatch` / release 前 | PR required にしない |
 
 Phase 1 は外部ネットワークや本番レビュー基盤に依存させない。Phase 2 は実際の WinUI、
 既定ブラウザ、固定バージョンの test stack を扱うが、常用開発 PC や本番資格情報は
@@ -160,8 +160,23 @@ VM は実行前後に snapshot から復元でき、対話ログオン済み des
 - runner の OS build、Windows App SDK Runtime、既定ブラウザ、DPI、locale を
   version manifest に記録する。
 
-Phase 2 は PR required check にしない。nightly で安定性を観測し、release 前は
-`workflow_dispatch` で明示的に実行する。
+Phase 2 は PR required check にしない。実装時の検証は `workflow_dispatch` で行い、
+release workflow から同じ reusable workflow を release gate として呼び出す。定期実行は
+行わず、runner と EBS の常時稼働コストを発生させない。
+
+### AWS EC2 runner の運用契約
+
+- runner は `self-hosted`, `windows`, `squirrel-notifier-desktop` の label を持つ専用 VM とする。
+- EC2 は常時起動せず、検証前に起動し、終了後に停止または terminate する。AMI と EBS snapshot
+  は、次回に同じ clean user profile、DPI、locale、Docker、browser、Windows App SDK runtime を
+  復元できる状態で作成する。
+- Mcp-Docker は Linux container stack のため、Windows runner 内で Docker Desktop / WSL2 を使うか、
+  stack を別の専用 Linux host に分離する。採用方式と image digest は version manifest に記録する。
+- EBS volume size は固定値を先に決めない。`Measure-DesktopE2EStorage.ps1` を clean image、
+  dependency 導入後、最小 scenario 実行後に実行し、測定済み使用量 + 4 GiB の候補のうち最小の
+  fit 値を採用する。候補で fit しない場合は runner image を縮小してから再測定する。
+- runner image の初期化、snapshot 復元、runner 登録、終了時 cleanup は AWS 側の runbook に従う。
+  本リポジトリの workflow は VM の作成・削除や AWS credential の取得を行わない。
 
 ## テスト資産の配置契約
 
@@ -209,6 +224,9 @@ tests/e2e/
   決まり、runner が artifact の `versions.json`（`productAssembly`）に記録するため、manifest には
   記録しない。外部コンポーネントを使わない scenario は空の object
   （`{}`）にする。
+- DesktopFull は `requiredComponents` と `requiredDriverSteps` を manifest に定義する。
+  runner は `timeoutSeconds`、`schemaVersion`、`phase`、`id` を検証し、待機時間をこの manifest から
+  取得する。スクリプト引数による timeout の上書きは許可しない。
 - `id` は artifact と failure record でも同じ値を使用する。
 - fixture のファイル名や本文に実 token、実 user code、実 repository を含めない。
 - 時刻、port、一時パスは harness が注入し、fixture に固定しない。
@@ -245,6 +263,37 @@ dummy launcher の境界を実装する。MSI、silent install、配布物の残
   記録する。
 - `latest` を暗黙取得しない。
 - version mismatch は製品テストを続けず `CONTRACT_VERSION_MISMATCH` で終了する。
+
+DesktopFull の `DESKTOP_E2E_COMPONENT_MANIFEST_JSON`（または同じ内容の
+`DESKTOP_E2E_COMPONENT_MANIFEST_PATH`）は、次の形で固定する。`requiredComponents` にない component、
+`version` または `digest` の欠落、未知の schemaVersion は受け付けない。
+
+```json
+{
+  "schemaVersion": 1,
+  "components": {
+    "mcp-docker": {
+      "version": "<40桁のcommit SHA>",
+      "digest": "sha256:<64桁のimage digest>"
+    },
+    "mcp-gateway": {
+      "version": "<40桁のcommit SHA>",
+      "digest": "sha256:<64桁のimage digest>"
+    },
+    "thread-owl": {
+      "version": "<40桁のcommit SHA>",
+      "digest": "sha256:<64桁のimage digest>"
+    },
+    "mcp-resource-subscriber": {
+      "version": "<SemVer または40桁のcommit SHA>",
+      "digest": "sha256:<64桁のimage digest>"
+    }
+  }
+}
+```
+
+検証済みの version と digest だけを `versions.json` に記録し、manifest 本文や資格情報は artifact へ
+出力しない。
 
 互換性 matrix の更新は依存更新として独立レビュー可能にし、製品コード変更へ混在させない。
 
@@ -289,6 +338,8 @@ cleanup は PowerShell の `finally` から必ず実行し、次を順番に処�
 
 cleanup が失敗した場合は、元の製品テストが成功していても run を失敗させる。診断 artifact
 を採取する前に削除してはならない。Phase 2 は上記に加えて VM snapshot 復元を必須とする。
+専用 root の削除結果は `cleanup.json` の `runRootRemoved` に記録し、削除失敗時は
+`failure.json` を `CLEANUP_FAILED` として生成する。
 
 ## Artifact 契約
 
@@ -309,9 +360,29 @@ artifacts/e2e/<phase>/<scenario-id>/
 - `sanitized.log`: secret scan 済みの統合ログ
 - `cleanup.json`: cleanup 対象ごとの実行結果と残留確認
 
+DesktopFull の `DESKTOP_E2E_FULL_DRIVER` は、次の引数を受け取り、`ResultPath` に機械可読な結果を
+必ず出力する。
+
+```text
+-MsiPath <MSI path>
+-ArtifactDirectory <scenario artifact directory>
+-WindowHandle <main window handle>
+-ScenarioManifestPath <desktop-full.json>
+-ExpectedOutcome <scenario manifest の expectedOutcome>
+-ResultPath <full-driver-result.json>
+```
+
+結果は `schemaVersion: 1`、scenario manifest と同じ `scenarioId` / `expectedOutcome` / `outcome`、
+および `requiredDriverSteps` の全 step が `passed` であることを要求する。不足または不一致は
+`PRODUCT_CONTRACT_MISMATCH` として扱う。artifact scan に失敗した場合は upload を行わず、
+`SECURITY_SECRET_EXPOSURE` の failure record を生成する。
+MSI install と driver process は scenario manifest の `timeoutSeconds` で定義する全体 deadline 内に
+終了し、超過時は `TIMEOUT` として cleanup と failure artifact を実行する。cleanup の MSI uninstall
+には、artifact を残すための独立した上限を設ける。
+
 Phase 1 の成功時は job summary と `versions.json` だけを残し、失敗時 artifact は 14 日保持する。
-Phase 2 は screenshot、必要に応じて動画、Windows Event Log、component log を加え、
-nightly は 30 日、release 前実行は 90 日保持する。
+Phase 2 は screenshot、必要に応じて動画、Windows Event Log、component log を加える。
+`workflow_dispatch` は 14 日、release 前実行は 90 日保持する。定期実行用の retention は設けない。
 
 artifact は成功判定の正本にしない。workflow の exit code と `result.json` が一致しない場合は
 `TEST_HARNESS_FAILED` とする。
@@ -407,8 +478,8 @@ Phase 1 を required check にするには、次をすべて満たす。
 - branch protection へ追加する check 名が固定されている。
 - rollback 手順と一時的に required から外す判断基準が文書化されている。
 
-導入順は `workflow_dispatch`、non-required PR check、required PR check とする。Phase 2 は
-この昇格条件の対象外で、nightly / release 前 gate のまま運用する。
+導入順は `workflow_dispatch`、release gate とする。Phase 2 は PR required check への昇格対象外で、
+手動検証と release 前 gate のみで運用する。
 
 ## 依存順
 

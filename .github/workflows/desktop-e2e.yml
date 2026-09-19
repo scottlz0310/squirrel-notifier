@@ -1,0 +1,158 @@
+name: Desktop E2E
+
+on:
+  workflow_call:
+    inputs:
+      release_artifact_name:
+        description: 'リリース build job が作成した artifact 名。空なら runner 上で build する。'
+        required: false
+        type: string
+        default: ''
+      expected_version:
+        description: '検証対象の製品 version'
+        required: false
+        type: string
+        default: ''
+      scenario:
+        description: '実行する desktop scenario'
+        required: false
+        type: string
+        default: DesktopSmoke
+      artifact_retention_days:
+        description: 'E2E artifact の保持日数'
+        required: false
+        type: number
+        default: 14
+    secrets:
+      DESKTOP_E2E_GATEWAY_URL:
+        required: false
+      DESKTOP_E2E_RESOURCE_URIS:
+        required: false
+      DESKTOP_E2E_COMPONENT_MANIFEST_JSON:
+        required: false
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: '検証対象の製品 version。空なら csproj の version を使用する。'
+        required: false
+        type: string
+        default: ''
+      scenario:
+        description: '実行する desktop scenario'
+        required: true
+        type: choice
+        options:
+          - DesktopSmoke
+          - DesktopFull
+        default: DesktopSmoke
+      artifact_retention_days:
+        description: 'E2E artifact の保持日数'
+        required: true
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  desktop-e2e:
+    name: Windows desktop E2E (${{ inputs.scenario }})
+    runs-on: [self-hosted, windows, squirrel-notifier-desktop]
+    environment: desktop-e2e
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET
+        if: inputs.release_artifact_name == ''
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WiX 7
+        if: inputs.release_artifact_name == ''
+        shell: pwsh
+        run: .\scripts\Ensure-Wix.ps1 -Version 7.0.0
+
+      - name: Download release package
+        if: inputs.release_artifact_name != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.release_artifact_name }}
+          path: release-output
+
+      - name: Build release package on runner
+        if: inputs.release_artifact_name == ''
+        shell: pwsh
+        run: .\scripts\Build-ReleasePackage.ps1 -OutputDirectory .\release-output
+
+      - name: Measure runner storage
+        shell: pwsh
+        run: >-
+          .\tests\e2e\scripts\Measure-DesktopE2EStorage.ps1
+          -OutputPath "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop\storage.json"
+          -WorkspacePath "$env:GITHUB_WORKSPACE"
+
+      - name: Run desktop E2E
+        shell: pwsh
+        env:
+          DESKTOP_E2E_GATEWAY_URL: ${{ secrets.DESKTOP_E2E_GATEWAY_URL }}
+          DESKTOP_E2E_RESOURCE_URIS: ${{ secrets.DESKTOP_E2E_RESOURCE_URIS }}
+          DESKTOP_E2E_COMPONENT_MANIFEST_JSON: ${{ secrets.DESKTOP_E2E_COMPONENT_MANIFEST_JSON }}
+          DESKTOP_E2E_COMPONENT_MANIFEST_PATH: ${{ vars.DESKTOP_E2E_COMPONENT_MANIFEST_PATH }}
+          DESKTOP_E2E_FULL_DRIVER: ${{ vars.DESKTOP_E2E_FULL_DRIVER }}
+          DESKTOP_E2E_EXPECTED_VERSION: ${{ inputs.expected_version }}
+          DESKTOP_E2E_SCENARIO: ${{ inputs.scenario }}
+        run: |
+          $msi = Get-ChildItem -LiteralPath "$env:GITHUB_WORKSPACE\release-output" -Filter '*.msi' -File -Recurse |
+            Sort-Object FullName |
+            Select-Object -First 1
+          if ($null -eq $msi) {
+            throw 'release-output に MSI がありません。'
+          }
+
+          $arguments = @{
+            MsiPath = $msi.FullName
+            Scenario = $env:DESKTOP_E2E_SCENARIO
+            ArtifactsDirectory = "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop"
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_EXPECTED_VERSION)) {
+            $arguments.ExpectedVersion = $env:DESKTOP_E2E_EXPECTED_VERSION
+          }
+          & .\tests\e2e\scripts\Invoke-DesktopE2E.ps1 @arguments
+
+      - name: Validate desktop E2E artifacts
+        id: artifact-scan
+        if: always()
+        shell: pwsh
+        run: |
+          $directories = @(Get-ChildItem -LiteralPath "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop" -Directory -ErrorAction SilentlyContinue)
+          if ($directories.Count -eq 0) {
+            throw 'desktop E2E artifact directory がありません。'
+          }
+          foreach ($directory in $directories) {
+            & .\tests\e2e\scripts\Test-E2EArtifacts.ps1 -ArtifactsDirectory $directory.FullName
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+          & .\tests\e2e\scripts\Test-E2EArtifacts.ps1 `
+            -ArtifactsDirectory "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop" `
+            -ScanOnly
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload desktop E2E artifacts
+        if: always() && steps.artifact-scan.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: squirrel-notifier-desktop-e2e-${{ github.run_id }}
+          path: artifacts/e2e/desktop
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact_retention_days }}
