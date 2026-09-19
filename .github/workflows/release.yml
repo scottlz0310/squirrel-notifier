@@ -36,12 +36,16 @@ jobs:
       - name: Get version
         id: version
         shell: pwsh
+        env:
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
+          RELEASE_INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
         run: |
-          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
-            $version = '${{ inputs.version }}'
+          if ($env:RELEASE_EVENT_NAME -eq 'workflow_dispatch') {
+            $version = $env:RELEASE_INPUT_VERSION
           }
           else {
-            $version = '${{ github.ref_name }}'
+            $version = $env:RELEASE_REF_NAME
           }
           $version = $version -replace '^v', ''
           if ($version -notmatch '^\d+\.\d+\.\d+$') {
@@ -52,13 +56,15 @@ jobs:
 
       - name: Install WiX 7
         shell: pwsh
-        run: dotnet tool install --global wix --version 7.0.0
+        run: .\scripts\Ensure-Wix.ps1 -Version 7.0.0
 
       - name: Build release package
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: >-
           .\scripts\Build-ReleasePackage.ps1
-          -Version '${{ steps.version.outputs.version }}'
+          -Version $env:RELEASE_VERSION
           -OutputDirectory .\release-output
 
       - name: Upload release package for desktop gate
@@ -85,7 +91,7 @@ jobs:
 
   publish:
     needs: [build-package, desktop-e2e]
-    if: startsWith(github.ref, 'refs/tags/') && needs.desktop-e2e.result == 'success'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && needs.desktop-e2e.result == 'success'
     runs-on: windows-latest
     permissions:
       contents: write

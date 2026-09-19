@@ -32,11 +32,6 @@ on:
         required: false
   workflow_dispatch:
     inputs:
-      release_artifact_name:
-        description: '既存 release artifact 名。空なら runner 上で build する。'
-        required: false
-        type: string
-        default: ''
       expected_version:
         description: '検証対象の製品 version。空なら csproj の version を使用する。'
         required: false
@@ -82,7 +77,7 @@ jobs:
       - name: Install WiX 7
         if: inputs.release_artifact_name == ''
         shell: pwsh
-        run: dotnet tool install --global wix --version 7.0.0
+        run: .\scripts\Ensure-Wix.ps1 -Version 7.0.0
 
       - name: Download release package
         if: inputs.release_artifact_name != ''
@@ -111,6 +106,8 @@ jobs:
           DESKTOP_E2E_COMPONENT_MANIFEST_JSON: ${{ secrets.DESKTOP_E2E_COMPONENT_MANIFEST_JSON }}
           DESKTOP_E2E_COMPONENT_MANIFEST_PATH: ${{ vars.DESKTOP_E2E_COMPONENT_MANIFEST_PATH }}
           DESKTOP_E2E_FULL_DRIVER: ${{ vars.DESKTOP_E2E_FULL_DRIVER }}
+          DESKTOP_E2E_EXPECTED_VERSION: ${{ inputs.expected_version }}
+          DESKTOP_E2E_SCENARIO: ${{ inputs.scenario }}
         run: |
           $msi = Get-ChildItem -LiteralPath "$env:GITHUB_WORKSPACE\release-output" -Filter '*.msi' -File -Recurse |
             Sort-Object FullName |
@@ -121,11 +118,11 @@ jobs:
 
           $arguments = @{
             MsiPath = $msi.FullName
-            Scenario = '${{ inputs.scenario }}'
+            Scenario = $env:DESKTOP_E2E_SCENARIO
             ArtifactsDirectory = "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop"
           }
-          if ('${{ inputs.expected_version }}' -ne '') {
-            $arguments.ExpectedVersion = '${{ inputs.expected_version }}'
+          if (-not [string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_EXPECTED_VERSION)) {
+            $arguments.ExpectedVersion = $env:DESKTOP_E2E_EXPECTED_VERSION
           }
           & .\tests\e2e\scripts\Invoke-DesktopE2E.ps1 @arguments
 

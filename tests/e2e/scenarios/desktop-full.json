@@ -10,5 +10,18 @@
   "requiresInteractiveDesktop": true,
   "requiresCleanRunner": true,
   "requiresExternalComponentManifest": true,
-  "requiresRunnerDriver": true
+  "requiresRunnerDriver": true,
+  "requiredComponents": [
+    "mcp-docker",
+    "mcp-gateway",
+    "thread-owl",
+    "mcp-resource-subscriber"
+  ],
+  "requiredDriverSteps": [
+    "deviceFlow",
+    "queue",
+    "notification",
+    "recovery",
+    "sleepResume"
+  ]
 }

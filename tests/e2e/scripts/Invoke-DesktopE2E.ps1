@@ -19,13 +19,48 @@ param(
 
     [string]$ArtifactsDirectory = (Join-Path (Get-Location) 'artifacts\e2e-local'),
 
-    [string]$ExpectedVersion,
-
-    [int]$TimeoutSeconds = 60
+    [string]$ExpectedVersion
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
+$scenarioManifestFile = switch ($Scenario) {
+    'DesktopSmoke' { 'desktop-smoke.json' }
+    'DesktopFull' { 'desktop-full.json' }
+}
+$scenarioManifestPath = Join-Path $repoRoot "tests\e2e\scenarios\$scenarioManifestFile"
+try {
+    $scenarioManifest = Get-Content -LiteralPath $scenarioManifestPath -Raw -Encoding utf8 | ConvertFrom-Json
+}
+catch {
+    throw "desktop scenario manifest を読み込めません: $scenarioManifestFile"
+}
+if ($scenarioManifest.schemaVersion -ne 1) {
+    throw "desktop scenario manifest の schemaVersion は 1 である必要があります: $scenarioManifestFile"
+}
+if ($scenarioManifest.phase -ne 'desktop') {
+    throw "desktop scenario manifest の phase が不正です: $scenarioManifestFile"
+}
+$scenarioId = [string]$scenarioManifest.id
+$expectedScenarioId = if ($Scenario -eq 'DesktopSmoke') { 'desktop-smoke' } else { 'desktop-full' }
+if ($scenarioId -ne $expectedScenarioId) {
+    throw "desktop scenario manifest の id が不正です: 期待値=$expectedScenarioId"
+}
+$timeoutSeconds = [int]$scenarioManifest.timeoutSeconds
+if ($timeoutSeconds -le 0) {
+    throw "desktop scenario manifest の timeoutSeconds が不正です: $scenarioId"
+}
+$requiredComponentNames = @()
+$requiredDriverSteps = @()
+if ($Scenario -eq 'DesktopFull') {
+    $requiredComponentNames = @($scenarioManifest.requiredComponents | ForEach-Object { [string]$_ })
+    $requiredDriverSteps = @($scenarioManifest.requiredDriverSteps | ForEach-Object { [string]$_ })
+    if ($requiredComponentNames.Count -eq 0 -or $requiredDriverSteps.Count -eq 0) {
+        throw "DesktopFull manifest に requiredComponents または requiredDriverSteps がありません。"
+    }
+}
 
 $resolvedMsiPath = (Resolve-Path -LiteralPath $MsiPath).Path
 $artifactRoot = [System.IO.Path]::GetFullPath($ArtifactsDirectory)
@@ -40,6 +75,7 @@ else {
 $runRoot = Join-Path $runnerTemp "squirrel-notifier-e2e\desktop-$runId"
 $installLogPath = Join-Path $runRoot 'msiexec-install.log'
 $uninstallLogPath = Join-Path $runRoot 'msiexec-uninstall.log'
+$fullDriverResultPath = Join-Path $scenarioArtifactDirectory 'full-driver-result.json'
 $installedDirectory = Join-Path $env:LOCALAPPDATA 'Programs\SquirrelNotifier'
 $installedExecutable = Join-Path $installedDirectory 'SquirrelNotifier.WinUI3.exe'
 $settingsDirectory = Join-Path $env:LOCALAPPDATA 'SquirrelNotifier'
@@ -54,6 +90,8 @@ $logLines = [System.Collections.Generic.List[string]]::new()
 $failure = $null
 $cleanupErrors = [System.Collections.Generic.List[string]]::new()
 $windowHandle = [IntPtr]::Zero
+$script:failureCategoryOverride = $null
+$script:componentManifestForArtifact = [ordered]@{}
 
 function Write-ScenarioLog {
     param(
@@ -90,6 +128,45 @@ function Get-SafeMessage {
     return $message
 }
 
+function Set-FailureCategory {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Category
+    )
+
+    $script:failureCategoryOverride = $Category
+}
+
+function New-FailureRecord {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Category,
+
+        [Parameter(Mandatory)]
+        [string]$Component,
+
+        [Parameter(Mandatory)]
+        [string]$Message
+    )
+
+    $artifactHints = @('result.json', 'versions.json', 'sanitized.log', 'cleanup.json')
+    if ($Scenario -eq 'DesktopFull') {
+        $artifactHints += 'full-driver-result.json'
+    }
+
+    return [ordered]@{
+        schemaVersion = 1
+        phase = 'desktop'
+        scenarioId = $scenarioId
+        category = $Category
+        component = $Component
+        message = $Message
+        startedAt = $startedAt.ToString('O')
+        completedAt = [DateTimeOffset]::UtcNow.ToString('O')
+        artifactHints = $artifactHints
+    }
+}
+
 function Invoke-Msi {
     param(
         [Parameter(Mandatory)]
@@ -114,7 +191,7 @@ function Invoke-Msi {
 }
 
 function Wait-InstalledExecutable {
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath $installedExecutable -PathType Leaf) {
             return
@@ -173,7 +250,7 @@ function Wait-MainWindow {
     )
 
     Ensure-WindowStateType
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         $Process.Refresh()
         if ($Process.HasExited) {
@@ -294,7 +371,7 @@ function Wait-UiElementByAutomationId {
         [string]$AutomationId
     )
 
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         $element = Get-UiElementByAutomationId -Root $Root -AutomationId $AutomationId
         if ($null -ne $element) {
@@ -340,11 +417,65 @@ function Assert-UiContract {
     }
 }
 
+function Test-ComponentManifest {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Manifest
+    )
+
+    if ($Manifest.schemaVersion -ne 1) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw 'component manifest の schemaVersion は 1 である必要があります。'
+    }
+    if ($null -eq $Manifest.components) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw 'component manifest に components がありません。'
+    }
+
+    $componentProperties = @($Manifest.components.PSObject.Properties)
+    $actualComponentNames = @($componentProperties | ForEach-Object { $_.Name })
+    $missingComponents = @($requiredComponentNames | Where-Object { $_ -notin $actualComponentNames })
+    $unexpectedComponents = @($actualComponentNames | Where-Object { $_ -notin $requiredComponentNames })
+    if ($missingComponents.Count -ne 0 -or $unexpectedComponents.Count -ne 0) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+        throw 'component manifest の required component 一覧が scenario と一致しません。'
+    }
+
+    $safeComponents = [ordered]@{}
+    foreach ($componentName in $requiredComponentNames) {
+        $componentProperty = $Manifest.components.PSObject.Properties[$componentName]
+        $component = if ($null -eq $componentProperty) { $null } else { $componentProperty.Value }
+        if ($null -eq $component) {
+            Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+            throw "component manifest の component が不正です: $componentName"
+        }
+
+        $versionProperty = $component.PSObject.Properties['version']
+        $digestProperty = $component.PSObject.Properties['digest']
+        $version = if ($null -eq $versionProperty) { '' } else { [string]$versionProperty.Value }
+        $digest = if ($null -eq $digestProperty) { '' } else { [string]$digestProperty.Value }
+        $validVersion = $version -match '^(?:[0-9a-fA-F]{40}|v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$'
+        $validDigest = $digest -match '^sha256:[0-9a-fA-F]{64}$'
+        if (-not $validVersion -or -not $validDigest) {
+            Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+            throw "component manifest の version または digest が不正です: $componentName"
+        }
+
+        $safeComponents[$componentName] = [ordered]@{
+            version = $version
+            digest = $digest
+        }
+    }
+    $script:componentManifestForArtifact = $safeComponents
+}
+
 function Test-ExternalStackReadiness {
     if ([string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_GATEWAY_URL)) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DesktopFull には DESKTOP_E2E_GATEWAY_URL が必要です。値はログへ出力しません。'
     }
     if ([string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_RESOURCE_URIS)) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DesktopFull には DESKTOP_E2E_RESOURCE_URIS が必要です。値はログへ出力しません。'
     }
 
@@ -352,14 +483,17 @@ function Test-ExternalStackReadiness {
         $gatewayUri = [Uri]::new($env:DESKTOP_E2E_GATEWAY_URL)
     }
     catch {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DESKTOP_E2E_GATEWAY_URL が有効な URI ではありません。'
     }
     if ($gatewayUri.Scheme -notin @('http', 'https')) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DESKTOP_E2E_GATEWAY_URL は http または https である必要があります。'
     }
 
     $resourceUris = @($env:DESKTOP_E2E_RESOURCE_URIS -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($resourceUris.Count -eq 0) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DESKTOP_E2E_RESOURCE_URIS に URI がありません。'
     }
     foreach ($resourceUri in $resourceUris) {
@@ -367,9 +501,11 @@ function Test-ExternalStackReadiness {
             $parsedResourceUri = [Uri]::new($resourceUri)
         }
         catch {
+            Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
             throw 'DESKTOP_E2E_RESOURCE_URIS に不正な URI があります。'
         }
         if ($parsedResourceUri.Scheme -notin @('http', 'https')) {
+            Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
             throw 'DESKTOP_E2E_RESOURCE_URIS は http または https である必要があります。'
         }
     }
@@ -377,11 +513,19 @@ function Test-ExternalStackReadiness {
     $manifestJson = $env:DESKTOP_E2E_COMPONENT_MANIFEST_JSON
     if ([string]::IsNullOrWhiteSpace($manifestJson) -and -not [string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_COMPONENT_MANIFEST_PATH)) {
         if (-not (Test-Path -LiteralPath $env:DESKTOP_E2E_COMPONENT_MANIFEST_PATH -PathType Leaf)) {
+            Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
             throw 'DESKTOP_E2E_COMPONENT_MANIFEST_PATH が見つかりません。'
         }
-        $manifestJson = Get-Content -LiteralPath $env:DESKTOP_E2E_COMPONENT_MANIFEST_PATH -Raw -Encoding utf8
+        try {
+            $manifestJson = Get-Content -LiteralPath $env:DESKTOP_E2E_COMPONENT_MANIFEST_PATH -Raw -Encoding utf8
+        }
+        catch {
+            Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
+            throw 'DESKTOP_E2E_COMPONENT_MANIFEST_PATH を読み込めません。'
+        }
     }
     if ([string]::IsNullOrWhiteSpace($manifestJson)) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DesktopFull には component manifest が必要です。値は artifact へ出力しません。'
     }
 
@@ -389,11 +533,10 @@ function Test-ExternalStackReadiness {
         $manifest = $manifestJson | ConvertFrom-Json
     }
     catch {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'component manifest が JSON として解釈できません。'
     }
-    if ($null -eq $manifest.schemaVersion -or $null -eq $manifest.components) {
-        throw 'component manifest に schemaVersion または components がありません。'
-    }
+    Test-ComponentManifest -Manifest $manifest
 
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
@@ -405,8 +548,15 @@ function Test-ExternalStackReadiness {
         }
         $connection = $client.ConnectAsync($gatewayUri.Host, $port)
         if (-not $connection.Wait(5000) -or -not $client.Connected) {
+            Set-FailureCategory -Category 'INFRA_RUNNER_FAILED'
             throw 'gateway の TCP endpoint に接続できません。'
         }
+    }
+    catch {
+        if ($null -eq $script:failureCategoryOverride) {
+            Set-FailureCategory -Category 'INFRA_RUNNER_FAILED'
+        }
+        throw
     }
     finally {
         $client.Dispose()
@@ -414,10 +564,12 @@ function Test-ExternalStackReadiness {
 
     $docker = Get-Command docker -ErrorAction SilentlyContinue
     if ($null -eq $docker) {
+        Set-FailureCategory -Category 'INFRA_RUNNER_FAILED'
         throw 'DesktopFull には Docker CLI が必要です。'
     }
     & $docker.Source info *> $null
     if ($LASTEXITCODE -ne 0) {
+        Set-FailureCategory -Category 'INFRA_RUNNER_FAILED'
         throw 'Docker daemon が利用できません。'
     }
 
@@ -426,18 +578,53 @@ function Test-ExternalStackReadiness {
 
 function Invoke-FullScenarioDriver {
     if ([string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_FULL_DRIVER)) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DesktopFull には DESKTOP_E2E_FULL_DRIVER が必要です。外部 stack の停止・復旧、device flow、queue、通知、sleep/resume を実行する driver を runner image に登録してください。'
     }
     if (-not (Test-Path -LiteralPath $env:DESKTOP_E2E_FULL_DRIVER -PathType Leaf)) {
+        Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DESKTOP_E2E_FULL_DRIVER が見つかりません。'
     }
 
     & pwsh -NoProfile -File $env:DESKTOP_E2E_FULL_DRIVER `
         -MsiPath $resolvedMsiPath `
         -ArtifactDirectory $scenarioArtifactDirectory `
-        -WindowHandle $windowHandle.ToInt64()
+        -WindowHandle $windowHandle.ToInt64() `
+        -ScenarioManifestPath $scenarioManifestPath `
+        -ExpectedOutcome $scenarioManifest.expectedOutcome `
+        -ResultPath $fullDriverResultPath
     if ($LASTEXITCODE -ne 0) {
+        Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
         throw 'DesktopFull driver が失敗しました。'
+    }
+
+    if (-not (Test-Path -LiteralPath $fullDriverResultPath -PathType Leaf)) {
+        Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
+        throw 'DesktopFull driver が machine-readable result を生成していません。'
+    }
+
+    try {
+        $driverResult = Get-Content -LiteralPath $fullDriverResultPath -Raw -Encoding utf8 | ConvertFrom-Json
+    }
+    catch {
+        Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
+        throw 'DesktopFull driver result が JSON として解釈できません。'
+    }
+    if ($driverResult.schemaVersion -ne 1 -or
+        $driverResult.scenarioId -ne $scenarioId -or
+        $driverResult.expectedOutcome -ne $scenarioManifest.expectedOutcome -or
+        $driverResult.outcome -ne $scenarioManifest.expectedOutcome -or
+        $null -eq $driverResult.steps) {
+        Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
+        throw 'DesktopFull driver result の scenario、expectedOutcome、outcome、または schemaVersion が不正です。'
+    }
+
+    foreach ($requiredStep in $requiredDriverSteps) {
+        $stepProperty = $driverResult.steps.PSObject.Properties[$requiredStep]
+        if ($null -eq $stepProperty -or [string]$stepProperty.Value -ne 'passed') {
+            Set-FailureCategory -Category 'PRODUCT_CONTRACT_MISMATCH'
+            throw "DesktopFull driver result の必須 step が成功していません: $requiredStep"
+        }
     }
 }
 
@@ -493,7 +680,7 @@ New-Item -ItemType Directory -Path $runRoot, $scenarioArtifactDirectory -Force |
 $result = [ordered]@{
     schemaVersion = 1
     phase = 'desktop'
-    scenarioId = $Scenario
+    scenarioId = $scenarioId
     runId = $runId
     status = 'running'
     startedAt = $startedAt.ToString('O')
@@ -507,6 +694,7 @@ $result = [ordered]@{
         screenshot = 'not-run'
         uiAutomation = 'not-run'
         fullDriver = 'not-run'
+        fullDriverResult = 'not-run'
     }
 }
 
@@ -550,23 +738,29 @@ try {
     if ($Scenario -eq 'DesktopFull') {
         Invoke-FullScenarioDriver
         $result.steps.fullDriver = 'passed'
+        $result.steps.fullDriverResult = 'passed'
     }
 
     Write-ScenarioLog 'install、launch、UI Automation、screenshot の確認に成功しました。'
     $result.status = 'passed'
 }
 catch {
-    $failure = [ordered]@{
-        schemaVersion = 1
-        phase = 'desktop'
-        scenarioId = $Scenario
-        category = if ($result.steps.preflight -ne 'passed') { 'INFRA_RUNNER_FAILED' } elseif ($result.steps.install -ne 'passed') { 'PRODUCT_INSTALL_FAILED' } else { 'PRODUCT_UI_FAILED' }
-        component = 'squirrel-notifier'
-        message = Get-SafeMessage -Exception $_.Exception
-        startedAt = $startedAt.ToString('O')
-        completedAt = [DateTimeOffset]::UtcNow.ToString('O')
-        artifactHints = @('result.json', 'versions.json', 'sanitized.log', 'cleanup.json')
+    $failureCategory = $script:failureCategoryOverride
+    if ([string]::IsNullOrWhiteSpace($failureCategory)) {
+        $failureCategory = if ($result.steps.preflight -ne 'passed') {
+            'INFRA_RUNNER_FAILED'
+        }
+        elseif ($result.steps.install -ne 'passed') {
+            'PRODUCT_INSTALL_FAILED'
+        }
+        else {
+            'PRODUCT_UI_FAILED'
+        }
     }
+    $failure = New-FailureRecord `
+        -Category $failureCategory `
+        -Component 'squirrel-notifier' `
+        -Message (Get-SafeMessage -Exception $_.Exception)
     $result.status = 'failed'
     $result.failureCategory = $failure.category
     Write-ScenarioLog "Desktop E2E に失敗しました: $($failure.category)"
@@ -577,7 +771,7 @@ finally {
             $process = Get-Process -Id $applicationProcessId -ErrorAction SilentlyContinue
             if ($null -ne $process) {
                 Stop-Process -Id $applicationProcessId -Force -ErrorAction Stop
-                $process.WaitForExit(10000)
+                $process.WaitForExit(10000) | Out-Null
             }
         }
         catch {
@@ -622,22 +816,55 @@ finally {
         $cleanupErrors.Add("残留が検出されました: $($residuals -join ', ')")
     }
 
+    $runRootRemoved = $false
+    try {
+        if (Test-Path -LiteralPath $runRoot) {
+            Remove-Item -LiteralPath $runRoot -Recurse -Force -ErrorAction Stop
+        }
+        $runRootRemoved = -not (Test-Path -LiteralPath $runRoot)
+        if (-not $runRootRemoved) {
+            throw '専用 temporary root が残っています。'
+        }
+    }
+    catch {
+        $cleanupErrors.Add('専用 temporary root を削除できませんでした。')
+    }
+
     $cleanup = [ordered]@{
         schemaVersion = 1
         phase = 'desktop'
-        scenarioId = $Scenario
+        scenarioId = $scenarioId
         status = if ($cleanupErrors.Count -eq 0) { 'passed' } else { 'failed' }
         installAttempted = $installStarted
         residuals = $residuals
         errors = @($cleanupErrors)
+        runRootRemoved = $runRootRemoved
         completedAt = [DateTimeOffset]::UtcNow.ToString('O')
     }
     Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'cleanup.json') -Value $cleanup
+
+    if ($cleanupErrors.Count -ne 0) {
+        $failure = New-FailureRecord `
+            -Category 'CLEANUP_FAILED' `
+            -Component 'desktop-e2e-harness' `
+            -Message "cleanup に失敗しました: $($cleanupErrors -join ' ')"
+        $result.status = 'failed'
+        $result.failureCategory = $failure.category
+        Write-ScenarioLog 'Desktop E2E の cleanup に失敗しました。'
+    }
 
     $versions = [ordered]@{
         schemaVersion = 1
         phase = 'desktop'
         measuredAt = [DateTimeOffset]::UtcNow.ToString('O')
+        scenarioId = $scenarioId
+        timeoutSeconds = $timeoutSeconds
+        scenarioManifest = [ordered]@{
+            schemaVersion = $scenarioManifest.schemaVersion
+            id = $scenarioId
+            expectedOutcome = $scenarioManifest.expectedOutcome
+        }
+        components = $script:componentManifestForArtifact
         os = [ordered]@{
             caption = (Get-CimInstance Win32_OperatingSystem).Caption
             version = [Environment]::OSVersion.Version.ToString()
@@ -665,6 +892,15 @@ $artifactScanFailed = $false
 & (Join-Path $PSScriptRoot 'Test-E2EArtifacts.ps1') -ArtifactsDirectory $scenarioArtifactDirectory
 if ($LASTEXITCODE -ne 0) {
     $artifactScanFailed = $true
+    $failure = New-FailureRecord `
+        -Category 'SECURITY_SECRET_EXPOSURE' `
+        -Component 'desktop-e2e-harness' `
+        -Message 'E2E artifact の必須ファイルまたは secret scan の検査に失敗しました。'
+    $result.status = 'failed'
+    $result.failureCategory = $failure.category
+    $result.completedAt = [DateTimeOffset]::UtcNow.ToString('O')
+    Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'result.json') -Value $result
+    Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'failure.json') -Value $failure
 }
 
 if ($null -ne $failure -or $cleanupErrors.Count -ne 0 -or $artifactScanFailed) {

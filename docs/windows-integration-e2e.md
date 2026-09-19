@@ -224,6 +224,9 @@ tests/e2e/
   決まり、runner が artifact の `versions.json`（`productAssembly`）に記録するため、manifest には
   記録しない。外部コンポーネントを使わない scenario は空の object
   （`{}`）にする。
+- DesktopFull は `requiredComponents` と `requiredDriverSteps` を manifest に定義する。
+  runner は `timeoutSeconds`、`schemaVersion`、`phase`、`id` を検証し、待機時間をこの manifest から
+  取得する。スクリプト引数による timeout の上書きは許可しない。
 - `id` は artifact と failure record でも同じ値を使用する。
 - fixture のファイル名や本文に実 token、実 user code、実 repository を含めない。
 - 時刻、port、一時パスは harness が注入し、fixture に固定しない。
@@ -260,6 +263,37 @@ dummy launcher の境界を実装する。MSI、silent install、配布物の残
   記録する。
 - `latest` を暗黙取得しない。
 - version mismatch は製品テストを続けず `CONTRACT_VERSION_MISMATCH` で終了する。
+
+DesktopFull の `DESKTOP_E2E_COMPONENT_MANIFEST_JSON`（または同じ内容の
+`DESKTOP_E2E_COMPONENT_MANIFEST_PATH`）は、次の形で固定する。`requiredComponents` にない component、
+`version` または `digest` の欠落、未知の schemaVersion は受け付けない。
+
+```json
+{
+  "schemaVersion": 1,
+  "components": {
+    "mcp-docker": {
+      "version": "<40桁のcommit SHA>",
+      "digest": "sha256:<64桁のimage digest>"
+    },
+    "mcp-gateway": {
+      "version": "<40桁のcommit SHA>",
+      "digest": "sha256:<64桁のimage digest>"
+    },
+    "thread-owl": {
+      "version": "<40桁のcommit SHA>",
+      "digest": "sha256:<64桁のimage digest>"
+    },
+    "mcp-resource-subscriber": {
+      "version": "<SemVer または40桁のcommit SHA>",
+      "digest": "sha256:<64桁のimage digest>"
+    }
+  }
+}
+```
+
+検証済みの version と digest だけを `versions.json` に記録し、manifest 本文や資格情報は artifact へ
+出力しない。
 
 互換性 matrix の更新は依存更新として独立レビュー可能にし、製品コード変更へ混在させない。
 
@@ -304,6 +338,8 @@ cleanup は PowerShell の `finally` から必ず実行し、次を順番に処�
 
 cleanup が失敗した場合は、元の製品テストが成功していても run を失敗させる。診断 artifact
 を採取する前に削除してはならない。Phase 2 は上記に加えて VM snapshot 復元を必須とする。
+専用 root の削除結果は `cleanup.json` の `runRootRemoved` に記録し、削除失敗時は
+`failure.json` を `CLEANUP_FAILED` として生成する。
 
 ## Artifact 契約
 
@@ -323,6 +359,23 @@ artifacts/e2e/<phase>/<scenario-id>/
 - `versions.json`: OS、SDK、runtime、CLI、commit SHA、image digest
 - `sanitized.log`: secret scan 済みの統合ログ
 - `cleanup.json`: cleanup 対象ごとの実行結果と残留確認
+
+DesktopFull の `DESKTOP_E2E_FULL_DRIVER` は、次の引数を受け取り、`ResultPath` に機械可読な結果を
+必ず出力する。
+
+```text
+-MsiPath <MSI path>
+-ArtifactDirectory <scenario artifact directory>
+-WindowHandle <main window handle>
+-ScenarioManifestPath <desktop-full.json>
+-ExpectedOutcome <scenario manifest の expectedOutcome>
+-ResultPath <full-driver-result.json>
+```
+
+結果は `schemaVersion: 1`、scenario manifest と同じ `scenarioId` / `expectedOutcome` / `outcome`、
+および `requiredDriverSteps` の全 step が `passed` であることを要求する。不足または不一致は
+`PRODUCT_CONTRACT_MISMATCH` として扱う。artifact scan に失敗した場合は upload を行わず、
+`SECURITY_SECRET_EXPOSURE` の failure record を生成する。
 
 Phase 1 の成功時は job summary と `versions.json` だけを残し、失敗時 artifact は 14 日保持する。
 Phase 2 は screenshot、必要に応じて動画、Windows Event Log、component log を加える。

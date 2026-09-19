@@ -82,6 +82,9 @@ Phase 2 の workflow は `.github/workflows/desktop-e2e.yml` です。定期実�
 `DESKTOP_E2E_FULL_DRIVER` を runner image に登録した場合だけ使用します。未設定の場合は
 成功扱いにせず、runner 契約違反として失敗します。token、device code、settings の内容は
 artifact へ出力しません。
+待機時間は `tests/e2e/scenarios/desktop-*.json` の `timeoutSeconds` を使用します。
+DesktopFull の component manifest は `requiredComponents` の全 component に固定 version と
+`sha256:` digest を要求し、driver は `full-driver-result.json` に必須 step の成功結果を出力します。
 
 ローカルの対話 desktop で MSI を直接検証する場合:
 
