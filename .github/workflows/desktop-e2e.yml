@@ -72,7 +72,7 @@ jobs:
         if: inputs.release_artifact_name == ''
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.401'
 
       - name: Install WiX 7
         if: inputs.release_artifact_name == ''
