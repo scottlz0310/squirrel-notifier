@@ -225,8 +225,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 processStarted = true;
             }
 
-            // codex exec 等、スキル呼び出し機構を持たずプロンプト全文を引数で受け取るエージェントは
-            // stdin の EOF を待って停止することがあるため、標準入力を即座に閉じて EOF を通知する.
+            // codex exec 等の非対話モードは、プロンプトを引数で受け取っても stdin の EOF を
+            // 待って停止することがあるため、標準入力を即座に閉じて EOF を通知する.
             _activeProcess.StandardInput.Close();
 
             // 実行中の逐次配信（#143）: 終了後一括の ReadToEndAsync ではなく行単位で読み取り、
@@ -253,6 +253,14 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 await LogAsync($"Review process stderr summary: {ProcessOutputSummarizer.Summarize(stderr, _secretMasker)}").ConfigureAwait(false);
             }
 
+            string errorMessage = exitCode == 0
+                ? string.Empty
+                : BuildProcessFailureMessage(plan, exitCode, stderr);
+            if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                await LogAsync($"Review process failure: {errorMessage}").ConfigureAwait(false);
+            }
+
             outcome = exitCode == 0 ? AgentExecutionOutcome.Succeeded : AgentExecutionOutcome.Failed;
             result = new LauncherResult
             {
@@ -260,6 +268,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 ExitCode = exitCode,
                 Stdout = stdout,
                 Stderr = stderr,
+                ErrorMessage = errorMessage,
             };
             await CompleteSessionAsync(
                 session,
@@ -749,5 +758,17 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private async Task LogAsync(string message)
     {
         await _loggingService.WriteAsync(message).ConfigureAwait(false);
+    }
+
+    private string BuildProcessFailureMessage(LauncherLaunchPlan plan, int exitCode, string stderr)
+    {
+        string detail = ProcessOutputSummarizer.Summarize(stderr, _secretMasker);
+        string skillHint = plan.ArgumentsTemplate.Contains("/thread-owl-pr-reviewer", StringComparison.Ordinal)
+            || plan.ArgumentsTemplate.Contains("/review-raven-thread-owl-cycle", StringComparison.Ordinal)
+            ? " skill が未配布、または CLI が skill 呼び出しに未対応の可能性があります。Mcp-Docker の skill 配布と CLI の対応状況を確認してください。"
+            : string.Empty;
+        string detailText = string.IsNullOrWhiteSpace(detail) ? string.Empty : $" stderr: {detail}";
+
+        return $"エージェントが終了コード {exitCode} で終了しました。{skillHint}{detailText}";
     }
 }

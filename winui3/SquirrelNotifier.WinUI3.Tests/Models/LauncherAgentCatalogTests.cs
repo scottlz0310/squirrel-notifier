@@ -92,6 +92,24 @@ public class LauncherAgentCatalogTests
         definition.ReviewedResumeArgumentsTemplate.Should().Contain("{sessionId}");
     }
 
+    [Theory]
+    [InlineData("claude", "/thread-owl-pr-reviewer", "/review-raven-thread-owl-cycle")]
+    [InlineData("codex", "/thread-owl-pr-reviewer", "/review-raven-thread-owl-cycle")]
+    [InlineData("agy", "/thread-owl-pr-reviewer", "/review-raven-thread-owl-cycle")]
+    [InlineData("copilot", "/thread-owl-pr-reviewer", "/review-raven-thread-owl-cycle")]
+    public void All_ShouldInvokeOfficialReviewSkills(
+        string presetId,
+        string reviewerSkill,
+        string reviewedSkill)
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
+
+        definition.ReviewerArgumentsTemplate.Should().Contain(reviewerSkill);
+        definition.ReviewedArgumentsTemplate.Should().Contain(reviewedSkill);
+        definition.ReviewerResumeArgumentsTemplate.Should().Contain(reviewerSkill);
+        definition.ReviewedResumeArgumentsTemplate.Should().Contain(reviewedSkill);
+    }
+
     [Fact]
     public void CustomPreset_ShouldNotSupportSessionResume()
     {
@@ -127,10 +145,10 @@ public class LauncherAgentCatalogTests
     [InlineData("claude", "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --verbose --output-format stream-json", "reviewer", "claude")]
     [InlineData("claude", "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --verbose --output-format stream-json", "reviewed", "claude")]
     [InlineData("claude", "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", LauncherAgentCatalog.CustomPresetId)]
-    [InlineData("agy", "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "agy")]
-    [InlineData("agy", "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"", "reviewed", "agy")]
-    [InlineData("codex", "exec --skip-git-repo-check --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "codex")]
-    [InlineData("codex", "exec --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"", "reviewed", "codex")]
+    [InlineData("agy", "--print-timeout 30m --output-format stream-json -p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "agy")]
+    [InlineData("agy", "--print-timeout 30m --output-format stream-json -p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"", "reviewed", "agy")]
+    [InlineData("codex", "exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "codex")]
+    [InlineData("codex", "exec --json \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"", "reviewed", "codex")]
     [InlineData("claude", "--something-else", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     [InlineData("unknown-cmd", "unknown-args", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     public void ResolvePresetId_ShouldMatchExactCommandAndArguments(string command, string arguments, string roleName, string expectedPresetId)

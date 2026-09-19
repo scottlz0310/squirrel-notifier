@@ -189,6 +189,35 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // #353 より前の既定 launcher は MCP ツールの使い方をプロンプト全文へ埋め込んでいた。
+        // Mcp-Docker から配布される正式 skill を呼び出す形へ、旧既定値と完全一致するスロットだけ
+        // 一回限り移行する。resume 引数がまだ存在しない旧 settings.json（resume migration 前）の
+        // 空文字は未変更として扱うが、既存のカスタム resume 引数があるスロットは通常引数も含めて変更しない。
+        if (!_settings.LauncherSkillPromptMigrated)
+        {
+            MigrateLauncherSkillPrompt(
+                command: "codex",
+                legacyReviewerArguments: "exec --skip-git-repo-check --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+                legacyReviewedArguments: "exec --json \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+                legacyReviewerResumeArguments: "exec resume --skip-git-repo-check --json {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+                legacyReviewedResumeArguments: "exec resume --json {sessionId} \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"");
+            MigrateLauncherSkillPrompt(
+                command: "agy",
+                legacyReviewerArguments: "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+                legacyReviewedArguments: "--print-timeout 30m --output-format stream-json -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+                legacyReviewerResumeArguments: "--print-timeout 30m --output-format stream-json --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+                legacyReviewedResumeArguments: "--print-timeout 30m --output-format stream-json --conversation {sessionId} -p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"");
+            MigrateLauncherSkillPrompt(
+                command: "copilot",
+                legacyReviewerArguments: "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+                legacyReviewedArguments: "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\"",
+                legacyReviewerResumeArguments: "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --session-id {sessionId}",
+                legacyReviewedResumeArguments: "-p \"thread-owl MCP のツールを使って {owner}/{repo}#{prNumber} のレビュー指摘に対応し、修正・返信・resolve を行ってください\" --session-id {sessionId}");
+
+            _settings.LauncherSkillPromptMigrated = true;
+            SaveSettings();
+        }
+
         // #305 より前の settings.json には resume テンプレートが無い。command / 通常引数が
         // 現行プリセットと完全一致するスロットだけを補完し、自由編集された設定は空のまま保つ。
         if (!_settings.LauncherResumeTemplatesMigrated)
@@ -240,6 +269,57 @@ internal sealed class SettingsService
             }
         }
     }
+
+    private void MigrateLauncherSkillPrompt(
+        string command,
+        string legacyReviewerArguments,
+        string legacyReviewedArguments,
+        string legacyReviewerResumeArguments,
+        string legacyReviewedResumeArguments)
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(command)!;
+        if (CanMigrateLauncherSlot(
+            _settings.ReviewerLauncherCommandPath,
+            _settings.ReviewerLauncherArguments,
+            _settings.ReviewerLauncherResumeArguments,
+            definition.Command,
+            legacyReviewerArguments,
+            legacyReviewerResumeArguments))
+        {
+            _settings.ReviewerLauncherArguments = definition.ReviewerArgumentsTemplate;
+            if (_settings.ReviewerLauncherResumeArguments == legacyReviewerResumeArguments)
+            {
+                _settings.ReviewerLauncherResumeArguments = definition.ReviewerResumeArgumentsTemplate;
+            }
+        }
+
+        if (CanMigrateLauncherSlot(
+            _settings.ReviewedLauncherCommandPath,
+            _settings.ReviewedLauncherArguments,
+            _settings.ReviewedLauncherResumeArguments,
+            definition.Command,
+            legacyReviewedArguments,
+            legacyReviewedResumeArguments))
+        {
+            _settings.ReviewedLauncherArguments = definition.ReviewedArgumentsTemplate;
+            if (_settings.ReviewedLauncherResumeArguments == legacyReviewedResumeArguments)
+            {
+                _settings.ReviewedLauncherResumeArguments = definition.ReviewedResumeArgumentsTemplate;
+            }
+        }
+    }
+
+    private bool CanMigrateLauncherSlot(
+        string commandPath,
+        string arguments,
+        string resumeArguments,
+        string expectedCommand,
+        string legacyArguments,
+        string legacyResumeArguments)
+        => commandPath == expectedCommand
+            && arguments == legacyArguments
+            && (resumeArguments == legacyResumeArguments
+                || (!_settings.LauncherResumeTemplatesMigrated && string.IsNullOrEmpty(resumeArguments)));
 
     // PATH / PATHEXT の探索は共通 resolver（#186）へ委譲する。解決できない場合は
     // 設定値をそのまま返し、起動時の Win32 エラー（ファイル未検出）として表面化させる
@@ -573,6 +653,9 @@ internal sealed class AppSettings
 
     // agy の session ID 抽出対応（#306、stream-json 化）を既存の未変更プリセットへ適用する migration
     public bool AgyStreamJsonMigrated { get; set; }
+
+    // launcher の MCP 全文プロンプトを正式 skill 呼び出しへ移行する一回限り migration（#353）
+    public bool LauncherSkillPromptMigrated { get; set; }
 
     // launcher スロットに選択されているエージェントプリセット ID（LauncherAgentCatalog 参照）。
     // 自由編集でどのプリセットとも一致しなくなった場合は LauncherAgentCatalog.CustomPresetId になる.
