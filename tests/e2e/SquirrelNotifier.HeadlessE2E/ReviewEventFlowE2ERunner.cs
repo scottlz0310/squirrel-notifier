@@ -22,6 +22,7 @@ internal static class ReviewEventFlowE2ERunner
     private const string _preflightFailureVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_PREFLIGHT_FAILURE";
     private const string _delayVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_DELAY_MS";
     private const string _observationMutexName = "SquirrelNotifier.E2E.DummySubscriber.Observation";
+    private const string _launcherObservationMutexName = "SquirrelNotifier.E2E.DummyLauncher.Observation";
     private const string _resourceUri = "queue://review/queue";
     private const string _secondaryResourceUri = "queue://review/secondary";
     private const int _pullRequestNumber = 307;
@@ -954,22 +955,50 @@ internal static class ReviewEventFlowE2ERunner
             return [];
         }
 
-        var observations = new List<LauncherObservation>();
-        foreach (string line in File.ReadLines(path))
+        using var mutex = new Mutex(false, _launcherObservationMutexName);
+        bool acquired = false;
+        try
         {
-            if (!string.IsNullOrWhiteSpace(line))
+            try
             {
-                LauncherObservation? observation = JsonSerializer.Deserialize<LauncherObservation>(line, _jsonOptions);
-                if (observation is null)
-                {
-                    throw new ContractE2EFailureException("TEST_HARNESS_FAILED", "dummy launcher invocation record を解釈できません。");
-                }
+                acquired = mutex.WaitOne(TimeSpan.FromSeconds(5));
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
 
-                observations.Add(observation);
+            if (!acquired)
+            {
+                throw new ContractE2EFailureException(
+                    "TEST_HARNESS_FAILED",
+                    "dummy launcher observation の mutex を取得できませんでした。");
+            }
+
+            var observations = new List<LauncherObservation>();
+            foreach (string line in File.ReadLines(path))
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    LauncherObservation? observation = JsonSerializer.Deserialize<LauncherObservation>(line, _jsonOptions);
+                    if (observation is null)
+                    {
+                        throw new ContractE2EFailureException("TEST_HARNESS_FAILED", "dummy launcher invocation record を解釈できません。");
+                    }
+
+                    observations.Add(observation);
+                }
+            }
+
+            return observations;
+        }
+        finally
+        {
+            if (acquired)
+            {
+                mutex.ReleaseMutex();
             }
         }
-
-        return observations;
     }
 
     private static void WriteSubscriberArtifact(string observationPath, string artifactsDirectory)
