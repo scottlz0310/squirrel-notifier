@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-21
+
+v0.13.0 のリリースが desktop E2E gate で失敗したため、CI・テスト基盤の安定化のみを含む修正リリースです。製品機能の変更はありません。
+
 ### Fixed
 
+- desktop E2E の EC2 runner 準備が Runner API の 403 で失敗する問題を解消し、GitHub App から runner 登録用トークンを払い出すようにした（#367）
 - headless E2E の `review-event-flow` で launcher 引数の到着順依存をなくし、失敗時の launcher 観測 artifact を保存するようにした（#366）
 - DesktopFull の手動実行を `main` / `v*` tag に限定し、任意 target code と secret-bearing driver の同一 runner 実行を防止した（#368）
 - ローカルの subscriber `.cmd` shim によるテストモックの誤判定を防ぎ、pre-push coverage hook の testhost ハングを有限時間で診断・終了するようにした（#370）
-- Desktop E2E の手動 dispatcher の reusable workflow 参照を release gate と同じ相対参照に揃え、対象 tag / branch の配布物検証経路を整合させた
+- Desktop E2E の手動 dispatcher が呼び出す reusable workflow 参照を release gate と同じ相対参照に揃えた
 
 ## [0.13.0] - 2026-09-20
 
@@ -483,7 +488,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.1...v0.11.0
