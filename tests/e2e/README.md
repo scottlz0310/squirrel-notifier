@@ -78,7 +78,10 @@ trusted dispatcher から開始するため、feature branch の workflow 定義
 のコードだけを `target_ref` として検証できます。target ref の package build は GitHub-hosted
 runner で E2E secret 無しに行い、protected environment の desktop job には artifact だけを
 渡します。desktop job は trusted ref の harness を使用し、target package の MSI custom action
-と製品プロセスへ E2E 用の値を継承させません。次の environment variables を事前に設定してください。
+と製品プロセスへ E2E 用の値を継承させません。DesktopSmoke は feature branch を検証できますが、
+DesktopFull は secret-bearing driver と target package が同じ runner 上で動作するため、手動 dispatcher
+では `main` または `v*` tag のみを `target_ref` に指定できます（例: `refs/tags/v0.13.0`）。
+次の environment variables を事前に設定してください。
 
 - `DESKTOP_E2E_AWS_ROLE_ARN`: GitHub OIDC を信頼する最小権限 IAM role の ARN
 - `DESKTOP_E2E_AWS_REGION`: EC2 のリージョン

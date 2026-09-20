@@ -188,7 +188,8 @@ workflow を release gate として呼び出す。定期実行は行わず、run
   GitHub-hosted runner で行い、protected environment の desktop job には artifact だけを渡す。
   desktop job は trusted ref の harness を使用し、target package の MSI custom action と製品
   プロセスへ E2E 用の値を継承させない。未保護 ref から直接起動した場合は dispatcher が拒否し、
-  release tag は引き続き gate 対象になる。AWS 設定値は environment variables、App の秘密鍵は
+  DesktopFull の手動実行も `main` または `v*` tag の `target_ref` に限定する（feature branch は
+  DesktopSmoke のみ）。release tag は引き続き gate 対象になる。AWS 設定値は environment variables、App の秘密鍵は
   `desktop-e2e` environment secret として管理する。online 状態の確認には、対象リポジトリだけへ
   インストールした GitHub App を使用する。Appには
   self-hosted runner 一覧を読むための `Administration: Read` だけを持たせ、workflow実行ごとに

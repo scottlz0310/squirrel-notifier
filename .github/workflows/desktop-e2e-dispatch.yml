@@ -35,6 +35,8 @@ jobs:
   reject-untrusted-workflow-ref:
     name: Require trusted dispatcher ref
     runs-on: ubuntu-latest
+    outputs:
+      target_ref: ${{ steps.validate_target_ref.outputs.target_ref }}
     steps:
       - name: Reject non-main workflow ref
         shell: bash
@@ -45,6 +47,34 @@ jobs:
             exit 1
           fi
           echo 'trusted dispatcher ref: main'
+
+      - name: Validate target ref for scenario
+        id: validate_target_ref
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          TARGET_REF: ${{ inputs.target_ref }}
+        shell: bash
+        run: |
+          validated_target_ref="$TARGET_REF"
+
+          if [[ "$SCENARIO" == 'DesktopFull' ]]; then
+            case "$TARGET_REF" in
+              main)
+                validated_target_ref='refs/heads/main'
+                ;;
+              refs/heads/main|refs/tags/v*)
+                ;;
+              v*)
+                validated_target_ref="refs/tags/$TARGET_REF"
+                ;;
+              *)
+                echo 'DesktopFull は main または v* tag のみを target_ref に指定できます。feature branch は DesktopSmoke で実行してください。' >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          echo "target_ref=$validated_target_ref" >> "$GITHUB_OUTPUT"
 
   build-target-package:
     name: Build target package without E2E secrets
@@ -58,7 +88,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
-          ref: ${{ inputs.target_ref }}
+          ref: ${{ needs.reject-untrusted-workflow-ref.outputs.target_ref }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
