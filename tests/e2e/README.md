@@ -66,18 +66,36 @@ headless 境界は #307、#222、#223 のスコープです。`distribution-inst
 
 ## Phase 2 実デスクトップ E2E
 
-Phase 2 の workflow は `.github/workflows/desktop-e2e.yml` です。定期実行は行わず、
-実装時の検証は GitHub Actions の `workflow_dispatch` から実行します。release workflow
-は同じ reusable workflow を release 前 gate として呼び出します。
+Phase 2 の reusable workflow は `.github/workflows/desktop-e2e.yml` です。定期実行は行わず、
+実装時の検証は `main` ref の `.github/workflows/desktop-e2e-dispatch.yml` を
+`workflow_dispatch` で実行し、入力 `target_ref` に検証対象の branch/tag を指定します。
+release workflow は同じ reusable workflow を release 前 gate として呼び出します。
 
-EC2 runner の起動・停止は workflow の GitHub-hosted job が担当します。次の repository variables を
-事前に設定してください。lifecycle job は `desktop-e2e` environment を宣言しないため、これらを
-environment-level variables に置いても参照されません。
+EC2 runner の起動・停止は workflow の GitHub-hosted job が担当します。`prepare-runner` と
+`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言します。この environment
+は trusted ref として `main` branch と `v*` tag だけを許可します。手動実行は `main` ref の
+trusted dispatcher から開始するため、feature branch の workflow 定義を実行せずに、その branch
+のコードだけを `target_ref` として検証できます。target ref の package build は GitHub-hosted
+runner で E2E secret 無しに行い、protected environment の desktop job には artifact だけを
+渡します。desktop job は trusted ref の harness を使用し、target package の MSI custom action
+と製品プロセスへ E2E 用の値を継承させません。DesktopSmoke は feature branch を検証できますが、
+DesktopFull は secret-bearing driver と target package が同じ runner 上で動作するため、手動 dispatcher
+では `main` または `v*` tag のみを `target_ref` に指定できます（例: `refs/tags/v0.13.0`）。
+次の environment variables を事前に設定してください。
 
 - `DESKTOP_E2E_AWS_ROLE_ARN`: GitHub OIDC を信頼する最小権限 IAM role の ARN
 - `DESKTOP_E2E_AWS_REGION`: EC2 のリージョン
 - `DESKTOP_E2E_AWS_INSTANCE_ID`: 対象 EC2 instance ID
 - `DESKTOP_E2E_RUNNER_NAME`: self-hosted runner の登録名
+
+次の GitHub App の設定も必要です。Appは `squirrel-notifier` だけへインストールし、Repository
+`Administration: Read` だけを許可してください。workflowは実行ごとに短期の installation token を
+生成するため、installation token自体を保存しません。
+
+- `DESKTOP_E2E_GITHUB_APP_ID`: GitHub AppのApp ID（environment variable、秘密ではない）
+- `DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY`: GitHub Appの秘密鍵（`desktop-e2e` environment secret）
+
+秘密鍵はworkflowログへ出力しません。
 
 IAM role には対象 instance に対する `DescribeInstances`、`DescribeInstanceStatus`、
 `StartInstances`、`StopInstances` だけを許可し、長期 AWS access key は使用しません。

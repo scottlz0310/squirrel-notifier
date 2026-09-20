@@ -30,27 +30,8 @@ on:
         required: false
       DESKTOP_E2E_COMPONENT_MANIFEST_JSON:
         required: false
-  workflow_dispatch:
-    inputs:
-      expected_version:
-        description: '検証対象の製品 version。空なら csproj の version を使用する。'
+      DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY:
         required: false
-        type: string
-        default: ''
-      scenario:
-        description: '実行する desktop scenario'
-        required: true
-        type: choice
-        options:
-          - DesktopSmoke
-          - DesktopFull
-        default: DesktopSmoke
-      artifact_retention_days:
-        description: 'E2E artifact の保持日数'
-        required: true
-        type: number
-        default: 14
-
 permissions:
   contents: read
   actions: read
@@ -64,6 +45,9 @@ jobs:
     name: Prepare EC2 desktop runner
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # environment の trusted branch/tag policy (main / v*) と trusted dispatcher により、
+    # 未保護 ref の workflow 定義が秘密鍵へ到達しないようにする。
+    environment: desktop-e2e
     permissions:
       contents: read
       actions: read
@@ -80,6 +64,8 @@ jobs:
           AWS_ROLE_TO_ASSUME: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
           RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
+          GITHUB_APP_ID: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           missing=()
@@ -87,9 +73,11 @@ jobs:
           [[ -n "$AWS_ROLE_TO_ASSUME" ]] || missing+=(DESKTOP_E2E_AWS_ROLE_ARN)
           [[ -n "$INSTANCE_ID" ]] || missing+=(DESKTOP_E2E_AWS_INSTANCE_ID)
           [[ -n "$RUNNER_NAME" ]] || missing+=(DESKTOP_E2E_RUNNER_NAME)
+          [[ -n "$GITHUB_APP_ID" ]] || missing+=(DESKTOP_E2E_GITHUB_APP_ID)
+          [[ -n "$GITHUB_APP_PRIVATE_KEY" ]] || missing+=(DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY)
 
           if (( ${#missing[@]} > 0 )); then
-            printf '必要な repository/environment variable がありません: %s\n' "${missing[*]}" >&2
+            printf '必要な repository variable/secret がありません: %s\n' "${missing[*]}" >&2
             exit 1
           fi
 
@@ -105,6 +93,14 @@ jobs:
           role-to-assume: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
           role-session-name: desktop-e2e-${{ github.run_id }}
 
+      - name: Create GitHub App token
+        id: github-app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
+          private-key: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
+          permission-administration: read
+
       - name: Start instance and wait for runner
         id: lifecycle
         shell: bash
@@ -113,7 +109,7 @@ jobs:
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
           RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
           RUNNER_LABEL: squirrel-notifier-desktop
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
           API_URL: ${{ github.api_url }}
           REPOSITORY: ${{ github.repository }}
         run: |
@@ -208,10 +204,11 @@ jobs:
       actions: read
 
     steps:
-      - name: Checkout code
+      - name: Checkout trusted E2E harness
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          path: trusted-source
 
       - name: Setup .NET
         if: inputs.release_artifact_name == ''
@@ -234,12 +231,12 @@ jobs:
       - name: Build release package on runner
         if: inputs.release_artifact_name == ''
         shell: pwsh
-        run: .\scripts\Build-ReleasePackage.ps1 -OutputDirectory .\release-output
+        run: .\trusted-source\scripts\Build-ReleasePackage.ps1 -OutputDirectory .\release-output
 
       - name: Measure runner storage
         shell: pwsh
         run: >-
-          .\tests\e2e\scripts\Measure-DesktopE2EStorage.ps1
+          .\trusted-source\tests\e2e\scripts\Measure-DesktopE2EStorage.ps1
           -OutputPath "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop\storage.json"
           -WorkspacePath "$env:GITHUB_WORKSPACE"
 
@@ -269,7 +266,7 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_EXPECTED_VERSION)) {
             $arguments.ExpectedVersion = $env:DESKTOP_E2E_EXPECTED_VERSION
           }
-          & .\tests\e2e\scripts\Invoke-DesktopE2E.ps1 @arguments
+          & "$env:GITHUB_WORKSPACE\trusted-source\tests\e2e\scripts\Invoke-DesktopE2E.ps1" @arguments
 
       - name: Validate desktop E2E artifacts
         id: artifact-scan
@@ -281,12 +278,12 @@ jobs:
             throw 'desktop E2E artifact directory がありません。'
           }
           foreach ($directory in $directories) {
-            & .\tests\e2e\scripts\Test-E2EArtifacts.ps1 -ArtifactsDirectory $directory.FullName
+            & "$env:GITHUB_WORKSPACE\trusted-source\tests\e2e\scripts\Test-E2EArtifacts.ps1" -ArtifactsDirectory $directory.FullName
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
           }
-          & .\tests\e2e\scripts\Test-E2EArtifacts.ps1 `
+          & "$env:GITHUB_WORKSPACE\trusted-source\tests\e2e\scripts\Test-E2EArtifacts.ps1" `
             -ArtifactsDirectory "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop" `
             -ScanOnly
           if ($LASTEXITCODE -ne 0) {
@@ -308,6 +305,7 @@ jobs:
     needs: [prepare-runner, desktop-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: desktop-e2e
     permissions:
       contents: read
       actions: read

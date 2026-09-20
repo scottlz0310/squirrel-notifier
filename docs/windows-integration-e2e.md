@@ -160,9 +160,11 @@ VM は実行前後に snapshot から復元でき、対話ログオン済み des
 - runner の OS build、Windows App SDK Runtime、既定ブラウザ、DPI、locale を
   version manifest に記録する。
 
-Phase 2 は PR required check にしない。実装時の検証は `workflow_dispatch` で行い、
-release workflow から同じ reusable workflow を release gate として呼び出す。定期実行は
-行わず、runner と EBS の常時稼働コストを発生させない。
+Phase 2 は PR required check にしない。実装時の検証は `main` ref の
+`.github/workflows/desktop-e2e-dispatch.yml` を `workflow_dispatch` で行い、
+`target_ref` に検証対象の branch/tag を指定する。release workflow からは同じ reusable
+workflow を release gate として呼び出す。定期実行は行わず、runner と EBS の常時稼働コストを
+発生させない。
 
 ### AWS EC2 runner の運用契約
 
@@ -179,6 +181,19 @@ release workflow から同じ reusable workflow を release gate として呼び
 - runner image の初期化、snapshot 復元、runner 登録、Windows service 化は AWS 側の runbook に従う。
   本リポジトリの workflow は VM の作成・削除は行わず、GitHub OIDC の短期 credential で既存 instance
   の Describe / Start / Stop だけを行う。runner online 待機に失敗した場合は desktop E2E を開始しない。
+  `prepare-runner`、`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言し、
+  environment の trusted branch/tag policy を `main` と `v*` に限定する。手動実行は main ref
+  の trusted dispatcher から reusable workflow を呼び出し、feature branch の workflow 定義
+  を実行せずに `target_ref` の package だけを build する。package build は E2E secret 無しの
+  GitHub-hosted runner で行い、protected environment の desktop job には artifact だけを渡す。
+  desktop job は trusted ref の harness を使用し、target package の MSI custom action と製品
+  プロセスへ E2E 用の値を継承させない。未保護 ref から直接起動した場合は dispatcher が拒否し、
+  DesktopFull の手動実行も `main` または `v*` tag の `target_ref` に限定する（feature branch は
+  DesktopSmoke のみ）。release tag は引き続き gate 対象になる。AWS 設定値は environment variables、App の秘密鍵は
+  `desktop-e2e` environment secret として管理する。online 状態の確認には、対象リポジトリだけへ
+  インストールした GitHub App を使用する。Appには
+  self-hosted runner 一覧を読むための `Administration: Read` だけを持たせ、workflow実行ごとに
+  短期の installation token を生成する。AWS credential と秘密鍵はログへ出力しない。
 
 ## テスト資産の配置契約
 
