@@ -66,6 +66,9 @@ jobs:
     name: Prepare EC2 desktop runner
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 手動実行で未保護 ref の workflow 定義が秘密鍵へ到達しないよう、
+    # runner 準備 job 自体を保護された environment の承認対象にする。
+    environment: desktop-e2e
     permissions:
       contents: read
       actions: read

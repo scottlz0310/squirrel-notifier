@@ -179,7 +179,9 @@ release workflow から同じ reusable workflow を release gate として呼び
 - runner image の初期化、snapshot 復元、runner 登録、Windows service 化は AWS 側の runbook に従う。
   本リポジトリの workflow は VM の作成・削除は行わず、GitHub OIDC の短期 credential で既存 instance
   の Describe / Start / Stop だけを行う。runner online 待機に失敗した場合は desktop E2E を開始しない。
-  online 状態の確認には、対象リポジトリだけへインストールした GitHub App を使用する。Appには
+  `prepare-runner` 自体も保護された `desktop-e2e` environment の承認対象とし、手動実行で
+  未保護 ref を選んだ場合でも承認前に job と秘密鍵が利用可能にならないようにする。online
+  状態の確認には、対象リポジトリだけへインストールした GitHub App を使用する。Appには
   self-hosted runner 一覧を読むための `Administration: Read` だけを持たせ、workflow実行ごとに
   短期の installation token を生成する。App IDはrepository variable、秘密鍵はrepository
   secretで管理し、AWS credential と同様にログへ出力しない。

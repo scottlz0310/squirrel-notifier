@@ -70,9 +70,9 @@ Phase 2 の workflow は `.github/workflows/desktop-e2e.yml` です。定期実�
 実装時の検証は GitHub Actions の `workflow_dispatch` から実行します。release workflow
 は同じ reusable workflow を release 前 gate として呼び出します。
 
-EC2 runner の起動・停止は workflow の GitHub-hosted job が担当します。次の repository variables を
-事前に設定してください。lifecycle job は `desktop-e2e` environment を宣言しないため、これらを
-environment-level variables に置いても参照されません。
+EC2 runner の起動・停止は workflow の GitHub-hosted job が担当します。`prepare-runner` と
+`desktop-e2e` は保護された `desktop-e2e` environment を宣言するため、手動実行では environment
+承認後に job が開始されます。次の repository variables を事前に設定してください。
 
 - `DESKTOP_E2E_AWS_ROLE_ARN`: GitHub OIDC を信頼する最小権限 IAM role の ARN
 - `DESKTOP_E2E_AWS_REGION`: EC2 のリージョン
