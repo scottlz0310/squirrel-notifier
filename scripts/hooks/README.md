@@ -62,13 +62,21 @@ git commit
 
 **チェック内容**:
 - すべてのユニットテストを実行
-- コードカバレッジを測定（80% 必須）
+- CI と同じく line / branch / method のコードカバレッジを 1 回で測定（各 80% 必須）
 - テスト失敗またはカバレッジ不足でプッシュを拒否
+- `dotnet test` は既定 600 秒で打ち切り、ハング時はプロセスツリーを終了して診断を表示
+
+タイムアウトを一時的に変更する場合は、秒数を環境変数で指定します:
+
+```powershell
+$env:SQUIRREL_NOTIFIER_PRE_PUSH_TIMEOUT_SECONDS = "900"
+pwsh -File scripts/hooks/pre-commit-test.ps1
+```
 
 **修正方法**:
 ```powershell
 # テストを修正・追加してから
-dotnet test winui3/SquirrelNotifier.WinUI3.sln -c Release
+pwsh -File scripts/hooks/pre-commit-test.ps1
 git push
 ```
 

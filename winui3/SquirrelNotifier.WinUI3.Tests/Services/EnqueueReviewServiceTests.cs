@@ -28,7 +28,9 @@ public class EnqueueReviewServiceTests : IDisposable
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"EnqueueReviewTests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_tempDir);
-        _settingsService = new SettingsService(_tempDir);
+        _settingsService = new SettingsService(_tempDir, pnpmBinDir: string.Empty);
+        // 実環境の .cmd shim を解決すると ArgumentList が使われないため、プロセスモックの判定を壊す。
+        _settingsService.Settings.SubscriberCommandPath = "squirrel-notifier-test-subscriber";
         _loggingService = new LoggingService(_tempDir);
     }
 
