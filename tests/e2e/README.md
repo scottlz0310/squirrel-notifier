@@ -66,13 +66,17 @@ headless 境界は #307、#222、#223 のスコープです。`distribution-inst
 
 ## Phase 2 実デスクトップ E2E
 
-Phase 2 の workflow は `.github/workflows/desktop-e2e.yml` です。定期実行は行わず、
-実装時の検証は GitHub Actions の `workflow_dispatch` から実行します。release workflow
-は同じ reusable workflow を release 前 gate として呼び出します。
+Phase 2 の reusable workflow は `.github/workflows/desktop-e2e.yml` です。定期実行は行わず、
+実装時の検証は `main` ref の `.github/workflows/desktop-e2e-dispatch.yml` を
+`workflow_dispatch` で実行し、入力 `target_ref` に検証対象の branch/tag を指定します。
+release workflow は同じ reusable workflow を release 前 gate として呼び出します。
 
 EC2 runner の起動・停止は workflow の GitHub-hosted job が担当します。`prepare-runner` と
-`desktop-e2e` は保護された `desktop-e2e` environment を宣言するため、手動実行では environment
-承認後に job が開始されます。次の repository variables を事前に設定してください。
+`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言します。この environment
+は trusted ref として `main` branch と `v*` tag だけを許可します。手動実行は `main` ref の
+trusted dispatcher から開始するため、feature branch の workflow 定義を実行せずに、その branch
+のコードだけを `target_ref` として検証できます。次の environment variables を事前に設定
+してください。
 
 - `DESKTOP_E2E_AWS_ROLE_ARN`: GitHub OIDC を信頼する最小権限 IAM role の ARN
 - `DESKTOP_E2E_AWS_REGION`: EC2 のリージョン
@@ -83,8 +87,8 @@ EC2 runner の起動・停止は workflow の GitHub-hosted job が担当しま�
 `Administration: Read` だけを許可してください。workflowは実行ごとに短期の installation token を
 生成するため、installation token自体を保存しません。
 
-- `DESKTOP_E2E_GITHUB_APP_ID`: GitHub AppのApp ID（repository variable、秘密ではない）
-- `DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY`: GitHub Appの秘密鍵（repository secret）
+- `DESKTOP_E2E_GITHUB_APP_ID`: GitHub AppのApp ID（environment variable、秘密ではない）
+- `DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY`: GitHub Appの秘密鍵（`desktop-e2e` environment secret）
 
 秘密鍵はworkflowログへ出力しません。
 

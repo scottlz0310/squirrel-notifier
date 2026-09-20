@@ -23,6 +23,11 @@ on:
         required: false
         type: number
         default: 14
+      source_ref:
+        description: '検証対象コードの branch/tag。空なら呼び出し元の ref を使用する。'
+        required: false
+        type: string
+        default: ''
     secrets:
       DESKTOP_E2E_GATEWAY_URL:
         required: false
@@ -32,27 +37,6 @@ on:
         required: false
       DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY:
         required: false
-  workflow_dispatch:
-    inputs:
-      expected_version:
-        description: '検証対象の製品 version。空なら csproj の version を使用する。'
-        required: false
-        type: string
-        default: ''
-      scenario:
-        description: '実行する desktop scenario'
-        required: true
-        type: choice
-        options:
-          - DesktopSmoke
-          - DesktopFull
-        default: DesktopSmoke
-      artifact_retention_days:
-        description: 'E2E artifact の保持日数'
-        required: true
-        type: number
-        default: 14
-
 permissions:
   contents: read
   actions: read
@@ -66,8 +50,8 @@ jobs:
     name: Prepare EC2 desktop runner
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # 手動実行で未保護 ref の workflow 定義が秘密鍵へ到達しないよう、
-    # runner 準備 job 自体を保護された environment の承認対象にする。
+    # environment の trusted branch/tag policy (main / v*) と trusted dispatcher により、
+    # 未保護 ref の workflow 定義が秘密鍵へ到達しないようにする。
     environment: desktop-e2e
     permissions:
       contents: read
@@ -229,6 +213,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Setup .NET
         if: inputs.release_artifact_name == ''
@@ -325,6 +310,7 @@ jobs:
     needs: [prepare-runner, desktop-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: desktop-e2e
     permissions:
       contents: read
       actions: read

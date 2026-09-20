@@ -1,0 +1,63 @@
+name: Desktop E2E Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: '検証対象コードの branch/tag。workflow 定義は main から実行する。'
+        required: true
+        type: string
+        default: main
+      expected_version:
+        description: '検証対象の製品 version。空なら csproj の version を使用する。'
+        required: false
+        type: string
+        default: ''
+      scenario:
+        description: '実行する desktop scenario'
+        required: true
+        type: choice
+        options:
+          - DesktopSmoke
+          - DesktopFull
+        default: DesktopSmoke
+      artifact_retention_days:
+        description: 'E2E artifact の保持日数'
+        required: true
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  reject-untrusted-workflow-ref:
+    name: Require trusted dispatcher ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject non-main workflow ref
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo 'desktop E2E の手動実行は main ref の dispatcher から開始してください。' >&2
+            echo '検証対象の branch/tag は target_ref で指定します。' >&2
+            exit 1
+          fi
+          echo 'trusted dispatcher ref: main'
+
+  desktop-e2e:
+    name: Desktop E2E (${{ inputs.scenario }})
+    if: needs.reject-untrusted-workflow-ref.result == 'success'
+    needs: reject-untrusted-workflow-ref
+    uses: scottlz0310/squirrel-notifier/.github/workflows/desktop-e2e.yml@main
+    with:
+      source_ref: ${{ inputs.target_ref }}
+      expected_version: ${{ inputs.expected_version }}
+      scenario: ${{ inputs.scenario }}
+      artifact_retention_days: ${{ inputs.artifact_retention_days }}
+    secrets: inherit
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
