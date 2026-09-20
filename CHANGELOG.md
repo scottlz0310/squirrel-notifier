@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- desktop E2E の runner online 待機で `offline` 分岐が実際の状態文字列 `offline:false` にマッチせず「状態を確認できません」に落ちていたのを修正し、runner が一覧に見つからない場合は token から見える runner 一覧を診断出力するようにした（#376）
+
 ## [0.13.1] - 2026-09-21
 
 v0.13.0 のリリースが desktop E2E gate で失敗したため、CI・テスト基盤の安定化のみを含む修正リリースです。製品機能の変更はありません。

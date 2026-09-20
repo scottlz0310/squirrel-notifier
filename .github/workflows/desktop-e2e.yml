@@ -177,11 +177,14 @@ jobs:
               online:true)
                 echo "runner は online ですが busy です。再試行します (${attempt}/60)。"
                 ;;
-              offline)
+              offline:*)
                 echo "runner はまだ offline です。再試行します (${attempt}/60)。"
                 ;;
               '')
                 echo "runner が見つかりません。再試行します (${attempt}/60)。"
+                if (( attempt == 1 || attempt % 10 == 0 )); then
+                  jq -r '"  この token から見える runner: total=\(.total_count) names=[\([.runners[]?.name] | join(", "))]"' <<< "$runners"
+                fi
                 ;;
               *)
                 echo "runner の状態を確認できません: $runner_state" >&2
