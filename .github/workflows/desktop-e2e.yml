@@ -54,7 +54,6 @@ on:
 permissions:
   contents: read
   actions: read
-  id-token: write
 
 concurrency:
   group: desktop-e2e-ec2
@@ -65,6 +64,10 @@ jobs:
     name: Prepare EC2 desktop runner
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
     outputs:
       instance_id: ${{ steps.lifecycle.outputs.instance_id }}
       started_by_workflow: ${{ steps.lifecycle.outputs.started_by_workflow }}
@@ -200,6 +203,9 @@ jobs:
     runs-on: [self-hosted, windows, squirrel-notifier-desktop]
     environment: desktop-e2e
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - name: Checkout code
@@ -302,6 +308,10 @@ jobs:
     needs: [prepare-runner, desktop-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
 
     steps:
       - name: Keep instance state owned by another process
