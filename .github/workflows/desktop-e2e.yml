@@ -30,6 +30,8 @@ on:
         required: false
       DESKTOP_E2E_COMPONENT_MANIFEST_JSON:
         required: false
+      DESKTOP_E2E_GITHUB_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       expected_version:
@@ -80,6 +82,7 @@ jobs:
           AWS_ROLE_TO_ASSUME: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
           RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
+          GITHUB_API_TOKEN: ${{ secrets.DESKTOP_E2E_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           missing=()
@@ -87,6 +90,7 @@ jobs:
           [[ -n "$AWS_ROLE_TO_ASSUME" ]] || missing+=(DESKTOP_E2E_AWS_ROLE_ARN)
           [[ -n "$INSTANCE_ID" ]] || missing+=(DESKTOP_E2E_AWS_INSTANCE_ID)
           [[ -n "$RUNNER_NAME" ]] || missing+=(DESKTOP_E2E_RUNNER_NAME)
+          [[ -n "$GITHUB_API_TOKEN" ]] || missing+=(DESKTOP_E2E_GITHUB_TOKEN)
 
           if (( ${#missing[@]} > 0 )); then
             printf '必要な repository/environment variable がありません: %s\n' "${missing[*]}" >&2
@@ -113,7 +117,7 @@ jobs:
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
           RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
           RUNNER_LABEL: squirrel-notifier-desktop
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.DESKTOP_E2E_GITHUB_TOKEN }}
           API_URL: ${{ github.api_url }}
           REPOSITORY: ${{ github.repository }}
         run: |

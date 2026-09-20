@@ -179,6 +179,9 @@ release workflow から同じ reusable workflow を release gate として呼び
 - runner image の初期化、snapshot 復元、runner 登録、Windows service 化は AWS 側の runbook に従う。
   本リポジトリの workflow は VM の作成・削除は行わず、GitHub OIDC の短期 credential で既存 instance
   の Describe / Start / Stop だけを行う。runner online 待機に失敗した場合は desktop E2E を開始しない。
+  online 状態の確認には GitHub Actions repository secret の `DESKTOP_E2E_GITHUB_TOKEN` を使用する。
+  token は対象リポジトリの self-hosted runner 一覧を読むための `Administration: Read` だけを持たせ、
+  AWS credential と同様にログへ出力しない。
 
 ## テスト資産の配置契約
 
