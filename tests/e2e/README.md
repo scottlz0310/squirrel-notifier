@@ -79,12 +79,14 @@ environment-level variables に置いても参照されません。
 - `DESKTOP_E2E_AWS_INSTANCE_ID`: 対象 EC2 instance ID
 - `DESKTOP_E2E_RUNNER_NAME`: self-hosted runner の登録名
 
-次の GitHub Actions repository secret も設定してください。これは `actions/runners` API で
-runner の online 状態と label を確認するためだけに使用します。fine-grained PAT または
-GitHub App installation token を対象リポジトリ限定で発行し、Repository `Administration: Read`
-だけを許可してください。AWS variables と異なり、token は必ず secret に保存し、ログへ出力しません。
+次の GitHub App の設定も必要です。Appは `squirrel-notifier` だけへインストールし、Repository
+`Administration: Read` だけを許可してください。workflowは実行ごとに短期の installation token を
+生成するため、installation token自体を保存しません。
 
-- `DESKTOP_E2E_GITHUB_TOKEN`: self-hosted runner API 読み取り用の GitHub token
+- `DESKTOP_E2E_GITHUB_APP_ID`: GitHub AppのApp ID（repository variable、秘密ではない）
+- `DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY`: GitHub Appの秘密鍵（repository secret）
+
+秘密鍵はworkflowログへ出力しません。
 
 IAM role には対象 instance に対する `DescribeInstances`、`DescribeInstanceStatus`、
 `StartInstances`、`StopInstances` だけを許可し、長期 AWS access key は使用しません。

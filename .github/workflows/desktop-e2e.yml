@@ -30,7 +30,7 @@ on:
         required: false
       DESKTOP_E2E_COMPONENT_MANIFEST_JSON:
         required: false
-      DESKTOP_E2E_GITHUB_TOKEN:
+      DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY:
         required: false
   workflow_dispatch:
     inputs:
@@ -82,7 +82,8 @@ jobs:
           AWS_ROLE_TO_ASSUME: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
           RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
-          GITHUB_API_TOKEN: ${{ secrets.DESKTOP_E2E_GITHUB_TOKEN }}
+          GITHUB_APP_ID: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           missing=()
@@ -90,10 +91,11 @@ jobs:
           [[ -n "$AWS_ROLE_TO_ASSUME" ]] || missing+=(DESKTOP_E2E_AWS_ROLE_ARN)
           [[ -n "$INSTANCE_ID" ]] || missing+=(DESKTOP_E2E_AWS_INSTANCE_ID)
           [[ -n "$RUNNER_NAME" ]] || missing+=(DESKTOP_E2E_RUNNER_NAME)
-          [[ -n "$GITHUB_API_TOKEN" ]] || missing+=(DESKTOP_E2E_GITHUB_TOKEN)
+          [[ -n "$GITHUB_APP_ID" ]] || missing+=(DESKTOP_E2E_GITHUB_APP_ID)
+          [[ -n "$GITHUB_APP_PRIVATE_KEY" ]] || missing+=(DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY)
 
           if (( ${#missing[@]} > 0 )); then
-            printf '必要な repository/environment variable がありません: %s\n' "${missing[*]}" >&2
+            printf '必要な repository variable/secret がありません: %s\n' "${missing[*]}" >&2
             exit 1
           fi
 
@@ -109,6 +111,14 @@ jobs:
           role-to-assume: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
           role-session-name: desktop-e2e-${{ github.run_id }}
 
+      - name: Create GitHub App token
+        id: github-app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
+          private-key: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
+          permission-administration: read
+
       - name: Start instance and wait for runner
         id: lifecycle
         shell: bash
@@ -117,7 +127,7 @@ jobs:
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
           RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
           RUNNER_LABEL: squirrel-notifier-desktop
-          GH_TOKEN: ${{ secrets.DESKTOP_E2E_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
           API_URL: ${{ github.api_url }}
           REPOSITORY: ${{ github.repository }}
         run: |
