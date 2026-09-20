@@ -119,7 +119,7 @@ jobs:
     name: Desktop E2E (${{ inputs.scenario }})
     if: needs.build-target-package.result == 'success'
     needs: build-target-package
-    uses: scottlz0310/squirrel-notifier/.github/workflows/desktop-e2e.yml@main
+    uses: ./.github/workflows/desktop-e2e.yml
     with:
       release_artifact_name: desktop-e2e-target-${{ github.run_id }}
       expected_version: ${{ inputs.expected_version }}
