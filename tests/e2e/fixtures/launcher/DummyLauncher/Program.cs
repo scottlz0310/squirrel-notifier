@@ -14,6 +14,7 @@ internal static class Program
     private const string _outputFormatVariable = "SQUIRREL_NOTIFIER_E2E_DUMMY_OUTPUT_FORMAT";
     private const string _sessionIdVariable = "SQUIRREL_NOTIFIER_E2E_DUMMY_SESSION_ID";
     private const string _resumeExitCodeVariable = "SQUIRREL_NOTIFIER_E2E_DUMMY_RESUME_EXIT_CODE";
+    private const string _observationMutexName = "SquirrelNotifier.E2E.DummyLauncher.Observation";
 
     private static readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -58,9 +59,35 @@ internal static class Program
             ExitCode = exitCode,
         };
         Directory.CreateDirectory(Path.GetDirectoryName(observationPath)!);
-        File.AppendAllText(
-            observationPath,
-            JsonSerializer.Serialize(observation, _serializerOptions) + Environment.NewLine);
+        using var mutex = new Mutex(false, _observationMutexName);
+        bool acquired = false;
+        try
+        {
+            try
+            {
+                acquired = mutex.WaitOne(TimeSpan.FromSeconds(5));
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
+
+            if (!acquired)
+            {
+                throw new IOException("dummy launcher observation の mutex を取得できませんでした。");
+            }
+
+            File.AppendAllText(
+                observationPath,
+                JsonSerializer.Serialize(observation, _serializerOptions) + Environment.NewLine);
+        }
+        finally
+        {
+            if (acquired)
+            {
+                mutex.ReleaseMutex();
+            }
+        }
 
         if (string.Equals(outputFormat, "codex", StringComparison.OrdinalIgnoreCase))
         {
