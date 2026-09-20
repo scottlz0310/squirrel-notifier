@@ -30,7 +30,9 @@ public class McpSubscriptionServiceStartAsyncTests : IDisposable
     public McpSubscriptionServiceStartAsyncTests()
     {
         _settingsDirectory = Path.Combine(Path.GetTempPath(), $"McpStartAsyncTests_{Guid.NewGuid()}");
-        _settingsService = new SettingsService(_settingsDirectory);
+        _settingsService = new SettingsService(_settingsDirectory, pnpmBinDir: string.Empty);
+        // 実環境の .cmd shim を解決すると ArgumentList が使われないため、プロセスモックの判定を壊す。
+        _settingsService.Settings.SubscriberCommandPath = "squirrel-notifier-test-subscriber";
         _notificationService = new Mock<INotificationService>().Object;
         _loggingService = new LoggingService(_settingsDirectory);
     }

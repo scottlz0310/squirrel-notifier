@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - headless E2E の `review-event-flow` で launcher 引数の到着順依存をなくし、失敗時の launcher 観測 artifact を保存するようにした（#366）
 - DesktopFull の手動実行を `main` / `v*` tag に限定し、任意 target code と secret-bearing driver の同一 runner 実行を防止した（#368）
+- ローカルの subscriber `.cmd` shim によるテストモックの誤判定を防ぎ、pre-push coverage hook の testhost ハングを有限時間で診断・終了するようにした（#370）
 
 ## [0.13.0] - 2026-09-20
 
