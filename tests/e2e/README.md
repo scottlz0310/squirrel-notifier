@@ -103,9 +103,14 @@ workflow 開始前から instance が稼働していた場合は、別の運用�
 停止中の instance をこの workflow が起動した場合だけ、E2E の成功・失敗・キャンセル後に停止します。
 同一 instance の同時利用は `concurrency` で直列化します。
 
-現段階では runner の Windows サービス登録、依存ツールの導入、AMI / User Data の生成は AWS 側の
-一回限りのセットアップとして扱います。runner が `squirrel-notifier-desktop` label 付きで
-online にならない場合、E2E job を開始せずに失敗します。
+現段階では runner の自動ログオン設定とログオン時の runner 起動、依存ツールの導入、
+AMI / User Data の生成は AWS 側の一回限りのセットアップとして扱います。runner が
+`squirrel-notifier-desktop` label 付きで online にならない場合、E2E job を開始せずに失敗します。
+
+**runner を Windows サービスとして登録しないでください。** `Invoke-DesktopE2E.ps1` は
+対話ログオン済み desktop session を要求し、`[Environment]::UserInteractive` が false の場合や
+実行ユーザーが SYSTEM の場合は開始前に失敗します。service は session 0 で動くため、
+この条件を満たせません。
 
 手動実行では `DesktopSmoke` を選ぶと、専用の対話ログオン済み Windows runner 上で次を検証します。
 

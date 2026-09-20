@@ -178,7 +178,12 @@ workflow を release gate として呼び出す。定期実行は行わず、run
 - EBS volume size は固定値を先に決めない。`Measure-DesktopE2EStorage.ps1` を clean image、
   dependency 導入後、最小 scenario 実行後に実行し、測定済み使用量 + 4 GiB の候補のうち最小の
   fit 値を採用する。候補で fit しない場合は runner image を縮小してから再測定する。
-- runner image の初期化、snapshot 復元、runner 登録、Windows service 化は AWS 側の runbook に従う。
+- runner image の初期化、snapshot 復元、runner 登録、対話ログオン済みセッションでの runner 自動起動は
+  AWS 側の runbook に従う。**runner を Windows service として登録してはならない。** desktop E2E の
+  harness は `[Environment]::UserInteractive` と非 SYSTEM ユーザーを要求し、UI Automation と
+  screenshot が対話デスクトップを必要とするため、session 0 で動く service では実行できない
+  （`tests/e2e/scripts/Invoke-DesktopE2E.ps1`）。自動ログオン、ログオン時の runner 起動、
+  スリープ・モニタ電源断・画面ロックの無効化によって対話セッションを維持する。
   本リポジトリの workflow は VM の作成・削除は行わず、GitHub OIDC の短期 credential で既存 instance
   の Describe / Start / Stop だけを行う。runner online 待機に失敗した場合は desktop E2E を開始しない。
   `prepare-runner`、`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言し、
