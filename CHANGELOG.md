@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- headless E2E の `review-event-flow` で launcher 引数の到着順依存をなくし、失敗時の launcher 観測 artifact を保存するようにした（#366）
+
 ## [0.13.0] - 2026-09-20
 
 Windows の配布物・通知プロセス境界・実デスクトップ E2E と、release 前の AWS runner 運用を強化する機能リリースです。

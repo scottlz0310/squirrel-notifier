@@ -40,6 +40,7 @@ internal static class Program
         "sanitized.log",
         "command-lines.json",
         "subscriber-invocations.json",
+        "launcher-invocations.json",
         "settings-sanitized.json",
         "versions.json",
     ];
