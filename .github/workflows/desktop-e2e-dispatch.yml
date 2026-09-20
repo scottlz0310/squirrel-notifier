@@ -46,13 +46,52 @@ jobs:
           fi
           echo 'trusted dispatcher ref: main'
 
+  build-target-package:
+    name: Build target package without E2E secrets
+    needs: reject-untrusted-workflow-ref
+    if: needs.reject-untrusted-workflow-ref.result == 'success'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout target code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          ref: ${{ inputs.target_ref }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WiX 7
+        shell: pwsh
+        run: .\scripts\Ensure-Wix.ps1 -Version 7.0.0
+
+      - name: Build target release package
+        shell: pwsh
+        run: .\scripts\Build-ReleasePackage.ps1 -OutputDirectory .\release-output
+
+      - name: Upload target release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-e2e-target-${{ github.run_id }}
+          path: |
+            release-output/*.zip
+            release-output/*.msi
+            release-output/checksums-x64.txt
+            release-output/release-package.json
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact_retention_days }}
+
   desktop-e2e:
     name: Desktop E2E (${{ inputs.scenario }})
-    if: needs.reject-untrusted-workflow-ref.result == 'success'
-    needs: reject-untrusted-workflow-ref
+    if: needs.build-target-package.result == 'success'
+    needs: build-target-package
     uses: scottlz0310/squirrel-notifier/.github/workflows/desktop-e2e.yml@main
     with:
-      source_ref: ${{ inputs.target_ref }}
+      release_artifact_name: desktop-e2e-target-${{ github.run_id }}
       expected_version: ${{ inputs.expected_version }}
       scenario: ${{ inputs.scenario }}
       artifact_retention_days: ${{ inputs.artifact_retention_days }}

@@ -184,10 +184,13 @@ workflow を release gate として呼び出す。定期実行は行わず、run
   `prepare-runner`、`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言し、
   environment の trusted branch/tag policy を `main` と `v*` に限定する。手動実行は main ref
   の trusted dispatcher から reusable workflow を呼び出し、feature branch の workflow 定義
-  を実行せずに `target_ref` のコードだけを checkout する。未保護 ref から直接起動した場合は
-  dispatcher が拒否し、release tag は引き続き gate 対象になる。AWS 設定値は environment
-  variables、App の秘密鍵は `desktop-e2e` environment secret として管理する。online 状態の
-  確認には、対象リポジトリだけへインストールした GitHub App を使用する。Appには
+  を実行せずに `target_ref` の package だけを build する。package build は E2E secret 無しの
+  GitHub-hosted runner で行い、protected environment の desktop job には artifact だけを渡す。
+  desktop job は trusted ref の harness を使用し、target package の MSI custom action と製品
+  プロセスへ E2E 用の値を継承させない。未保護 ref から直接起動した場合は dispatcher が拒否し、
+  release tag は引き続き gate 対象になる。AWS 設定値は environment variables、App の秘密鍵は
+  `desktop-e2e` environment secret として管理する。online 状態の確認には、対象リポジトリだけへ
+  インストールした GitHub App を使用する。Appには
   self-hosted runner 一覧を読むための `Administration: Read` だけを持たせ、workflow実行ごとに
   短期の installation token を生成する。AWS credential と秘密鍵はログへ出力しない。
 

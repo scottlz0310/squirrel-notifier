@@ -73,6 +73,23 @@ $windowHandle = [IntPtr]::Zero
 $script:failureCategoryOverride = $null
 $script:componentManifestForArtifact = [ordered]@{}
 $artifactDirectoryReady = $false
+$script:trustedDriverEnvironmentNames = @(
+    'DESKTOP_E2E_GATEWAY_URL',
+    'DESKTOP_E2E_RESOURCE_URIS',
+    'DESKTOP_E2E_COMPONENT_MANIFEST_JSON',
+    'DESKTOP_E2E_COMPONENT_MANIFEST_PATH',
+    'DESKTOP_E2E_FULL_DRIVER'
+)
+$script:trustedDriverEnvironment = [ordered]@{}
+foreach ($name in $script:trustedDriverEnvironmentNames) {
+    $script:trustedDriverEnvironment[$name] = [Environment]::GetEnvironmentVariable($name)
+}
+
+function Remove-TargetProcessEnvironment {
+    foreach ($name in $script:trustedDriverEnvironmentNames) {
+        Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+    }
+}
 
 function Write-ScenarioLog {
     param(
@@ -694,11 +711,12 @@ function Test-ExternalStackReadiness {
 }
 
 function Invoke-FullScenarioDriver {
-    if ([string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_FULL_DRIVER)) {
+    $driverPath = [string]$script:trustedDriverEnvironment['DESKTOP_E2E_FULL_DRIVER']
+    if ([string]::IsNullOrWhiteSpace($driverPath)) {
         Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DesktopFull には DESKTOP_E2E_FULL_DRIVER が必要です。外部 stack の停止・復旧、device flow、queue、通知、sleep/resume を実行する driver を runner image に登録してください。'
     }
-    if (-not (Test-Path -LiteralPath $env:DESKTOP_E2E_FULL_DRIVER -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $driverPath -PathType Leaf)) {
         Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
         throw 'DESKTOP_E2E_FULL_DRIVER が見つかりません。'
     }
@@ -711,7 +729,7 @@ function Invoke-FullScenarioDriver {
 
     $driverArguments = @(
         '-NoProfile',
-        '-File', $env:DESKTOP_E2E_FULL_DRIVER,
+        '-File', $driverPath,
         '-MsiPath', $resolvedMsiPath,
         '-ArtifactDirectory', $scenarioArtifactDirectory,
         '-WindowHandle', [string]$windowHandle.ToInt64(),
@@ -725,6 +743,12 @@ function Invoke-FullScenarioDriver {
     $startInfo.CreateNoWindow = $true
     foreach ($argument in $driverArguments) {
         $startInfo.ArgumentList.Add([string]$argument)
+    }
+    foreach ($name in $script:trustedDriverEnvironmentNames) {
+        $value = $script:trustedDriverEnvironment[$name]
+        if ($null -ne $value) {
+            $startInfo.Environment[$name] = [string]$value
+        }
     }
 
     $driverProcess = [System.Diagnostics.Process]::new()
@@ -908,6 +932,10 @@ try {
         Test-ExternalStackReadiness
         $result.steps.externalStack = 'ready'
     }
+
+    # target package の MSI custom action と製品プロセスへ E2E 用の値を継承させない。
+    # 必要な値は trusted harness が保持し、runner image の trusted driver にだけ明示的に渡す。
+    Remove-TargetProcessEnvironment
 
     $msiHash = (Get-FileHash -LiteralPath $resolvedMsiPath -Algorithm SHA256).Hash
     $result.steps.msiSha256 = $msiHash

@@ -23,11 +23,6 @@ on:
         required: false
         type: number
         default: 14
-      source_ref:
-        description: '検証対象コードの branch/tag。空なら呼び出し元の ref を使用する。'
-        required: false
-        type: string
-        default: ''
     secrets:
       DESKTOP_E2E_GATEWAY_URL:
         required: false
@@ -209,11 +204,11 @@ jobs:
       actions: read
 
     steps:
-      - name: Checkout code
+      - name: Checkout trusted E2E harness
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
-          ref: ${{ inputs.source_ref || github.ref }}
+          path: trusted-source
 
       - name: Setup .NET
         if: inputs.release_artifact_name == ''
@@ -236,12 +231,12 @@ jobs:
       - name: Build release package on runner
         if: inputs.release_artifact_name == ''
         shell: pwsh
-        run: .\scripts\Build-ReleasePackage.ps1 -OutputDirectory .\release-output
+        run: .\trusted-source\scripts\Build-ReleasePackage.ps1 -OutputDirectory .\release-output
 
       - name: Measure runner storage
         shell: pwsh
         run: >-
-          .\tests\e2e\scripts\Measure-DesktopE2EStorage.ps1
+          .\trusted-source\tests\e2e\scripts\Measure-DesktopE2EStorage.ps1
           -OutputPath "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop\storage.json"
           -WorkspacePath "$env:GITHUB_WORKSPACE"
 
@@ -271,7 +266,7 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($env:DESKTOP_E2E_EXPECTED_VERSION)) {
             $arguments.ExpectedVersion = $env:DESKTOP_E2E_EXPECTED_VERSION
           }
-          & .\tests\e2e\scripts\Invoke-DesktopE2E.ps1 @arguments
+          & "$env:GITHUB_WORKSPACE\trusted-source\tests\e2e\scripts\Invoke-DesktopE2E.ps1" @arguments
 
       - name: Validate desktop E2E artifacts
         id: artifact-scan
@@ -283,12 +278,12 @@ jobs:
             throw 'desktop E2E artifact directory がありません。'
           }
           foreach ($directory in $directories) {
-            & .\tests\e2e\scripts\Test-E2EArtifacts.ps1 -ArtifactsDirectory $directory.FullName
+            & "$env:GITHUB_WORKSPACE\trusted-source\tests\e2e\scripts\Test-E2EArtifacts.ps1" -ArtifactsDirectory $directory.FullName
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
           }
-          & .\tests\e2e\scripts\Test-E2EArtifacts.ps1 `
+          & "$env:GITHUB_WORKSPACE\trusted-source\tests\e2e\scripts\Test-E2EArtifacts.ps1" `
             -ArtifactsDirectory "$env:GITHUB_WORKSPACE\artifacts\e2e\desktop" `
             -ScanOnly
           if ($LASTEXITCODE -ne 0) {
