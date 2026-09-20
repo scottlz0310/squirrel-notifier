@@ -122,6 +122,7 @@ internal static class ReviewEventFlowE2ERunner
         finally
         {
             WriteSubscriberArtifact(observationPath, artifactsDirectory);
+            WriteLauncherArtifact(runRoot, artifactsDirectory);
         }
     }
 
@@ -265,47 +266,25 @@ internal static class ReviewEventFlowE2ERunner
 
             await subscription.StopAsync().ConfigureAwait(false);
 
-            IReadOnlyList<LauncherObservation> launcherObservations = await WaitForLauncherObservationsAsync(
+            _ = await WaitForLauncherObservationsAsync(
                 runRoot,
                 launcherObservationStart + _expectedEventCount,
                 cancellationToken).ConfigureAwait(false);
             await processing.WaitForIdleAsync(cancellationToken).ConfigureAwait(false);
-            launcherObservations = launcherObservations
+            IReadOnlyList<LauncherObservation> launcherObservations = ReadLauncherObservations(runRoot)
                 .Skip(launcherObservationStart)
-                .Take(_expectedEventCount)
                 .ToArray();
             Check(
                 launcherObservations.Count == _expectedEventCount,
                 assertions,
                 $"{caseId}: 各通知イベントを一度ずつ dummy launcher へ渡す");
 
-            for (int index = 0; index < reviewEvents.Count; index++)
-            {
-                ReviewEvent reviewEvent = reviewEvents[index];
-                LauncherObservation observation = launcherObservations[index];
-                string[] expectedArguments =
-                [
-                    "--repository",
-                    reviewEvent.Repository,
-                    "--pull-request",
-                    reviewEvent.PrNumber.ToString(CultureInfo.InvariantCulture),
-                    "--reason",
-                    reviewEvent.Reason,
-                ];
-                Check(
-                    observation.Arguments.SequenceEqual(expectedArguments),
-                    assertions,
-                    $"{caseId}: owner/repo・PR 番号・reason を launcher 引数へ展開する ({reviewEvent.PrNumber})");
-                string expectedWorkingDirectory = Path.GetFullPath(
-                    Path.Combine(caseSettingsDirectory, "launcher-workspace", "reviewer"));
-                Check(
-                    string.Equals(
-                        Path.GetFullPath(observation.WorkingDirectory),
-                        expectedWorkingDirectory,
-                        StringComparison.OrdinalIgnoreCase),
-                    assertions,
-                    $"{caseId}: reviewer launcher の working directory を隔離する ({reviewEvent.PrNumber})");
-            }
+            AssertLauncherObservations(
+                reviewEvents,
+                launcherObservations,
+                caseSettingsDirectory,
+                caseId,
+                assertions);
         }
         finally
         {
@@ -683,6 +662,65 @@ internal static class ReviewEventFlowE2ERunner
             $"dummy launcher の観測が {expectedCount} 件に到達しませんでした。");
     }
 
+    private static void AssertLauncherObservations(
+        IReadOnlyList<ReviewEvent> reviewEvents,
+        IReadOnlyList<LauncherObservation> launcherObservations,
+        string caseSettingsDirectory,
+        string caseId,
+        List<string> assertions)
+    {
+        bool[] matched = new bool[launcherObservations.Count];
+        string expectedWorkingDirectory = Path.GetFullPath(
+            Path.Combine(caseSettingsDirectory, "launcher-workspace", "reviewer"));
+
+        foreach (ReviewEvent reviewEvent in reviewEvents)
+        {
+            string[] expectedArguments = BuildLauncherArguments(reviewEvent);
+            int matchingIndex = -1;
+            for (int index = 0; index < launcherObservations.Count; index++)
+            {
+                LauncherObservation observation = launcherObservations[index];
+                if (!matched[index]
+                    && observation.Arguments.SequenceEqual(expectedArguments)
+                    && string.Equals(
+                        Path.GetFullPath(observation.WorkingDirectory),
+                        expectedWorkingDirectory,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    matchingIndex = index;
+                    break;
+                }
+            }
+
+            Check(
+                matchingIndex >= 0,
+                assertions,
+                $"{caseId}: owner/repo・PR 番号・reason と working directory を launcher 観測から照合する ({reviewEvent.PrNumber})");
+            if (matchingIndex < 0)
+            {
+                continue;
+            }
+
+            matched[matchingIndex] = true;
+        }
+
+        Check(
+            matched.All(static value => value),
+            assertions,
+            $"{caseId}: launcher 観測に期待外の invocation を含めない");
+    }
+
+    private static string[] BuildLauncherArguments(ReviewEvent reviewEvent)
+        =>
+        [
+            "--repository",
+            reviewEvent.Repository,
+            "--pull-request",
+            reviewEvent.PrNumber.ToString(CultureInfo.InvariantCulture),
+            "--reason",
+            reviewEvent.Reason,
+        ];
+
     private static string? GetOptionValue(string[] arguments, string option)
     {
         for (int index = 0; index < arguments.Length - 1; index++)
@@ -1009,6 +1047,18 @@ internal static class ReviewEventFlowE2ERunner
             : [];
         File.WriteAllText(
             Path.Combine(artifactsDirectory, "subscriber-invocations.json"),
+            JsonSerializer.Serialize(observations, _jsonOptions));
+    }
+
+    private static void WriteLauncherArtifact(string runRoot, string artifactsDirectory)
+    {
+        Directory.CreateDirectory(artifactsDirectory);
+        string observationPath = Path.Combine(runRoot, "dummy-invocations.jsonl");
+        IReadOnlyList<LauncherObservation> observations = File.Exists(observationPath)
+            ? ReadLauncherObservations(runRoot)
+            : [];
+        File.WriteAllText(
+            Path.Combine(artifactsDirectory, "launcher-invocations.json"),
             JsonSerializer.Serialize(observations, _jsonOptions));
     }
 
