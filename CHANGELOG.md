@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-20
+
+Windows の配布物・通知プロセス境界・実デスクトップ E2E と、release 前の AWS runner 運用を強化する機能リリースです。
+
 ### Added
 
 - 専用 Windows runner で MSI の install / launch / UI Automation / screenshot / uninstall を検証する Desktop E2E workflow と、release 前 gate、手動検証、runner ストレージ計測を追加した（#224）
@@ -472,7 +476,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.10.0...v0.10.1
