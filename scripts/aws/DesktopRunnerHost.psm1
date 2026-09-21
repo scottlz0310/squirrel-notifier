@@ -180,6 +180,70 @@ function New-DesktopRunnerSessionPolicyPlan
     }
 }
 
+function Get-DesktopRunnerInstanceProfileDecision
+{
+    <#
+    .SYNOPSIS
+      instance に付いている instance profile から、次に取るべき操作を決める。
+    .DESCRIPTION
+      「何かが関連付けられている」ことを関連付け済みと扱うと、別の profile が付いた instance を
+      成功扱いにしてしまい、SSM role が無いまま Run Command が権限不足で失敗する。
+      ARN 末尾の profile 名を期待値と照合し、状態が associated になるまでは完了と判定しない。
+
+      CurrentArn には aws cli の `--output text` が値なしのときに返す 'None' が入り得る。
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$CurrentArn,
+
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$CurrentState,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ExpectedName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CurrentArn) -or $CurrentArn -eq 'None')
+    {
+        return [pscustomobject]@{
+            Action      = 'associate'
+            CurrentName = $null
+            Reason      = 'instance に instance profile が関連付けられていない。'
+        }
+    }
+
+    $currentName = ($CurrentArn -split '/')[-1]
+
+    if ($currentName -ne $ExpectedName)
+    {
+        return [pscustomobject]@{
+            Action      = 'conflict'
+            CurrentName = $currentName
+            Reason      = "instance には別の instance profile が関連付けられている: $CurrentArn"
+        }
+    }
+
+    if ($CurrentState -eq 'associated')
+    {
+        return [pscustomobject]@{
+            Action      = 'ok'
+            CurrentName = $currentName
+            Reason      = '期待する instance profile が associated で関連付けられている。'
+        }
+    }
+
+    return [pscustomobject]@{
+        Action      = 'wait'
+        CurrentName = $currentName
+        Reason      = "期待する instance profile だが状態が associated ではない: $CurrentState"
+    }
+}
+
 function New-DesktopRunnerBootstrapReport
 {
     <#
@@ -231,5 +295,6 @@ Export-ModuleMember -Function @(
     'New-DesktopRunnerWinlogonPlan'
     'New-DesktopRunnerLogonTaskXml'
     'New-DesktopRunnerSessionPolicyPlan'
+    'Get-DesktopRunnerInstanceProfileDecision'
     'New-DesktopRunnerBootstrapReport'
 )

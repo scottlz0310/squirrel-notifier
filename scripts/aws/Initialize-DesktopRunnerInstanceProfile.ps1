@@ -37,6 +37,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'DesktopRunnerHost.psm1') -Force
+
 $inlinePolicyName = 'DesktopE2EAutoLogonParameterRead'
 
 function Invoke-AwsCli
@@ -197,15 +199,44 @@ if ($existingProfile -ne $RoleName)
     }
 }
 
-$associated = Invoke-AwsCli -Arguments @(
-    'ec2', 'describe-iam-instance-profile-associations',
-    '--region', $Region,
-    '--filters', "Name=instance-id,Values=$InstanceId", 'Name=state,Values=associating,associated',
-    '--query', 'IamInstanceProfileAssociations[0].IamInstanceProfile.Arn',
-    '--output', 'text'
-)
+function Get-CurrentInstanceProfileAssociation
+{
+    <#
+    .SYNOPSIS
+      instance に現在関連付けられている instance profile の ARN と状態を返す。
+    #>
+    param(
+        [string]$TargetInstanceId,
+        [string]$RegionName
+    )
 
-if ([string]::IsNullOrWhiteSpace($associated) -or $associated -eq 'None')
+    $raw = Invoke-AwsCli -Arguments @(
+        'ec2', 'describe-iam-instance-profile-associations',
+        '--region', $RegionName,
+        '--filters', "Name=instance-id,Values=$TargetInstanceId", 'Name=state,Values=associating,associated',
+        '--query', 'IamInstanceProfileAssociations[0].[IamInstanceProfile.Arn,State]',
+        '--output', 'text'
+    )
+
+    $fields = @(($raw -split '\s+') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $arn = if ($fields.Count -ge 1) { $fields[0] } else { '' }
+    $state = if ($fields.Count -ge 2) { $fields[1] } else { '' }
+
+    return [pscustomobject]@{ Arn = $arn; State = $state }
+}
+
+$association = Get-CurrentInstanceProfileAssociation -TargetInstanceId $InstanceId -RegionName $Region
+$decision = Get-DesktopRunnerInstanceProfileDecision `
+    -CurrentArn $association.Arn `
+    -CurrentState $association.State `
+    -ExpectedName $InstanceProfileName
+
+if ($decision.Action -eq 'conflict')
+{
+    throw "$($decision.Reason) 期待する profile は $InstanceProfileName です。desktop E2E runner 以外の用途で使われている instance か確認し、必要なら手動で付け替えてから再実行してください。"
+}
+
+if ($decision.Action -eq 'associate')
 {
     if ($PSCmdlet.ShouldProcess($InstanceId, "instance profile $InstanceProfileName を関連付け"))
     {
@@ -238,9 +269,39 @@ if ([string]::IsNullOrWhiteSpace($associated) -or $associated -eq 'None')
         }
     }
 }
-else
+
+# associating のまま成功を返すと、SSM への登録前に bootstrap を投入して権限不足で失敗する。
+if ($PSCmdlet.ShouldProcess($InstanceId, "instance profile $InstanceProfileName が associated になるまで待機"))
 {
-    Write-Verbose "instance profile は関連付け済みです: $associated"
+    $maxWaitAttempts = 12
+    $associationState = ''
+    for ($attempt = 1; $attempt -le $maxWaitAttempts; $attempt++)
+    {
+        $association = Get-CurrentInstanceProfileAssociation -TargetInstanceId $InstanceId -RegionName $Region
+        $decision = Get-DesktopRunnerInstanceProfileDecision `
+            -CurrentArn $association.Arn `
+            -CurrentState $association.State `
+            -ExpectedName $InstanceProfileName
+
+        if ($decision.Action -eq 'conflict')
+        {
+            throw "$($decision.Reason) 期待する profile は $InstanceProfileName です。"
+        }
+
+        if ($decision.Action -eq 'ok')
+        {
+            $associationState = $association.State
+            break
+        }
+
+        Write-Verbose "instance profile の関連付けがまだ完了していません: $($decision.Reason)（$attempt/$maxWaitAttempts）"
+        Start-Sleep -Seconds 5
+    }
+
+    if ($associationState -ne 'associated')
+    {
+        throw "instance profile $InstanceProfileName が $InstanceId で associated になりませんでした。最後に観測した状態: '$($association.State)'"
+    }
 }
 
 [pscustomobject]@{
@@ -250,6 +311,8 @@ else
     instanceId            = $InstanceId
     roleName              = $RoleName
     instanceProfileName   = $InstanceProfileName
+    instanceProfileArn    = $association.Arn
+    associationState      = $association.State
     passwordParameterName = $PasswordParameterName
     passwordParameterArn  = $parameterArn
 } | ConvertTo-Json -Depth 4

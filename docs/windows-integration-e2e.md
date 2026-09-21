@@ -237,6 +237,7 @@ session で `run.cmd` を実行する必要がある。この設定を再現可�
 | スクリプト | 実行場所 | 役割 |
 |---|---|---|
 | `Initialize-DesktopRunnerInstanceProfile.ps1` | 開発機 | IAM role / instance profile を作成し instance へ関連付ける |
+| `Set-DesktopRunnerAutoLogonPassword.ps1` | 開発機 | 自動ログオン用パスワードを SecureString として登録する |
 | `Invoke-DesktopRunnerBootstrap.ps1` | 開発機 | bootstrap を SSM Run Command で投入する |
 | `Setup-DesktopRunnerHost.ps1` | instance 内 | 自動ログオン、ログオン時の runner 起動、セッション維持設定を適用する |
 | `DesktopRunnerHost.psm1` | instance 内 | 適用内容を組み立てる（Pester で契約を固定する） |
@@ -255,10 +256,20 @@ pwsh -File scripts\aws\Initialize-DesktopRunnerInstanceProfile.ps1 -InstanceId <
 #### 2. 自動ログオン用パスワードの登録
 
 パスワードは registry へ平文で書かず、SSM Parameter Store の SecureString に置く。
-**この操作はリポジトリのスクリプトからは行わない。**
 
 ```powershell
-aws ssm put-parameter --region us-east-1 --name /squirrel-notifier/desktop-e2e/autologon-password --type SecureString --value '<Administrator のパスワード>'
+pwsh -File scripts\aws\Set-DesktopRunnerAutoLogonPassword.ps1 -Region us-east-1
+```
+
+パスワードは対話入力で受け取り、値を引数として外部プロセスへ渡さない。**`aws ssm put-parameter
+--value <パスワード>` は使わない。** 値が aws.exe のコマンドライン引数に載るため、shell の履歴と
+実行中プロセスのコマンドラインの両方に平文が残り、SecureString として保存しても登録の時点で
+資格情報が露出する。
+
+初回は AWS Tools for PowerShell の導入が必要になる。
+
+```powershell
+Install-Module -Name AWS.Tools.SimpleSystemsManagement -Scope CurrentUser
 ```
 
 #### 3. bootstrap の投入

@@ -164,6 +164,41 @@ Describe 'New-DesktopRunnerBootstrapReport' {
     }
 }
 
+Describe 'Get-DesktopRunnerInstanceProfileDecision' {
+    # 「何かが関連付けられている」ことを関連付け済みと扱うと、別 profile が付いた instance を
+    # 成功扱いにし、SSM role が無いまま Run Command が権限不足で失敗する。
+    It '<Case> は <Expected> を返す' -ForEach @(
+        @{ Case = '未関連付け'; Arn = ''; State = ''; Expected = 'associate' }
+        @{ Case = 'aws cli の None'; Arn = 'None'; State = 'None'; Expected = 'associate' }
+        @{ Case = '期待する profile が associated'; Arn = 'arn:aws:iam::1:instance-profile/Expected'; State = 'associated'; Expected = 'ok' }
+        @{ Case = '期待する profile が associating'; Arn = 'arn:aws:iam::1:instance-profile/Expected'; State = 'associating'; Expected = 'wait' }
+        @{ Case = '別 profile が associated'; Arn = 'arn:aws:iam::1:instance-profile/Other'; State = 'associated'; Expected = 'conflict' }
+        @{ Case = '別 profile が associating'; Arn = 'arn:aws:iam::1:instance-profile/Other'; State = 'associating'; Expected = 'conflict' }
+    ) {
+        $decision = Get-DesktopRunnerInstanceProfileDecision -CurrentArn $Arn -CurrentState $State -ExpectedName 'Expected'
+        $decision.Action | Should -Be $Expected
+    }
+
+    It '衝突時に現在の profile 名と ARN を報告する' {
+        $decision = Get-DesktopRunnerInstanceProfileDecision `
+            -CurrentArn 'arn:aws:iam::1:instance-profile/Other' `
+            -CurrentState 'associated' `
+            -ExpectedName 'Expected'
+
+        $decision.CurrentName | Should -Be 'Other'
+        $decision.Reason | Should -BeLike '*arn:aws:iam::1:instance-profile/Other*'
+    }
+
+    It 'associated 以外を完了と判定しない' {
+        $decision = Get-DesktopRunnerInstanceProfileDecision `
+            -CurrentArn 'arn:aws:iam::1:instance-profile/Expected' `
+            -CurrentState 'associating' `
+            -ExpectedName 'Expected'
+
+        $decision.Action | Should -Not -Be 'ok'
+    }
+}
+
 Describe 'SSM Run Command 互換のエンコーディング' {
     # Windows PowerShell 5.1（AWS-RunPowerShellScript の既定 shell）は BOM の無い UTF-8 を
     # ANSI として読むため、日本語コメントがあると構文エラーになる。BOM の欠落を回帰させない。
@@ -172,6 +207,7 @@ Describe 'SSM Run Command 互換のエンコーディング' {
         @{ Name = 'Setup-DesktopRunnerHost.ps1' }
         @{ Name = 'Initialize-DesktopRunnerInstanceProfile.ps1' }
         @{ Name = 'Invoke-DesktopRunnerBootstrap.ps1' }
+        @{ Name = 'Set-DesktopRunnerAutoLogonPassword.ps1' }
     ) {
         $path = Join-Path $PSScriptRoot $Name
         $bytes = [System.IO.File]::ReadAllBytes($path)
