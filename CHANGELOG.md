@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- desktop E2E runner を EC2 起動だけで online にする bootstrap を `scripts/aws/` に追加した。SSM Run Command で自動ログオン・ログオン時の runner 起動・対話セッション維持を適用し、RDP でログオンして `run.cmd` を実行する手作業をなくす。自動ログオンのパスワードは registry へ平文で書かず、SSM Parameter Store から取得して LSA secret へ格納する（#392）
 - desktop E2E の失敗時に、製品ログ・Windows Event Log・プロセス状態・window 一覧・UI Automation ツリーを cleanup より前に artifact へ収集するようにした。製品由来のテキストは session ID と資格情報をサニタイズしてから出力する（#386）
 
 ### Fixed

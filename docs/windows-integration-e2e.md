@@ -204,12 +204,13 @@ workflow を release gate として呼び出す。定期実行は行わず、run
 - EBS volume size は固定値を先に決めない。`Measure-DesktopE2EStorage.ps1` を clean image、
   dependency 導入後、最小 scenario 実行後に実行し、測定済み使用量 + 4 GiB の候補のうち最小の
   fit 値を採用する。候補で fit しない場合は runner image を縮小してから再測定する。
-- runner image の初期化、snapshot 復元、runner 登録、対話ログオン済みセッションでの runner 自動起動は
-  AWS 側の runbook に従う。**runner を Windows service として登録してはならない。** desktop E2E の
+- runner image の初期化、snapshot 復元、runner 登録は AWS 側の runbook に従う。
+  **runner を Windows service として登録してはならない。** desktop E2E の
   harness は `[Environment]::UserInteractive` と非 SYSTEM ユーザーを要求し、UI Automation と
   screenshot が対話デスクトップを必要とするため、session 0 で動く service では実行できない
   （`tests/e2e/scripts/Invoke-DesktopE2E.ps1`）。自動ログオン、ログオン時の runner 起動、
-  スリープ・モニタ電源断・画面ロックの無効化によって対話セッションを維持する。
+  スリープ・モニタ電源断・画面ロックの無効化によって対話セッションを維持する。適用手順は
+  後述の「runner ホストの bootstrap」に従い、`scripts/aws/` のスクリプトで再現する。
   本リポジトリの workflow は VM の作成・削除は行わず、GitHub OIDC の短期 credential で既存 instance
   の Describe / Start / Stop だけを行う。runner online 待機に失敗した場合は desktop E2E を開始しない。
   `prepare-runner`、`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言し、
@@ -225,6 +226,74 @@ workflow を release gate として呼び出す。定期実行は行わず、run
   インストールした GitHub App を使用する。Appには
   self-hosted runner 一覧を読むための `Administration: Read` だけを持たせ、workflow実行ごとに
   短期の installation token を生成する。AWS credential と秘密鍵はログへ出力しない。
+
+### runner ホストの bootstrap
+
+EC2 を起動しただけでは runner は online にならない。service 化が使えないため、対話ログオンした
+session で `run.cmd` を実行する必要がある。この設定を再現可能な手順にしたものが `scripts/aws/` の
+スクリプトである（#392）。設定は instance に永続するため、実行するのは初回と runner を再構成した
+ときだけでよい。
+
+| スクリプト | 実行場所 | 役割 |
+|---|---|---|
+| `Initialize-DesktopRunnerInstanceProfile.ps1` | 開発機 | IAM role / instance profile を作成し instance へ関連付ける |
+| `Invoke-DesktopRunnerBootstrap.ps1` | 開発機 | bootstrap を SSM Run Command で投入する |
+| `Setup-DesktopRunnerHost.ps1` | instance 内 | 自動ログオン、ログオン時の runner 起動、セッション維持設定を適用する |
+| `DesktopRunnerHost.psm1` | instance 内 | 適用内容を組み立てる（Pester で契約を固定する） |
+
+#### 1. IAM リソースの作成
+
+instance profile が無い間は SSM Agent が登録されず、Run Command を使えない。
+
+```powershell
+pwsh -File scripts\aws\Initialize-DesktopRunnerInstanceProfile.ps1 -InstanceId <instance-id> -Region us-east-1
+```
+
+付与するのは `AmazonSSMManagedInstanceCore` と、自動ログオン用 parameter 1 件の読み取りだけとする。
+`kms:Decrypt` は `kms:ViaService` 条件で SSM 経由に限定する。
+
+#### 2. 自動ログオン用パスワードの登録
+
+パスワードは registry へ平文で書かず、SSM Parameter Store の SecureString に置く。
+**この操作はリポジトリのスクリプトからは行わない。**
+
+```powershell
+aws ssm put-parameter --region us-east-1 --name /squirrel-notifier/desktop-e2e/autologon-password --type SecureString --value '<Administrator のパスワード>'
+```
+
+#### 3. bootstrap の投入
+
+instance を起動し、SSM に登録されたことを確認してから実行する。
+
+```powershell
+aws ssm describe-instance-information --region us-east-1 --query "InstanceInformationList[?InstanceId=='<instance-id>'].PingStatus" --output text
+pwsh -File scripts\aws\Invoke-DesktopRunnerBootstrap.ps1 -InstanceId <instance-id> -Region us-east-1
+```
+
+bootstrap は次を適用する。
+
+- **自動ログオン**: `AutoAdminLogon` と `DefaultUserName` を registry へ書き、パスワードは
+  LSA secret（`DefaultPassword`）へ格納する。registry に残っていた平文の `DefaultPassword` と、
+  自動ログオン回数を消費する `AutoLogonCount` は削除する
+- **ログオン時の runner 起動**: `LogonType=InteractiveToken`、`RunLevel=HighestAvailable`、
+  `ExecutionTimeLimit=PT0S` のタスクを登録する。runner が service として登録済みの場合は停止する
+- **セッション維持**: 画面ロック、スクリーンセーバー、スリープ、モニタ電源断、ディスク停止、
+  休止を無効化する
+
+出力は適用したステップとパスワードの出所だけを含む JSON である。パスワードそのものは出力にも
+ログにも残さない。
+
+#### 4. 確認
+
+instance を再起動し、RDP を使わずに runner が online になることを確認する。
+
+```powershell
+aws ec2 reboot-instances --region us-east-1 --instance-ids <instance-id>
+gh api repos/scottlz0310/squirrel-notifier/actions/runners --jq '.runners[] | "\(.name) \(.status)"'
+```
+
+**RDP で接続したまま検証しない。** 切断済み session では描画が止まり screenshot と UI Automation が
+破綻し得るため、自動ログオンの console session だけで DesktopSmoke が完走することを確認する。
 
 ## テスト資産の配置契約
 
