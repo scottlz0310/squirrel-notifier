@@ -546,6 +546,15 @@ function Wait-UiElementByAutomationId {
     )
 
     while ([DateTimeOffset]::UtcNow -lt $scenarioDeadline) {
+        # 製品プロセスが終了していれば要素は二度と現れない。scenario timeout まで待ち切らず
+        # 即座に失敗させる。#385 では 8 秒でクラッシュしていたが 300 秒待っており、
+        # 失敗分類も実態（製品の異常終了）ではなく TIMEOUT になっていた。
+        if ($null -ne $applicationProcess -and $applicationProcess.HasExited) {
+            Set-FailureCategory -Category 'PRODUCT_UI_FAILED'
+            throw ("UI Automation 検証中にアプリケーションが終了しました。" +
+                "終了コード=$($applicationProcess.ExitCode), 待機していた要素=$AutomationId")
+        }
+
         $element = Get-UiElementByAutomationId -Root $Root -AutomationId $AutomationId
         if ($null -ne $element) {
             return $element
