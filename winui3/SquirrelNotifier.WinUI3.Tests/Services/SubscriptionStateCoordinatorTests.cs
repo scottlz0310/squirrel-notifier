@@ -31,6 +31,7 @@ public sealed class SubscriptionStateCoordinatorTests
         presentation.Notification.Should().BeNull();
         presentation.StateLogMessage.Should().Be($"[UI] Updating tray icon to normal state. State: {stateName}");
         presentation.NotificationLogMessage.Should().BeNull();
+        presentation.State.Should().Be(Enum.Parse<SubscriptionState>(stateName));
     }
 
     [Theory]
@@ -59,6 +60,7 @@ public sealed class SubscriptionStateCoordinatorTests
             "Squirrel Notifier",
             expectedNotificationMessage,
             NotificationIcon.Error));
+        presentation.State.Should().Be(SubscriptionState.Error);
     }
 
     [Fact]

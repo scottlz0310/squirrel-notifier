@@ -20,7 +20,8 @@ internal sealed record SubscriptionStatePresentation(
     bool IsAuthenticationRequired,
     TrayNotificationPresentation? Notification,
     string StateLogMessage,
-    string? NotificationLogMessage);
+    string? NotificationLogMessage,
+    SubscriptionState State);
 
 /// <summary>
 /// 購読状態からトレイとエラー表示の内容を決める。エラー通知の一回制御も UI から分離する。
@@ -55,7 +56,8 @@ internal sealed class SubscriptionStateCoordinator
                 false,
                 null,
                 $"[UI] Updating tray icon to normal state. State: {state}",
-                null);
+                null,
+                state);
         }
 
         bool shouldShowErrorBalloon = !_hasShownErrorBalloon;
@@ -84,6 +86,7 @@ internal sealed class SubscriptionStateCoordinator
             isAuthenticationRequired,
             notification,
             $"[UI] Updating tray icon to error state. Error: {lastError}",
-            notificationLogMessage);
+            notificationLogMessage,
+            state);
     }
 }
