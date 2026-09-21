@@ -11,9 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- desktop E2E の runner online 待機で `offline` 分岐が実際の状態文字列 `offline:false` にマッチせず「状態を確認できません」に落ちていたのを修正し、runner が一覧に見つからない場合は token から見える runner 一覧を診断出力するようにした（#376）
-- desktop E2E の runner 待機が使う環境変数名を `RUNNER_NAME` / `RUNNER_LABEL` から `TARGET_RUNNER_NAME` / `TARGET_RUNNER_LABEL` へ変更し、GitHub Actions の予約済み環境変数による上書きで runner 名の照合が常に失敗していたのを修正した（#376）
-- desktop E2E runner の runbook 記述を harness の要求へ揃え、runner を Windows service として登録せず対話ログオン済みセッションで自動起動する旨を明記した（#376）
+- Desktop E2E Dispatch が再利用ワークフローのジョブを生成できず run が失敗していたのを修正した。`workflow_dispatch` の入力を文字列として受け、`fromJSON` で数値化してから `type: number` の入力へ渡すようにし、あわせて保持日数の範囲を dispatcher 側で検証するようにした（#374）
 
 ## [0.13.1] - 2026-09-21
 
@@ -26,6 +24,9 @@ v0.13.0 のリリースが desktop E2E gate で失敗したため、CI・テス�
 - DesktopFull の手動実行を `main` / `v*` tag に限定し、任意 target code と secret-bearing driver の同一 runner 実行を防止した（#368）
 - ローカルの subscriber `.cmd` shim によるテストモックの誤判定を防ぎ、pre-push coverage hook の testhost ハングを有限時間で診断・終了するようにした（#370）
 - Desktop E2E の手動 dispatcher が呼び出す reusable workflow 参照を release gate と同じ相対参照に揃えた
+- desktop E2E の runner online 待機で `offline` 分岐が実際の状態文字列 `offline:false` にマッチせず「状態を確認できません」に落ちていたのを修正し、runner が一覧に見つからない場合は token から見える runner 一覧を診断出力するようにした（#376）
+- desktop E2E の runner 待機が使う環境変数名を `RUNNER_NAME` / `RUNNER_LABEL` から `TARGET_RUNNER_NAME` / `TARGET_RUNNER_LABEL` へ変更し、GitHub Actions の予約済み環境変数による上書きで runner 名の照合が常に失敗していたのを修正した（#376）
+- desktop E2E runner の runbook 記述を harness の要求へ揃え、runner を Windows service として登録せず対話ログオン済みセッションで自動起動する旨を明記した（#376）
 
 ### Changed
 

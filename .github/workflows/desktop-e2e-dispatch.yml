@@ -22,10 +22,10 @@ on:
           - DesktopFull
         default: DesktopSmoke
       artifact_retention_days:
-        description: 'E2E artifact の保持日数'
+        description: 'E2E artifact の保持日数（1〜90 の整数）'
         required: true
-        type: number
-        default: 14
+        type: string
+        default: '14'
 
 permissions:
   contents: read
@@ -53,8 +53,23 @@ jobs:
         env:
           SCENARIO: ${{ inputs.scenario }}
           TARGET_REF: ${{ inputs.target_ref }}
+          ARTIFACT_RETENTION_DAYS: ${{ inputs.artifact_retention_days }}
         shell: bash
         run: |
+          # 呼び出し先へ fromJSON で数値として渡すため、ここで JSON の正規の数値形式かつ
+          # 1〜90 であることを確定させる。不正値のままだとジョブ生成時に失敗し、
+          # ログの残らない診断困難な失敗になる。
+          #
+          # 範囲検証に bash の算術を使わないのは、算術が入力を別の値として解釈するため。
+          # 先頭 0 は 8 進数となり `014` が 12 として範囲内と誤判定され、`008` は
+          # `value too great for base` で異常終了し、20 桁級の値は 64bit で桁あふれする。
+          # いずれも fromJSON 側では JSON の数値として扱えず、避けたい失敗が再発する。
+          # 正規形だけを受理する正規表現に一本化し、fromJSON と検証の規則を揃える。
+          if [[ ! "$ARTIFACT_RETENTION_DAYS" =~ ^([1-9]|[1-8][0-9]|90)$ ]]; then
+            echo 'artifact_retention_days は 1〜90 の整数で指定してください（先頭 0 は不可）。' >&2
+            exit 1
+          fi
+
           validated_target_ref="$TARGET_REF"
 
           if [[ "$SCENARIO" == 'DesktopFull' ]]; then
@@ -124,7 +139,9 @@ jobs:
       release_artifact_name: desktop-e2e-target-${{ github.run_id }}
       expected_version: ${{ inputs.expected_version }}
       scenario: ${{ inputs.scenario }}
-      artifact_retention_days: ${{ inputs.artifact_retention_days }}
+      # 呼び出し先の入力は type: number。workflow_dispatch の入力は文字列として渡るため、
+      # そのまま渡すとジョブ生成時に型が一致せず、ログも check-run も残さずに run が失敗する。
+      artifact_retention_days: ${{ fromJSON(inputs.artifact_retention_days) }}
     secrets: inherit
     permissions:
       contents: read
