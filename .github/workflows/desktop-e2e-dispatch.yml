@@ -56,14 +56,17 @@ jobs:
           ARTIFACT_RETENTION_DAYS: ${{ inputs.artifact_retention_days }}
         shell: bash
         run: |
-          # 呼び出し先へ fromJSON で数値として渡すため、ここで整数であることを確定させる。
-          # 不正値のままだとジョブ生成時に失敗し、ログの残らない診断困難な失敗になる。
-          if [[ ! "$ARTIFACT_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
-            echo 'artifact_retention_days は整数で指定してください。' >&2
-            exit 1
-          fi
-          if (( ARTIFACT_RETENTION_DAYS < 1 || ARTIFACT_RETENTION_DAYS > 90 )); then
-            echo 'artifact_retention_days は 1〜90 の範囲で指定してください。' >&2
+          # 呼び出し先へ fromJSON で数値として渡すため、ここで JSON の正規の数値形式かつ
+          # 1〜90 であることを確定させる。不正値のままだとジョブ生成時に失敗し、
+          # ログの残らない診断困難な失敗になる。
+          #
+          # 範囲検証に bash の算術を使わないのは、算術が入力を別の値として解釈するため。
+          # 先頭 0 は 8 進数となり `014` が 12 として範囲内と誤判定され、`008` は
+          # `value too great for base` で異常終了し、20 桁級の値は 64bit で桁あふれする。
+          # いずれも fromJSON 側では JSON の数値として扱えず、避けたい失敗が再発する。
+          # 正規形だけを受理する正規表現に一本化し、fromJSON と検証の規則を揃える。
+          if [[ ! "$ARTIFACT_RETENTION_DAYS" =~ ^([1-9]|[1-8][0-9]|90)$ ]]; then
+            echo 'artifact_retention_days は 1〜90 の整数で指定してください（先頭 0 は不可）。' >&2
             exit 1
           fi
 
