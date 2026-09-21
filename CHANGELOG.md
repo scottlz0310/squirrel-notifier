@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - desktop E2E の runner online 待機で `offline` 分岐が実際の状態文字列 `offline:false` にマッチせず「状態を確認できません」に落ちていたのを修正し、runner が一覧に見つからない場合は token から見える runner 一覧を診断出力するようにした（#376）
 - desktop E2E の runner 待機が使う環境変数名を `RUNNER_NAME` / `RUNNER_LABEL` から `TARGET_RUNNER_NAME` / `TARGET_RUNNER_LABEL` へ変更し、GitHub Actions の予約済み環境変数による上書きで runner 名の照合が常に失敗していたのを修正した（#376）
+- desktop E2E runner の runbook 記述を harness の要求へ揃え、runner を Windows service として登録せず対話ログオン済みセッションで自動起動する旨を明記した（#376）
 
 ## [0.13.1] - 2026-09-21
 
