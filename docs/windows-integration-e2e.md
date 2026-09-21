@@ -150,6 +150,32 @@ VM は実行前後に snapshot から復元でき、対話ログオン済み des
 - スリープ・復帰後の再購読
 - スクリーンショット、動画、Windows Event Log、component log
 
+### 失敗時の証跡
+
+desktop E2E は失敗原因を artifact だけで判別できるよう、cleanup より前に次を収集する（#386）。
+cleanup は製品プロセスの停止、MSI uninstall、user settings の削除、runRoot の削除を行うため、
+この順序を崩すと証跡が残らない。
+
+| artifact | 内容 |
+|---|---|
+| `evidence.json` | 収集できたファイルと、収集時に発生したエラーの一覧 |
+| `ui-tree.json` | 対象 window 配下の AutomationId / ControlType 一覧（**成功時も収集する**） |
+| `process-state.json` | 製品プロセスの生死、exit code、exit 時刻 |
+| `windows.json` | 製品プロセスが持つトップレベル window の列挙 |
+| `product-logs/` | `%LocalAppData%\SquirrelNotifier` 配下の `*.log` |
+| `settings-sanitized.json` | 同ディレクトリの `settings.json` |
+| `event-log.json` | Application / System の該当時刻範囲（Application Error / .NET Runtime 等） |
+
+`ui-tree.json` を成功時も収集するのは、正常時の AutomationId 一覧が失敗時の比較対象になるため。
+ただし **Expander が折りたたまれている状態では配下の要素が UI Automation ツリーへ現れない**。
+`SettingsExpander` の子（`GatewayUrlBox` 等）が一覧に無いことは、要素の欠落を意味しない。
+
+製品由来のテキストは必ずサニタイズしてから artifact へ出す。`Test-E2EArtifacts.ps1` が
+artifact 内の `.json` / `.log` / `.txt` / `.md` に対して GUID（session ID）と secret pattern の
+非露出を検査するため、生のログをそのまま置くと検査に落ちる。
+
+証跡収集は best-effort とし、収集自体の失敗で scenario の結果を変えない。
+
 ### Runner 要件
 
 - runner は個人の日常利用環境と分離する。
