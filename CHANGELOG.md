@@ -514,7 +514,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.11.0...v0.12.0
