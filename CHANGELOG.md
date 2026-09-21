@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- desktop E2E の UI Automation 待機が、製品プロセスの終了を検知せず scenario timeout まで待ち切っていたのを修正した。終了を検知した時点で失敗させ、失敗分類を `TIMEOUT` から `PRODUCT_UI_FAILED` へ改めて終了コードを記録する（#385）
 - Desktop E2E Dispatch が再利用ワークフローのジョブを生成できず run が失敗していたのを修正した。`workflow_dispatch` の入力を文字列として受け、`fromJSON` で数値化してから `type: number` の入力へ渡すようにし、あわせて保持日数の範囲を dispatcher 側で検証するようにした（#374）
 
 ## [0.13.1] - 2026-09-21
