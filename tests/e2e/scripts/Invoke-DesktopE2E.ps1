@@ -60,6 +60,9 @@ $settingsDirectory = Join-Path $env:LOCALAPPDATA 'SquirrelNotifier'
 $taskName = 'Squirrel Notifier'
 $applicationProcessName = 'SquirrelNotifier.WinUI3'
 $applicationProcessId = $null
+# 終了済みプロセスは Get-Process -Id の一覧から消えるため、exit code / exit time を読むには
+# Start-Process -PassThru で得たオブジェクトを保持しておく必要がある。
+$applicationProcess = $null
 $script:fullDriverProcessId = $null
 $installStarted = $false
 $script:runnerWasDirty = $false
@@ -126,6 +129,31 @@ function Get-SafeMessage {
     return $message
 }
 
+function ConvertTo-SanitizedText {
+    <#
+        artifact へ出す前に session ID と資格情報を落とす。
+        Test-E2EArtifacts.ps1 は artifact 内の .json / .log / .txt / .md に対して
+        GUID と secret pattern の非露出を検査するため、製品由来のテキストは必ずここを通す。
+        置換文言は headless E2E (ContractE2ERunner.cs) と揃える。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Text
+    )
+
+    $sanitized = [regex]::Replace(
+        $Text,
+        '(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b',
+        '<redacted-session-id>')
+    $sanitized = [regex]::Replace($sanitized, '(?i)Bearer\s+[A-Za-z0-9._-]{12,}', 'Bearer <redacted>')
+    $sanitized = [regex]::Replace(
+        $sanitized,
+        '(?i)\b(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{12,}\b',
+        '<redacted>')
+    return $sanitized
+}
+
 function Set-FailureCategory {
     param(
         [Parameter(Mandatory)]
@@ -147,7 +175,18 @@ function New-FailureRecord {
         [string]$Message
     )
 
-    $artifactHints = @('result.json', 'versions.json', 'sanitized.log', 'cleanup.json')
+    $artifactHints = @(
+        'result.json',
+        'versions.json',
+        'sanitized.log',
+        'cleanup.json',
+        'evidence.json',
+        'ui-tree.json',
+        'process-state.json',
+        'windows.json',
+        'event-log.json',
+        'settings-sanitized.json',
+        'product-logs/')
     if ($Scenario -eq 'DesktopFull') {
         $artifactHints += 'full-driver-result.json'
     }
@@ -357,6 +396,22 @@ namespace DesktopE2E
 
         [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        // 失敗時の診断で、対象プロセスが持つ全トップレベル window を列挙するために使う。
+        // MainWindowHandle だけではダイアログ等の別 window を観測できない。
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetWindowTextW(IntPtr hWnd, System.Text.StringBuilder text, int count);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetClassNameW(IntPtr hWnd, System.Text.StringBuilder name, int count);
     }
 }
 '@
@@ -833,6 +888,292 @@ function Invoke-FullScenarioDriver {
     }
 }
 
+function Get-UiTreeSnapshot {
+    <#
+        対象 window 配下の AutomationId / Name / ControlType を列挙する。
+        「要素が見つからない」失敗のとき、要素が存在しないのか別名なのかを artifact だけで判別するために使う。
+        暴走を避けるため深さと件数に上限を設ける。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [IntPtr]$Handle,
+
+        [int]$MaxDepth = 8,
+
+        [int]$MaxElements = 800
+    )
+
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Handle)
+    if ($null -eq $root) {
+        return [ordered]@{ available = $false; reason = 'root-element-unavailable'; elements = @() }
+    }
+
+    $elements = [System.Collections.Generic.List[object]]::new()
+    $truncated = $false
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $stack = [System.Collections.Generic.Stack[object]]::new()
+    $stack.Push([pscustomobject]@{ Element = $root; Depth = 0 })
+
+    while ($stack.Count -gt 0) {
+        if ($elements.Count -ge $MaxElements) {
+            $truncated = $true
+            break
+        }
+
+        $entry = $stack.Pop()
+        $element = $entry.Element
+        try {
+            $current = $element.Current
+            $elements.Add([ordered]@{
+                depth = $entry.Depth
+                automationId = $current.AutomationId
+                name = ConvertTo-SanitizedText -Text ([string]$current.Name)
+                controlType = $current.ControlType.ProgrammaticName
+                className = $current.ClassName
+                isOffscreen = $current.IsOffscreen
+                isEnabled = $current.IsEnabled
+            })
+        }
+        catch {
+            $elements.Add([ordered]@{ depth = $entry.Depth; error = 'element-read-failed' })
+            continue
+        }
+
+        if ($entry.Depth -ge $MaxDepth) {
+            continue
+        }
+
+        try {
+            $child = $walker.GetFirstChild($element)
+            while ($null -ne $child) {
+                $stack.Push([pscustomobject]@{ Element = $child; Depth = $entry.Depth + 1 })
+                $child = $walker.GetNextSibling($child)
+            }
+        }
+        catch {
+            continue
+        }
+    }
+
+    return [ordered]@{
+        available = $true
+        truncated = $truncated
+        maxDepth = $MaxDepth
+        elementCount = $elements.Count
+        elements = $elements.ToArray()
+    }
+}
+
+function Get-ProcessWindowSnapshot {
+    <#
+        対象 process が持つトップレベル window を列挙する。
+        MainWindowHandle だけでは、モーダルダイアログや隠された window を観測できない。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [int]$ProcessId
+    )
+
+    Ensure-WindowStateType
+
+    $windows = [System.Collections.Generic.List[object]]::new()
+    $callback = [DesktopE2E.WindowState+EnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+
+        $owner = [uint32]0
+        [void][DesktopE2E.WindowState]::GetWindowThreadProcessId($hWnd, [ref]$owner)
+        if ($owner -ne $ProcessId) {
+            return $true
+        }
+
+        $title = New-Object System.Text.StringBuilder 512
+        [void][DesktopE2E.WindowState]::GetWindowTextW($hWnd, $title, $title.Capacity)
+        $class = New-Object System.Text.StringBuilder 256
+        [void][DesktopE2E.WindowState]::GetClassNameW($hWnd, $class, $class.Capacity)
+
+        $windows.Add([ordered]@{
+            handle = $hWnd.ToString()
+            title = ConvertTo-SanitizedText -Text $title.ToString()
+            className = $class.ToString()
+            isVisible = [DesktopE2E.WindowState]::IsWindowVisible($hWnd)
+            isMinimized = [DesktopE2E.WindowState]::IsIconic($hWnd)
+        })
+        return $true
+    }
+
+    [void][DesktopE2E.WindowState]::EnumWindows($callback, [IntPtr]::Zero)
+    return $windows.ToArray()
+}
+
+function Save-DiagnosticEvidence {
+    <#
+        失敗原因を artifact だけで判別できるようにするための証跡を収集する（#386）。
+        cleanup より前に呼ぶこと。cleanup は製品プロセスの停止、MSI uninstall、
+        user settings の削除、runRoot の削除を行うため、後から実行しても証跡が残らない。
+
+        収集自体の失敗で scenario の結果を変えない。個々の失敗は errors へ記録して続行する。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [bool]$IsFailure
+    )
+
+    if (-not $artifactDirectoryReady) {
+        return
+    }
+
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $collected = [System.Collections.Generic.List[string]]::new()
+
+    # UI ツリーは成功時も残す。正常時の AutomationId 一覧が、将来の失敗時の比較対象になる。
+    if ($null -ne $windowHandle -and $windowHandle -ne [IntPtr]::Zero) {
+        try {
+            $uiTree = Get-UiTreeSnapshot -Handle $windowHandle
+            Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'ui-tree.json') -Value $uiTree
+            $collected.Add('ui-tree.json')
+        }
+        catch {
+            $errors.Add('ui-tree の収集に失敗しました。')
+        }
+    }
+
+    if (-not $IsFailure) {
+        Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'evidence.json') -Value ([ordered]@{
+            schemaVersion = 1
+            isFailure = $false
+            collected = $collected.ToArray()
+            errors = $errors.ToArray()
+        })
+        return
+    }
+
+    # プロセスの生死は「クラッシュか自発終了か、そもそも生きているか」の一次判別になる。
+    if ($null -ne $applicationProcessId) {
+        try {
+            $state = [ordered]@{ processId = $applicationProcessId }
+            # Get-Process -Id は終了済みプロセスを返さないため、exit code / exit time が失われる。
+            # 起動時に保持したオブジェクトを Refresh して読む。
+            if ($null -eq $applicationProcess) {
+                $state.status = 'unknown'
+                $state.reason = 'process-object-unavailable'
+            }
+            else {
+                $applicationProcess.Refresh()
+                $state.status = if ($applicationProcess.HasExited) { 'exited' } else { 'running' }
+                if ($applicationProcess.HasExited) {
+                    $state.exitCode = $applicationProcess.ExitCode
+                    $state.exitTime = $applicationProcess.ExitTime.ToUniversalTime().ToString('O')
+                }
+                else {
+                    $state.responding = $applicationProcess.Responding
+                    $state.mainWindowHandle = $applicationProcess.MainWindowHandle.ToString()
+                }
+            }
+            Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'process-state.json') -Value $state
+            $collected.Add('process-state.json')
+        }
+        catch {
+            $errors.Add('process-state の収集に失敗しました。')
+        }
+
+        try {
+            $windows = Get-ProcessWindowSnapshot -ProcessId $applicationProcessId
+            Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'windows.json') -Value ([ordered]@{
+                schemaVersion = 1
+                processId = $applicationProcessId
+                windowCount = $windows.Count
+                windows = $windows
+            })
+            $collected.Add('windows.json')
+        }
+        catch {
+            $errors.Add('window 一覧の収集に失敗しました。')
+        }
+    }
+
+    # 製品ログと settings は user settings 削除より前に退避する。必ずサニタイズを通す。
+    #
+    # ただし settingsDirectory が E2E 開始前から存在していた場合は収集しない。
+    # その中身は利用者の設定であり、SubscriberArguments や launcher の custom argument に
+    # 置かれた credential・URL query token は Test-E2EArtifacts の既知パターン（GUID /
+    # gh*_ / Bearer 等）に該当せず、サニタイズを通り抜けて artifact へ出てしまう。
+    # Assert-CleanRunner は dirty runner を preflight で止めるが、その失敗経路もこの finally を
+    # 通るため、ここで明示的に除外する必要がある。
+    # E2E が作った設定だけを対象にすれば「初回起動時の既定値を見る」という目的は満たせる。
+    if ($settingsExistedBefore) {
+        $errors.Add('E2E 開始前から存在する user settings のため、製品ログと settings を収集しませんでした。')
+    }
+    try {
+        if (-not $settingsExistedBefore -and (Test-Path -LiteralPath $settingsDirectory -PathType Container)) {
+            $logDirectory = Join-Path $scenarioArtifactDirectory 'product-logs'
+            foreach ($logFile in @(Get-ChildItem -LiteralPath $settingsDirectory -Filter '*.log' -File -Recurse -ErrorAction SilentlyContinue)) {
+                if (-not (Test-Path -LiteralPath $logDirectory -PathType Container)) {
+                    New-Item -ItemType Directory -Path $logDirectory -Force -ErrorAction Stop | Out-Null
+                }
+                $content = Get-Content -LiteralPath $logFile.FullName -Raw -Encoding utf8 -ErrorAction Stop
+                $sanitized = ConvertTo-SanitizedText -Text $content
+                Set-Content -LiteralPath (Join-Path $logDirectory $logFile.Name) -Value $sanitized -Encoding utf8 -NoNewline
+                $collected.Add("product-logs/$($logFile.Name)")
+            }
+
+            $settingsPath = Join-Path $settingsDirectory 'settings.json'
+            if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+                $settingsContent = Get-Content -LiteralPath $settingsPath -Raw -Encoding utf8 -ErrorAction Stop
+                Set-Content `
+                    -LiteralPath (Join-Path $scenarioArtifactDirectory 'settings-sanitized.json') `
+                    -Value (ConvertTo-SanitizedText -Text $settingsContent) `
+                    -Encoding utf8 -NoNewline
+                $collected.Add('settings-sanitized.json')
+            }
+        }
+    }
+    catch {
+        $errors.Add('製品ログまたは settings の収集に失敗しました。')
+    }
+
+    # プロセスが落ちた場合の証跡は Event Log にしか残らないことがある。
+    try {
+        $since = $startedAt.AddMinutes(-1).UtcDateTime
+        $events = @(Get-WinEvent -FilterHashtable @{
+                LogName = @('Application', 'System')
+                StartTime = $since
+                Level = @(1, 2, 3)
+            } -MaxEvents 200 -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -match 'Application Error|Windows Error Reporting|\.NET Runtime|Application Hang' -or $_.Message -match 'SquirrelNotifier' } |
+            Select-Object -First 50 |
+            ForEach-Object {
+                [ordered]@{
+                    timeCreated = $_.TimeCreated.ToUniversalTime().ToString('O')
+                    logName = $_.LogName
+                    provider = $_.ProviderName
+                    id = $_.Id
+                    level = $_.LevelDisplayName
+                    message = ConvertTo-SanitizedText -Text ([string]$_.Message)
+                }
+            })
+        Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'event-log.json') -Value ([ordered]@{
+            schemaVersion = 1
+            since = $since.ToString('O')
+            eventCount = $events.Count
+            events = $events
+        })
+        $collected.Add('event-log.json')
+    }
+    catch {
+        $errors.Add('Windows Event Log の収集に失敗しました。')
+    }
+
+    Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'evidence.json') -Value ([ordered]@{
+        schemaVersion = 1
+        isFailure = $true
+        collected = $collected.ToArray()
+        errors = $errors.ToArray()
+    })
+}
+
 function Assert-CleanRunner {
     $dirtyReasons = [System.Collections.Generic.List[string]]::new()
     if (Test-Path -LiteralPath $installedDirectory -PathType Container) {
@@ -988,6 +1329,18 @@ catch {
     Write-ScenarioLog "Desktop E2E に失敗しました: $($failure.category)"
 }
 finally {
+    # cleanup より前に収集する。以降の処理で製品プロセス停止・MSI uninstall・
+    # user settings 削除・runRoot 削除が走り、証跡が残らなくなる（#386）。
+    # 収集失敗は cleanup / scenario の結果へ混ぜない。$cleanupErrors へ入れると
+    # cleanup.status が CLEANUP_FAILED になり、証跡が取れなかっただけで元の E2E 結果を
+    # 上書きしてしまう。best-effort の契約どおり、失敗は log にだけ残す。
+    try {
+        Save-DiagnosticEvidence -IsFailure ($result.status -ne 'passed')
+    }
+    catch {
+        Write-ScenarioLog '診断証跡の収集に失敗しました。scenario の結果には影響しません。'
+    }
+
     if ($null -ne $script:fullDriverProcessId) {
         try {
             $driverProcess = Get-Process -Id $script:fullDriverProcessId -ErrorAction SilentlyContinue

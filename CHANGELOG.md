@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- desktop E2E の失敗時に、製品ログ・Windows Event Log・プロセス状態・window 一覧・UI Automation ツリーを cleanup より前に artifact へ収集するようにした。製品由来のテキストは session ID と資格情報をサニタイズしてから出力する（#386）
+
 ### Fixed
 
 - Desktop E2E Dispatch が再利用ワークフローのジョブを生成できず run が失敗していたのを修正した。`workflow_dispatch` の入力を文字列として受け、`fromJSON` で数値化してから `type: number` の入力へ渡すようにし、あわせて保持日数の範囲を dispatcher 側で検証するようにした（#374）
