@@ -247,7 +247,7 @@ internal sealed partial class MainWindow : Window
         // Check auto-start registration status
         _ = RefreshAutoStartStatusAsync();
 
-        _trayIconService = new TrayIconService(TrayIcon);
+        _trayIconService = new TrayIconService(TrayIcon, _loggingService.WriteAsync);
         _reviewNotificationCoordinator = new ReviewNotificationCoordinator(
             ShowReviewPopup,
             ShowReviewBalloon,
@@ -330,6 +330,7 @@ internal sealed partial class MainWindow : Window
     {
         TrayIcon.Loaded -= OnTrayIconLoaded;
         AttachTrayPopup();
+        _trayIconService.MarkReady();
     }
 
     /// <summary>
@@ -415,20 +416,13 @@ internal sealed partial class MainWindow : Window
     private void ApplySubscriptionStatePresentation(SubscriptionStatePresentation presentation)
     {
         _ = _loggingService.WriteAsync(presentation.StateLogMessage);
-        if (presentation.NotificationLogMessage is not null)
-        {
-            _ = _loggingService.WriteAsync(presentation.NotificationLogMessage);
-        }
 
         _trayIconService.UpdateIcon(presentation.IconFileName);
         _trayIconService.UpdateTooltip(presentation.Tooltip);
-        if (presentation.Notification is not null)
-        {
-            _trayIconService.ShowNotification(
-                presentation.Notification.Title,
-                presentation.Notification.Message,
-                presentation.Notification.Icon);
-        }
+        _trayIconService.ApplyNotification(
+            presentation.State,
+            presentation.Notification,
+            presentation.NotificationLogMessage);
 
         if (presentation.StatusText is not null)
         {

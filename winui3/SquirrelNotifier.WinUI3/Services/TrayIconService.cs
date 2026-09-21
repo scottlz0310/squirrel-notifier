@@ -13,11 +13,21 @@ namespace SquirrelNotifier.WinUI3.Services;
 internal sealed class TrayIconService : IDisposable
 {
     private readonly TaskbarIcon _taskbarIcon;
+    private readonly TrayNotificationCoordinator _notificationCoordinator;
 
-    public TrayIconService(TaskbarIcon taskbarIcon)
+    public TrayIconService(TaskbarIcon taskbarIcon, Func<string, Task> writeLogAsync)
     {
         _taskbarIcon = taskbarIcon ?? throw new ArgumentNullException(nameof(taskbarIcon));
+        ArgumentNullException.ThrowIfNull(writeLogAsync);
         _taskbarIcon.PopupPlacement = PlacementMode.Bottom;
+        _notificationCoordinator = new TrayNotificationCoordinator(
+            notification => _taskbarIcon.ShowNotification(
+                notification.Title,
+                notification.Message,
+                notification.Icon,
+                sound: true,
+                respectQuietTime: true),
+            writeLogAsync);
     }
 
     public void UpdateIcon(string iconFileName)
@@ -29,6 +39,19 @@ internal sealed class TrayIconService : IDisposable
     public void UpdateTooltip(string tooltip)
     {
         _taskbarIcon.ToolTipText = tooltip;
+    }
+
+    public void ApplyNotification(
+        SubscriptionState state,
+        TrayNotificationPresentation? notification,
+        string? notificationLogMessage)
+    {
+        _notificationCoordinator.Apply(state, notification, notificationLogMessage);
+    }
+
+    public void MarkReady()
+    {
+        _notificationCoordinator.MarkReady();
     }
 
     public void ShowNotification(
