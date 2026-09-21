@@ -60,6 +60,9 @@ $settingsDirectory = Join-Path $env:LOCALAPPDATA 'SquirrelNotifier'
 $taskName = 'Squirrel Notifier'
 $applicationProcessName = 'SquirrelNotifier.WinUI3'
 $applicationProcessId = $null
+# 終了済みプロセスは Get-Process -Id の一覧から消えるため、exit code / exit time を読むには
+# Start-Process -PassThru で得たオブジェクトを保持しておく必要がある。
+$applicationProcess = $null
 $script:fullDriverProcessId = $null
 $installStarted = $false
 $script:runnerWasDirty = $false
@@ -1051,19 +1054,22 @@ function Save-DiagnosticEvidence {
     if ($null -ne $applicationProcessId) {
         try {
             $state = [ordered]@{ processId = $applicationProcessId }
-            $process = Get-Process -Id $applicationProcessId -ErrorAction SilentlyContinue
-            if ($null -eq $process) {
-                $state.status = 'not-found'
+            # Get-Process -Id は終了済みプロセスを返さないため、exit code / exit time が失われる。
+            # 起動時に保持したオブジェクトを Refresh して読む。
+            if ($null -eq $applicationProcess) {
+                $state.status = 'unknown'
+                $state.reason = 'process-object-unavailable'
             }
             else {
-                $state.status = if ($process.HasExited) { 'exited' } else { 'running' }
-                if ($process.HasExited) {
-                    $state.exitCode = $process.ExitCode
-                    $state.exitTime = $process.ExitTime.ToUniversalTime().ToString('O')
+                $applicationProcess.Refresh()
+                $state.status = if ($applicationProcess.HasExited) { 'exited' } else { 'running' }
+                if ($applicationProcess.HasExited) {
+                    $state.exitCode = $applicationProcess.ExitCode
+                    $state.exitTime = $applicationProcess.ExitTime.ToUniversalTime().ToString('O')
                 }
                 else {
-                    $state.responding = $process.Responding
-                    $state.mainWindowHandle = $process.MainWindowHandle.ToString()
+                    $state.responding = $applicationProcess.Responding
+                    $state.mainWindowHandle = $applicationProcess.MainWindowHandle.ToString()
                 }
             }
             Write-JsonFile -Path (Join-Path $scenarioArtifactDirectory 'process-state.json') -Value $state
@@ -1089,8 +1095,19 @@ function Save-DiagnosticEvidence {
     }
 
     # 製品ログと settings は user settings 削除より前に退避する。必ずサニタイズを通す。
+    #
+    # ただし settingsDirectory が E2E 開始前から存在していた場合は収集しない。
+    # その中身は利用者の設定であり、SubscriberArguments や launcher の custom argument に
+    # 置かれた credential・URL query token は Test-E2EArtifacts の既知パターン（GUID /
+    # gh*_ / Bearer 等）に該当せず、サニタイズを通り抜けて artifact へ出てしまう。
+    # Assert-CleanRunner は dirty runner を preflight で止めるが、その失敗経路もこの finally を
+    # 通るため、ここで明示的に除外する必要がある。
+    # E2E が作った設定だけを対象にすれば「初回起動時の既定値を見る」という目的は満たせる。
+    if ($settingsExistedBefore) {
+        $errors.Add('E2E 開始前から存在する user settings のため、製品ログと settings を収集しませんでした。')
+    }
     try {
-        if (Test-Path -LiteralPath $settingsDirectory -PathType Container) {
+        if (-not $settingsExistedBefore -and (Test-Path -LiteralPath $settingsDirectory -PathType Container)) {
             $logDirectory = Join-Path $scenarioArtifactDirectory 'product-logs'
             foreach ($logFile in @(Get-ChildItem -LiteralPath $settingsDirectory -Filter '*.log' -File -Recurse -ErrorAction SilentlyContinue)) {
                 if (-not (Test-Path -LiteralPath $logDirectory -PathType Container)) {
@@ -1314,11 +1331,14 @@ catch {
 finally {
     # cleanup より前に収集する。以降の処理で製品プロセス停止・MSI uninstall・
     # user settings 削除・runRoot 削除が走り、証跡が残らなくなる（#386）。
+    # 収集失敗は cleanup / scenario の結果へ混ぜない。$cleanupErrors へ入れると
+    # cleanup.status が CLEANUP_FAILED になり、証跡が取れなかっただけで元の E2E 結果を
+    # 上書きしてしまう。best-effort の契約どおり、失敗は log にだけ残す。
     try {
         Save-DiagnosticEvidence -IsFailure ($result.status -ne 'passed')
     }
     catch {
-        $cleanupErrors.Add('診断証跡の収集に失敗しました。')
+        Write-ScenarioLog '診断証跡の収集に失敗しました。scenario の結果には影響しません。'
     }
 
     if ($null -ne $script:fullDriverProcessId) {
