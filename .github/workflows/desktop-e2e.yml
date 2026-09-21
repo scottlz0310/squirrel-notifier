@@ -63,7 +63,7 @@ jobs:
           AWS_REGION: ${{ vars.DESKTOP_E2E_AWS_REGION }}
           AWS_ROLE_TO_ASSUME: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
-          RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
+          TARGET_RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
           GITHUB_APP_ID: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
         run: |
@@ -72,7 +72,7 @@ jobs:
           [[ -n "$AWS_REGION" ]] || missing+=(DESKTOP_E2E_AWS_REGION)
           [[ -n "$AWS_ROLE_TO_ASSUME" ]] || missing+=(DESKTOP_E2E_AWS_ROLE_ARN)
           [[ -n "$INSTANCE_ID" ]] || missing+=(DESKTOP_E2E_AWS_INSTANCE_ID)
-          [[ -n "$RUNNER_NAME" ]] || missing+=(DESKTOP_E2E_RUNNER_NAME)
+          [[ -n "$TARGET_RUNNER_NAME" ]] || missing+=(DESKTOP_E2E_RUNNER_NAME)
           [[ -n "$GITHUB_APP_ID" ]] || missing+=(DESKTOP_E2E_GITHUB_APP_ID)
           [[ -n "$GITHUB_APP_PRIVATE_KEY" ]] || missing+=(DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY)
 
@@ -107,8 +107,8 @@ jobs:
         env:
           AWS_REGION: ${{ vars.DESKTOP_E2E_AWS_REGION }}
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
-          RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
-          RUNNER_LABEL: squirrel-notifier-desktop
+          TARGET_RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
+          TARGET_RUNNER_LABEL: squirrel-notifier-desktop
           GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
           API_URL: ${{ github.api_url }}
           REPOSITORY: ${{ github.repository }}
@@ -154,24 +154,24 @@ jobs:
               }
 
             runner_state="$(jq -r \
-              --arg runner "$RUNNER_NAME" \
-              --arg label "$RUNNER_LABEL" \
+              --arg runner "$TARGET_RUNNER_NAME" \
+              --arg label "$TARGET_RUNNER_LABEL" \
               '.runners[]? | select(.name == $runner) | if ([.labels[]?.name] | index($label)) == null then "invalid-label" else "\(.status):\(.busy)" end' \
               <<< "$runners" | head -n 1)"
 
             case "$runner_state" in
               online:false)
-                echo "runner が online になりました: $RUNNER_NAME"
+                echo "runner が online になりました: $TARGET_RUNNER_NAME"
                 {
                   echo '### EC2 desktop runner'
                   echo "- instance: \`$INSTANCE_ID\`"
-                  echo "- runner: \`$RUNNER_NAME\`"
+                  echo "- runner: \`$TARGET_RUNNER_NAME\`"
                   echo '- runner status: online'
                 } >> "$GITHUB_STEP_SUMMARY"
                 exit 0
                 ;;
               invalid-label)
-                echo "runner に必要な label がありません: $RUNNER_LABEL" >&2
+                echo "runner に必要な label がありません: $TARGET_RUNNER_LABEL" >&2
                 exit 1
                 ;;
               online:true)
@@ -183,7 +183,7 @@ jobs:
               '')
                 echo "runner が見つかりません。再試行します (${attempt}/60)。"
                 if (( attempt == 1 || attempt % 10 == 0 )); then
-                  jq -r '"  この token から見える runner: total=\(.total_count) names=[\([.runners[]?.name] | join(", "))]"' <<< "$runners"
+                  jq -r --arg runner "$TARGET_RUNNER_NAME" '"  この token から見える runner: total=\(.total_count) names=[\([.runners[]?.name] | join(", "))] / 比較名=[\($runner)]"' <<< "$runners"
                 fi
                 ;;
               *)
@@ -193,7 +193,7 @@ jobs:
             sleep 10
           done
 
-          echo "runner が online になりませんでした: $RUNNER_NAME" >&2
+          echo "runner が online になりませんでした: $TARGET_RUNNER_NAME" >&2
           exit 1
 
   desktop-e2e:
