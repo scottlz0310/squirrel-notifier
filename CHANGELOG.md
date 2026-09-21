@@ -27,6 +27,10 @@ v0.13.0 のリリースが desktop E2E gate で失敗したため、CI・テス�
 - ローカルの subscriber `.cmd` shim によるテストモックの誤判定を防ぎ、pre-push coverage hook の testhost ハングを有限時間で診断・終了するようにした（#370）
 - Desktop E2E の手動 dispatcher が呼び出す reusable workflow 参照を release gate と同じ相対参照に揃えた
 
+### Changed
+
+- desktop E2E release gate を一時的に無効化した。`DesktopFull` の実行前提（`DESKTOP_E2E_GATEWAY_URL` 等の secret と mcp-docker / mcp-gateway / thread-owl / mcp-resource-subscriber の外部 component stack）が未整備で、gate は導入以来一度も成功していない。**このバージョンの配布物は実デスクトップでの install / launch / UI Automation / screenshot / uninstall 検証を経ていない。** gate の復帰は #381 で追跡する
+
 ## [0.13.0] - 2026-09-20
 
 Windows の配布物・通知プロセス境界・実デスクトップ E2E と、release 前の AWS runner 運用を強化する機能リリースです。
