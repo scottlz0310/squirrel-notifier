@@ -213,6 +213,18 @@ jobs:
           fetch-depth: 1
           path: trusted-source
 
+      # self-hosted runner は使い回しで workspace が run をまたいで残る。前回の MSI が残ると
+      # 検証対象と別 version をインストールし、前回の scenario 証跡も artifact へ混ざる（#399）。
+      - name: Reset desktop E2E outputs
+        shell: pwsh
+        run: |
+          foreach ($path in @('release-output', 'artifacts\e2e\desktop')) {
+            $fullPath = Join-Path $env:GITHUB_WORKSPACE $path
+            if (Test-Path -LiteralPath $fullPath) {
+              Remove-Item -LiteralPath $fullPath -Recurse -Force
+            }
+          }
+
       - name: Setup .NET
         if: inputs.release_artifact_name == ''
         uses: actions/setup-dotnet@v6
@@ -254,12 +266,12 @@ jobs:
           DESKTOP_E2E_EXPECTED_VERSION: ${{ inputs.expected_version }}
           DESKTOP_E2E_SCENARIO: ${{ inputs.scenario }}
         run: |
-          $msi = Get-ChildItem -LiteralPath "$env:GITHUB_WORKSPACE\release-output" -Filter '*.msi' -File -Recurse |
-            Sort-Object FullName |
-            Select-Object -First 1
-          if ($null -eq $msi) {
-            throw 'release-output に MSI がありません。'
+          # 複数あるときに 1 つを選ぶと、検証対象と別の MSI を黙ってインストールしうる（#399）
+          $msiFiles = @(Get-ChildItem -LiteralPath "$env:GITHUB_WORKSPACE\release-output" -Filter '*.msi' -File -Recurse)
+          if ($msiFiles.Count -ne 1) {
+            throw "release-output の MSI はちょうど 1 個である必要があります: $($msiFiles.Count) 個 ($($msiFiles.Name -join ', '))"
           }
+          $msi = $msiFiles[0]
 
           $arguments = @{
             MsiPath = $msi.FullName
