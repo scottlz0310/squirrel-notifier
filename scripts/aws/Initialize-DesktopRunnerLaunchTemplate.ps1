@@ -55,18 +55,19 @@ function Invoke-AwsCli
     .SYNOPSIS
       aws CLI を呼び出し、失敗を例外へ変換する。
     .DESCRIPTION
-      -AllowFailure は「存在しない」を戻り値で判定したい場合だけに使う。
-      それ以外の失敗を握り潰すと、権限不足を設定済みと誤認する。
+      -AbsentErrorCode は「存在しない」を戻り値で判定したい場合だけに使い、その AWS エラーコードの
+      失敗に限って $null を返す。権限不足や通信エラーまで未作成とみなすと、既存のリソースを見落として
+      作成へ進む。
     #>
     param(
         [string[]]$Arguments,
-        [switch]$AllowFailure
+        [string]$AbsentErrorCode
     )
 
     $output = & aws @Arguments 2>&1
     if ($LASTEXITCODE -ne 0)
     {
-        if ($AllowFailure)
+        if ($AbsentErrorCode -and ($output | Out-String).Contains("($AbsentErrorCode)"))
         {
             return $null
         }
@@ -141,6 +142,15 @@ $vpcId = Invoke-AwsCli -Arguments @(
     '--output', 'text'
 )
 
+# 読み取りはすべて Security Group の作成より前に済ませ、判定に失敗したときは何も書き込まない。
+$launchTemplateId = Invoke-AwsCli -Arguments @(
+    'ec2', 'describe-launch-templates',
+    '--region', $Region,
+    '--launch-template-names', $LaunchTemplateName,
+    '--query', 'LaunchTemplates[0].LaunchTemplateId',
+    '--output', 'text'
+) -AbsentErrorCode 'InvalidLaunchTemplateName.NotFoundException'
+
 $securityGroups = Invoke-AwsCli -Arguments @(
     'ec2', 'describe-security-groups',
     '--region', $Region,
@@ -182,14 +192,6 @@ $desiredData = New-DesktopRunnerLaunchTemplateData `
     -SubnetId $SubnetId `
     -SecurityGroupId $securityGroupId
 $versionDescription = "image $ImageId"
-
-$launchTemplateId = Invoke-AwsCli -Arguments @(
-    'ec2', 'describe-launch-templates',
-    '--region', $Region,
-    '--launch-template-names', $LaunchTemplateName,
-    '--query', 'LaunchTemplates[0].LaunchTemplateId',
-    '--output', 'text'
-) -AllowFailure
 
 if ($null -eq $launchTemplateId)
 {

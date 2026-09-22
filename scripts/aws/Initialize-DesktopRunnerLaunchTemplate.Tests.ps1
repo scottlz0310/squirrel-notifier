@@ -2,6 +2,7 @@
 # 書き込みの条件を固定する（#380）。
 # - タグの無い AMI、自アカウント所有でない AMI では何も書き込まずに止まる
 # - 既存の Security Group に inbound があれば Launch Template を変更せずに止まる
+# - Launch Template の存在確認は NotFound のときだけ未作成とみなし、他の失敗では何も書き込まずに止まる
 # - default version が期待値と一致していれば新しい version を作らない。異なれば作って default にする
 # aws CLI は、呼び出しを記録して状態に応じた応答を返す関数で置き換える。
 
@@ -34,13 +35,19 @@ BeforeAll {
             'ec2 create-security-group' { return 'sg-0123456789abcdef0' }
             'ec2 describe-launch-templates'
             {
+                if ($fake.LaunchTemplateDescribeError)
+                {
+                    $global:LASTEXITCODE = 254
+                    return "An error occurred ($($fake.LaunchTemplateDescribeError)) when calling the DescribeLaunchTemplates operation"
+                }
+
                 if ($fake.LaunchTemplateData)
                 {
                     return 'lt-0123456789abcdef0'
                 }
 
                 $global:LASTEXITCODE = 254
-                return 'InvalidLaunchTemplateName.NotFoundException'
+                return 'An error occurred (InvalidLaunchTemplateName.NotFoundException) when calling the DescribeLaunchTemplates operation: At least one of the launch templates specified in the request does not exist.'
             }
             'ec2 describe-launch-template-versions'
             {
@@ -64,8 +71,9 @@ BeforeAll {
             ImageOwned           = $true
             ImageTags            = @([ordered]@{ Key = $script:Tag.Key; Value = $script:Tag.ImageValue })
             SecurityGroupExists  = $true
-            SecurityGroupIngress = @()
-            LaunchTemplateData   = $null
+            SecurityGroupIngress        = @()
+            LaunchTemplateData          = $null
+            LaunchTemplateDescribeError = $null
         }
     }
 
@@ -111,6 +119,20 @@ Describe 'Initialize-DesktopRunnerLaunchTemplate.ps1' {
         $global:FakeAwsState.SecurityGroupIngress = @([ordered]@{ IpProtocol = 'tcp'; FromPort = 3389; ToPort = 3389 })
 
         { Invoke-InitializeScript } | Should -Throw '*inbound*'
+
+        @($global:FakeAwsCalls | Where-Object { $_ -in $script:WriteOperations }) | Should -BeNullOrEmpty
+    }
+
+    It 'Launch Template の存在確認が <ErrorCode> で失敗したら、未作成とみなさず何も書き込まずに止まる' -ForEach @(
+        @{ ErrorCode = 'UnauthorizedOperation' }
+        @{ ErrorCode = 'RequestExpired' }
+        @{ ErrorCode = 'InvalidLaunchTemplateName.MalformedException' }
+    ) {
+        # SG も未作成の状態にし、読み取りより先に SG を作っていないことも確かめる。
+        $global:FakeAwsState.SecurityGroupExists = $false
+        $global:FakeAwsState.LaunchTemplateDescribeError = $ErrorCode
+
+        { Invoke-InitializeScript } | Should -Throw "*$ErrorCode*"
 
         @($global:FakeAwsCalls | Where-Object { $_ -in $script:WriteOperations }) | Should -BeNullOrEmpty
     }
