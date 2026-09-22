@@ -149,15 +149,16 @@ internal static class LauncherAgentCatalog
 
         // 各 CLI の skill は Mcp-Docker から配布される。MCP サーバー接続設定と skill の
         // 配布・更新自体は squirrel-notifier の責務ではなく、ここでは起動プロンプトだけを渡す.
+        // codex の skill 呼び出し構文は / ではなく $ で始まる（#395）.
         new LauncherAgentDefinition(
             "codex",
             "codex",
             "codex",
-            "exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "exec --json \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
+            "exec --skip-git-repo-check --json \"$thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "exec --json \"$review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
             string.Empty,
-            "exec resume --skip-git-repo-check --json {sessionId} \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "exec resume --json {sessionId} \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
+            "exec resume --skip-git-repo-check --json {sessionId} \"$thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+            "exec resume --json {sessionId} \"$review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
             "codex",
             SessionIdSupply: SessionIdSupply.ParsedFromOutput,
             OutputFormat: LauncherOutputFormat.CodexJson),

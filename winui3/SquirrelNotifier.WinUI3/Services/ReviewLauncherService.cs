@@ -763,8 +763,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private string BuildProcessFailureMessage(LauncherLaunchPlan plan, int exitCode, string stderr)
     {
         string detail = ProcessOutputSummarizer.Summarize(stderr, _secretMasker);
-        string skillHint = plan.ArgumentsTemplate.Contains("/thread-owl-pr-reviewer", StringComparison.Ordinal)
-            || plan.ArgumentsTemplate.Contains("/review-raven-thread-owl-cycle", StringComparison.Ordinal)
+
+        // skill 呼び出しのプレフィックスは CLI ごとに異なる（codex は $、他は /。#395）ため、skill 名だけで判定する
+        string skillHint = plan.ArgumentsTemplate.Contains("thread-owl-pr-reviewer", StringComparison.Ordinal)
+            || plan.ArgumentsTemplate.Contains("review-raven-thread-owl-cycle", StringComparison.Ordinal)
             ? " skill が未配布、または CLI が skill 呼び出しに未対応の可能性があります。Mcp-Docker の skill 配布と CLI の対応状況を確認してください。"
             : string.Empty;
         string detailText = string.IsNullOrWhiteSpace(detail) ? string.Empty : $" stderr: {detail}";

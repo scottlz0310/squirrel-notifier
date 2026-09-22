@@ -13,11 +13,13 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 | プリセット ID | コマンド | 引数の方式 | rateLimitAgentId |
 |---|---|---|---|
 | `claude` | `claude` | `-p "/thread-owl-pr-reviewer ..." --verbose --output-format stream-json` のようなスキル呼び出し。stream-json は progress event の逐次取得用で、`-p` との併用時は CLI 仕様で `--verbose` が必須（[docs/progress-event-contract.md](progress-event-contract.md) 参照） | `claude-code` |
-| `codex` | `codex` | reviewer は `exec --skip-git-repo-check --json "/thread-owl-pr-reviewer ..."`、reviewed は `exec --json "/review-raven-thread-owl-cycle ..."` | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
+| `codex` | `codex` | reviewer は `exec --skip-git-repo-check --json "$thread-owl-pr-reviewer ..."`、reviewed は `exec --json "$review-raven-thread-owl-cycle ..."`。codex の skill 呼び出し構文は `$` で始まる | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
 | `agy` | `agy` | `--print-timeout 30m --output-format stream-json -p "/thread-owl-pr-reviewer ..."` または `"/review-raven-thread-owl-cycle ..."` | `agy` |
 | `copilot` | `copilot` | `-p "/thread-owl-pr-reviewer ..."` または `"/review-raven-thread-owl-cycle ..."` | `null`（レートリミット取得手段が無い） |
 
-全プリセットが正式 skill 名をプロンプトの先頭で呼び出す。skill 本体の配布・更新と MCP 接続設定は Mcp-Docker の責務であり、squirrel-notifier は起動テンプレートだけを管理する。skill が未配布、または CLI が slash skill に未対応の場合は、起動プロセスの stderr と失敗メッセージに原因を残す。
+全プリセットが正式 skill 名をプロンプトの先頭で呼び出す（codex は `$`、他は `/` プレフィックス）。skill 本体の配布・更新と MCP 接続設定は Mcp-Docker の責務であり、squirrel-notifier は起動テンプレートだけを管理する。skill が未配布、または CLI が skill 呼び出しに未対応の場合は、起動プロセスの stderr と失敗メッセージに原因を残す。
+
+「コマンドをコピー」の出力は、`$` / `` ` `` を含む引数だけを PowerShell の単一引用符形式（`'$thread-owl-pr-reviewer ...'`）で出力する。二重引用符のままだと PowerShell が `$thread` を変数展開して skill 名が壊れるため。この形式は cmd.exe への貼り付けには対応しない。
 
 ## Settings UI での挙動
 
@@ -29,6 +31,7 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 - #187 より前の `claude` 既定引数は text 出力のため progress event を実行中に取得できなかった。未変更の既定値だけを `ClaudeStreamJsonMigrated` で `--verbose --output-format stream-json` 付きへ移行する。自由編集された command / arguments は変更しない
 - #306 より前の `codex` / `agy` 既定引数は session ID を取得できない出力形式だった。未変更の既定値だけを `CodexJsonOutputMigrated` / `AgyStreamJsonMigrated` で `codex --json` / `agy --output-format stream-json` 付きへ移行する。自由編集された command / arguments は変更しない
 - #353 より前の `codex` / `agy` / `copilot` 既定引数は MCP ツールの使い方を全文へ埋め込んでいた。未変更の既定値だけを `LauncherSkillPromptMigrated` で正式 skill 呼び出しへ移行する。自由編集された command / arguments / resume arguments は変更しない
+- #395 より前の `codex` 既定引数は skill を `/` で呼んでいたため、codex が skill 呼び出しとして認識しなかった。未変更の既定値だけを `CodexSkillPromptPrefixMigrated` で `$` プレフィックスへ移行する。自由編集された command / arguments / resume arguments は変更しない
 
 ## セッション resume
 

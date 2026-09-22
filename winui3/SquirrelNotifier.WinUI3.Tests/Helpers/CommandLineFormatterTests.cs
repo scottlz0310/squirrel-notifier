@@ -40,11 +40,25 @@ public class CommandLineFormatterTests
                 "exec",
                 "--skip-git-repo-check",
                 "--json",
-                "/thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください",
+                "$thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください",
             });
 
         result.Should().Be(
-            "codex exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください\"");
+            "codex exec --skip-git-repo-check --json '$thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください'");
+    }
+
+    // PowerShell の二重引用符内では $ / ` が展開・エスケープとして解釈されるため、
+    // これらを含む引数は単一引用符で literal にする（#395）
+    [Theory]
+    [InlineData("$review-raven-thread-owl-cycle", "'$review-raven-thread-owl-cycle'")]
+    [InlineData("$skill owner/repo#1", "'$skill owner/repo#1'")]
+    [InlineData("a`b", "'a`b'")]
+    [InlineData("$skill it's \"quoted\"", "'$skill it''s \"quoted\"'")]
+    public void Format_ShouldUsePowerShellSingleQuotes_WhenArgumentContainsExpansionChars(string argument, string expected)
+    {
+        string result = CommandLineFormatter.Format("codex", new[] { "exec", argument });
+
+        result.Should().Be($"codex exec {expected}");
     }
 
     [Fact]

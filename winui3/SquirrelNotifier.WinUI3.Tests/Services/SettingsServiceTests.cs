@@ -9,6 +9,12 @@ namespace SquirrelNotifier.WinUI3.Tests.Services;
 
 public class SettingsServiceTests : IDisposable
 {
+    // #353〜#395 の codex 既定値（skill を / で呼んでいた）
+    private const string _legacyCodexSlashReviewerArguments = "exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+    private const string _legacyCodexSlashReviewedArguments = "exec --json \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+    private const string _legacyCodexSlashReviewerResumeArguments = "exec resume --skip-git-repo-check --json {sessionId} \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"";
+    private const string _legacyCodexSlashReviewedResumeArguments = "exec resume --json {sessionId} \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"";
+
     private readonly string _settingsDirectory;
     private readonly SettingsService _settingsService;
 
@@ -1033,6 +1039,101 @@ public class SettingsServiceTests : IDisposable
             service.Settings.ReviewerLauncherArguments.Should().Be(seed.ReviewerLauncherArguments);
             service.Settings.ReviewerLauncherResumeArguments.Should().Be(customResumeArguments);
             service.Settings.LauncherSkillPromptMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CodexSkillPromptPrefixMigration_ShouldRewriteLegacySlashDefaults(bool presetsMigrated)
+    {
+        LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierCodexSkillPrefixMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = "codex",
+            ReviewerLauncherArguments = _legacyCodexSlashReviewerArguments,
+            ReviewerLauncherResumeArguments = _legacyCodexSlashReviewerResumeArguments,
+            ReviewerLauncherPresetId = "codex",
+            ReviewedLauncherCommandPath = "codex",
+            ReviewedLauncherArguments = _legacyCodexSlashReviewedArguments,
+            ReviewedLauncherResumeArguments = _legacyCodexSlashReviewedResumeArguments,
+            ReviewedLauncherPresetId = "codex",
+            LauncherSlotsMigrated = true,
+            ReviewedLauncherSkillMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            CodexJsonOutputMigrated = true,
+            AgyStreamJsonMigrated = true,
+            LauncherSkillPromptMigrated = true,
+            LauncherResumeTemplatesMigrated = true,
+            LauncherPresetsMigrated = presetsMigrated,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherArguments.Should().Be(codex.ReviewerArgumentsTemplate);
+            service.Settings.ReviewerLauncherResumeArguments.Should().Be(codex.ReviewerResumeArgumentsTemplate);
+            service.Settings.ReviewedLauncherArguments.Should().Be(codex.ReviewedArgumentsTemplate);
+            service.Settings.ReviewedLauncherResumeArguments.Should().Be(codex.ReviewedResumeArgumentsTemplate);
+            service.Settings.ReviewerLauncherArguments.Should().Contain("\"$thread-owl-pr-reviewer ");
+            service.Settings.ReviewedLauncherArguments.Should().Contain("\"$review-raven-thread-owl-cycle ");
+            service.Settings.ReviewerLauncherPresetId.Should().Be("codex");
+            service.Settings.ReviewedLauncherPresetId.Should().Be("codex");
+            service.Settings.CodexSkillPromptPrefixMigrated.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("custom-command", _legacyCodexSlashReviewerArguments, _legacyCodexSlashReviewerResumeArguments)]
+    [InlineData("codex", "exec --json \"/thread-owl-pr-reviewer custom\"", _legacyCodexSlashReviewerResumeArguments)]
+    [InlineData("codex", _legacyCodexSlashReviewerArguments, "exec resume --custom {sessionId}")]
+    public void CodexSkillPromptPrefixMigration_ShouldPreserveCustomizedSettings(
+        string command,
+        string arguments,
+        string resumeArguments)
+    {
+        string settingsDir = Path.Combine(Path.GetTempPath(), $"SquirrelNotifierCodexSkillPrefixMigrationTest_{Guid.NewGuid()}");
+        Directory.CreateDirectory(settingsDir);
+        var seed = new AppSettings
+        {
+            ReviewerLauncherCommandPath = command,
+            ReviewerLauncherArguments = arguments,
+            ReviewerLauncherResumeArguments = resumeArguments,
+            LauncherSlotsMigrated = true,
+            ReviewedLauncherSkillMigrated = true,
+            AgyPrintTimeoutMigrated = true,
+            CodexReviewerWorkingDirectoryMigrated = true,
+            ClaudeStreamJsonMigrated = true,
+            CodexJsonOutputMigrated = true,
+            AgyStreamJsonMigrated = true,
+            LauncherSkillPromptMigrated = true,
+            LauncherResumeTemplatesMigrated = true,
+            LauncherPresetsMigrated = true,
+        };
+        File.WriteAllText(Path.Combine(settingsDir, "settings.json"), System.Text.Json.JsonSerializer.Serialize(seed));
+
+        try
+        {
+            var service = new SettingsService(settingsDir, pnpmBinDir: string.Empty);
+
+            service.Settings.ReviewerLauncherCommandPath.Should().Be(command);
+            service.Settings.ReviewerLauncherArguments.Should().Be(arguments);
+            service.Settings.ReviewerLauncherResumeArguments.Should().Be(resumeArguments);
+            service.Settings.CodexSkillPromptPrefixMigrated.Should().BeTrue();
         }
         finally
         {
