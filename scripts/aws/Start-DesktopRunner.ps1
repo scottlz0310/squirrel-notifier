@@ -155,9 +155,19 @@ try
         exit $exitCode
     }
 
+    # 永続 runner の資格情報が 1 つでも残ると、同じ登録の runner が複数 instance から接続して job を
+    # 取り合う。削除できない場合は JIT 起動へ進まず停止する。
     foreach ($path in $plan.CredentialFilesToRemove)
     {
-        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $path)
+        {
+            Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+        }
+    }
+    $remaining = @($plan.CredentialFilesToRemove | Where-Object { Test-Path -LiteralPath $_ })
+    if ($remaining.Count -gt 0)
+    {
+        throw "永続 runner の資格情報を削除できませんでした: $($remaining -join ', ')"
     }
     Write-LauncherLog '永続 runner の資格情報を削除しました。JIT config を待機します。'
 

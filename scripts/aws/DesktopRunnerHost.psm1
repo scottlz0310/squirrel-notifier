@@ -187,8 +187,11 @@ function New-DesktopRunnerLaunchPlan
         }
     }
 
+    # Join-Path は PowerShell provider でドライブを解決するため、Linux の Pester では C: が無く失敗する。
+    # 対象は常に Windows instance 上のパスなので、区切り文字を固定して連結する。
+    $runnerRoot = $RunnerDirectory.TrimEnd('\')
     $credentialFiles = @('.runner', '.credentials', '.credentials_rsaparams') |
-        ForEach-Object { Join-Path $RunnerDirectory $_ }
+        ForEach-Object { '{0}\{1}' -f $runnerRoot, $_ }
 
     return [pscustomobject]@{
         Mode                 = 'jit'

@@ -139,7 +139,14 @@ Describe 'New-DesktopRunnerLaunchPlan' {
         @{ Name = '.credentials_rsaparams' }
     ) {
         $plan = New-DesktopRunnerLaunchPlan -CurrentInstanceId 'i-0123456789abcdef0' @script:LaunchArguments
-        $plan.CredentialFilesToRemove | Should -Contain (Join-Path 'C:\Users\Administrator\actions-runner' $Name)
+        $plan.CredentialFilesToRemove | Should -Contain ('C:\Users\Administrator\actions-runner\' + $Name)
+    }
+
+    It '末尾に区切り文字がある runner ディレクトリでも区切り文字を重ねない' {
+        $arguments = @{} + $script:LaunchArguments
+        $arguments['RunnerDirectory'] = 'C:\Users\Administrator\actions-runner\'
+        $plan = New-DesktopRunnerLaunchPlan -CurrentInstanceId 'i-0123456789abcdef0' @arguments
+        $plan.CredentialFilesToRemove | Should -Contain 'C:\Users\Administrator\actions-runner\.runner'
     }
 
     It 'JIT config の parameter 名を instance ID から決める' {
