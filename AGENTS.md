@@ -63,6 +63,24 @@ dotnet build winui3\SquirrelNotifier.WinUI3.sln -c Release -p:Platform=x64
 ```
 登録解除は `.\scripts\uninstall.ps1` を使用します。
 
+### MCP サーバー設定（リポジトリスコープ）
+
+リポジトリ固有の MCP サーバーは `.mcp.json` に定義し、git 追跡対象とします。個人環境に閉じた設定（`~/.claude.json` や `.claude/settings.local.json`）へ書かないでください。前者は他の開発者やエージェントに共有されず、後者はグローバルの git ignore で除外されるためです。
+
+| サーバー | 用途 |
+|---|---|
+| `aws` | AWS MCP Server（`mcp-proxy-for-aws-cli` 経由）。desktop E2E runner の EC2 instance と SSM（Run Command / Parameter Store）を扱う。`scripts/aws/*.ps1` と同じ対象を、スクリプト化前の調査・復旧で直接操作するために使う |
+
+前提と運用:
+
+- 認証情報は `.mcp.json` に書きません。ローカルの AWS プロファイル（`default`）へ委ねます。session が切れていると proxy が `LoginRefreshRequired` で落ちるため、その場合は `aws login` で再認証してください。
+- リージョンは `--metadata AWS_REGION=us-east-1` で渡し、`scripts/aws/*.ps1` の既定値と揃えています。片方を変える場合は両方を合わせてください。
+- 変更操作（mutating operations）を許可しています。read-only に絞る場合は `--read-only` を付けるか IAM 側で制限します。EC2 instance の停止・削除、SSM Parameter の上書き、AMI の削除などは実行前にユーザーへ確認してください。
+- `awslabs.aws-api-mcp-server` は end of development のため採用しません（起動時に deprecation notice が出ます）。後継の AWS MCP Server はマネージドのリモートエンドポイントで、リクエストは `aws-mcp.<region>.api.aws` へ送られます。
+- 配布物は library 版の `mcp-proxy-for-aws` ではなく、依存が pin された CLI 版 `mcp-proxy-for-aws-cli` を使います（上流が MCP クライアント向けに案内しているのは CLI 版です）。
+- バージョンは `@latest` で解決します。Renovate は `.mcp.json` を認識しないため、ピン留めするとバージョンが更新されないまま残ります。
+- クライアント側（Claude Code 等）は `.mcp.json` のサーバーを初回に承認する必要があります。承認状態は個人環境に保存され、リポジトリには残りません。
+
 ### コーディングスタイルと命名規則
 このソリューションは `.editorconfig` を適用しています：文字コード UTF-8、改行 CRLF、インデントは 4 スペース（XML/JSON/YAML は 2 スペース）、ファイルスコープの名前空間、波括弧は改行に置く、などです。インターフェイス名は `I` で始め、プライベートフィールドは先頭にアンダースコアを付けます。`TreatWarningsAsErrors=true` のため、警告はビルド失敗につながります。型推論が明確な場合を除き明示的な型を使用してください。`using` ディレクティブは名前空間外に置き、StyleCop/Roslyn アナライザや `SecurityCodeScan` を CI で有効にしています。
 
