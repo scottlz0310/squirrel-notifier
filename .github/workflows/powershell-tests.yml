@@ -4,6 +4,7 @@ name: PowerShell Tests
 # - extract-release-notes.ps1: 公開 release 本文を生成する主要経路のため、版系列境界・前版選択を固定する。
 # - scripts/aws/DesktopRunnerHost.psm1: desktop E2E runner の自動ログオンと起動タスクの契約を固定する（#392）。
 # - tests/e2e/scripts/DesktopE2EEvidence.psm1: desktop E2E の version 照合と失敗時証跡を固定する（#397）。
+# - scripts/aws/DeveloperAccess.psm1: 開発者用 IAM ポリシーの権限境界を固定する（#405）。
 
 on:
   pull_request:

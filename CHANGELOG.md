@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - リポジトリスコープの MCP サーバー設定 `.mcp.json` を追加した。desktop E2E runner の EC2 / SSM を扱うために AWS MCP Server（`mcp-proxy-for-aws-cli` 経由）を `aws` として定義する。認証はローカルの AWS プロファイルへ委ね、リポジトリにシークレットは置かない。end of development の `awslabs.aws-api-mcp-server` ではなく後継を採用した
+- root 資格情報の常用をやめるため、開発者用の IAM ユーザーと Admin ロールを冪等に作成する `scripts/aws/Initialize-DeveloperAccess.ps1` を追加した。`default` プロファイル（AWS MCP Server・エージェント・`scripts/aws`）の権限を desktop E2E runner の操作に限定し、範囲外の作業は MFA 必須の Admin ロールへ切り替える。ポリシーの境界（変更系の操作を runner instance / Run Command ドキュメント / parameter prefix に限定し、IAM の操作を持たせず、ARN へ埋め込む値に wildcard や広すぎる値を受け付けない）と、Admin ロールの作成に失敗したときにユーザーへ権限を残さない書き込み順序を Pester で固定した（#405）
 
 ### Changed
 
