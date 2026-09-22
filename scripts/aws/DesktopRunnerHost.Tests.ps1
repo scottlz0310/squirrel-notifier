@@ -3,6 +3,7 @@
 # - registry へ平文パスワードを書かない（LSA secret へ格納する）
 # - runner を service（session 0）として起動しない（#378）
 # - bootstrap レポートへ資格情報を混入させない
+# - AMI から起動した instance で永続 runner の資格情報を使わない（#380）
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'DesktopRunnerHost.psm1') -Force
@@ -57,6 +58,8 @@ Describe 'New-DesktopRunnerLogonTaskXml' {
         $script:Xml = New-DesktopRunnerLogonTaskXml `
             -TaskUserId 'EC2AMAZ-TEST\Administrator' `
             -RunnerDirectory 'C:\Users\Administrator\actions-runner' `
+            -LauncherPath 'C:\ProgramData\SquirrelNotifier\desktop-runner\Start-DesktopRunner.ps1' `
+            -ConfigPath 'C:\ProgramData\SquirrelNotifier\desktop-runner\launcher.json' `
             -StartDelaySeconds 45
     }
 
@@ -78,7 +81,8 @@ Describe 'New-DesktopRunnerLogonTaskXml' {
         @{ XPath = '/t:Task/t:Triggers/t:LogonTrigger/t:UserId'; Expected = 'EC2AMAZ-TEST\Administrator' }
         @{ XPath = '/t:Task/t:Principals/t:Principal/t:UserId'; Expected = 'EC2AMAZ-TEST\Administrator' }
         @{ XPath = '/t:Task/t:Triggers/t:LogonTrigger/t:Delay'; Expected = 'PT45S' }
-        @{ XPath = '/t:Task/t:Actions/t:Exec/t:Command'; Expected = 'cmd.exe' }
+        @{ XPath = '/t:Task/t:Actions/t:Exec/t:Command'; Expected = 'powershell.exe' }
+        @{ XPath = '/t:Task/t:Actions/t:Exec/t:Arguments'; Expected = '-NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\SquirrelNotifier\desktop-runner\Start-DesktopRunner.ps1" -ConfigPath "C:\ProgramData\SquirrelNotifier\desktop-runner\launcher.json"' }
         @{ XPath = '/t:Task/t:Actions/t:Exec/t:WorkingDirectory'; Expected = 'C:\Users\Administrator\actions-runner' }
     ) {
         $node = Get-TaskNode -Xml $script:Xml -XPath $XPath
@@ -91,11 +95,70 @@ Describe 'New-DesktopRunnerLogonTaskXml' {
     }
 
     It 'XML 特殊文字を含むパスをエスケープする' {
-        $xml = New-DesktopRunnerLogonTaskXml -TaskUserId 'HOST\User' -RunnerDirectory 'C:\a&b\runner'
+        $xml = New-DesktopRunnerLogonTaskXml `
+            -TaskUserId 'HOST\User' `
+            -RunnerDirectory 'C:\a&b\runner' `
+            -LauncherPath 'C:\a&b\Start-DesktopRunner.ps1' `
+            -ConfigPath 'C:\a&b\launcher.json'
         { [xml]$xml } | Should -Not -Throw
 
         $node = Get-TaskNode -Xml $xml -XPath '/t:Task/t:Actions/t:Exec/t:WorkingDirectory'
         $node.InnerText | Should -Be 'C:\a&b\runner'
+
+        $node = Get-TaskNode -Xml $xml -XPath '/t:Task/t:Actions/t:Exec/t:Arguments'
+        $node.InnerText | Should -BeLike '*-File "C:\a&b\Start-DesktopRunner.ps1"*'
+    }
+}
+
+Describe 'New-DesktopRunnerLaunchPlan' {
+    BeforeAll {
+        $script:LaunchArguments = @{
+            LegacyInstanceId   = 'i-00b4e23b910eade6c'
+            RunnerDirectory    = 'C:\Users\Administrator\actions-runner'
+            JitParameterPrefix = '/squirrel-notifier/desktop-e2e/jit'
+        }
+    }
+
+    It '<Case> は <Expected> で起動する' -ForEach @(
+        @{ Case = 'bootstrap を適用した instance'; CurrentInstanceId = 'i-00b4e23b910eade6c'; Expected = 'persistent' }
+        @{ Case = 'AMI から起動した instance'; CurrentInstanceId = 'i-0123456789abcdef0'; Expected = 'jit' }
+    ) {
+        $plan = New-DesktopRunnerLaunchPlan -CurrentInstanceId $CurrentInstanceId @script:LaunchArguments
+        $plan.Mode | Should -Be $Expected
+    }
+
+    It '永続 runner の instance では資格情報を削除しない' {
+        $plan = New-DesktopRunnerLaunchPlan -CurrentInstanceId 'i-00b4e23b910eade6c' @script:LaunchArguments
+        $plan.CredentialFilesToRemove | Should -BeNullOrEmpty
+        $plan.JitParameterName | Should -BeNullOrEmpty
+    }
+
+    It 'JIT runner の instance では永続 runner の <Name> を削除する' -ForEach @(
+        @{ Name = '.runner' }
+        @{ Name = '.credentials' }
+        @{ Name = '.credentials_rsaparams' }
+    ) {
+        $plan = New-DesktopRunnerLaunchPlan -CurrentInstanceId 'i-0123456789abcdef0' @script:LaunchArguments
+        $plan.CredentialFilesToRemove | Should -Contain (Join-Path 'C:\Users\Administrator\actions-runner' $Name)
+    }
+
+    It 'JIT config の parameter 名を instance ID から決める' {
+        $plan = New-DesktopRunnerLaunchPlan -CurrentInstanceId 'i-0123456789abcdef0' @script:LaunchArguments
+        $plan.JitParameterName | Should -Be '/squirrel-notifier/desktop-e2e/jit/i-0123456789abcdef0'
+    }
+
+    It '<Name> が不正な値を拒否する' -ForEach @(
+        @{ Name = 'CurrentInstanceId'; Override = @{ CurrentInstanceId = 'not-an-instance' } }
+        @{ Name = 'LegacyInstanceId'; Override = @{ CurrentInstanceId = 'i-0123456789abcdef0'; LegacyInstanceId = 'None' } }
+        @{ Name = 'JitParameterPrefix'; Override = @{ CurrentInstanceId = 'i-0123456789abcdef0'; JitParameterPrefix = 'squirrel/jit/' } }
+    ) {
+        $invalidArguments = @{} + $script:LaunchArguments
+        foreach ($key in $Override.Keys)
+        {
+            $invalidArguments[$key] = $Override[$key]
+        }
+
+        { New-DesktopRunnerLaunchPlan @invalidArguments } | Should -Throw
     }
 }
 
@@ -205,6 +268,7 @@ Describe 'SSM Run Command 互換のエンコーディング' {
     It '<Name> は UTF-8 BOM で保存されている' -ForEach @(
         @{ Name = 'DesktopRunnerHost.psm1' }
         @{ Name = 'Setup-DesktopRunnerHost.ps1' }
+        @{ Name = 'Start-DesktopRunner.ps1' }
         @{ Name = 'Initialize-DesktopRunnerInstanceProfile.ps1' }
         @{ Name = 'Invoke-DesktopRunnerBootstrap.ps1' }
         @{ Name = 'Set-DesktopRunnerAutoLogonPassword.ps1' }

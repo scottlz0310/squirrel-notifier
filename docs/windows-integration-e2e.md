@@ -240,6 +240,7 @@ session で `run.cmd` を実行する必要がある。この設定を再現可�
 | `Set-DesktopRunnerAutoLogonPassword.ps1` | 開発機 | 自動ログオン用パスワードを SecureString として登録する |
 | `Invoke-DesktopRunnerBootstrap.ps1` | 開発機 | bootstrap を SSM Run Command で投入する |
 | `Setup-DesktopRunnerHost.ps1` | instance 内 | 自動ログオン、ログオン時の runner 起動、セッション維持設定を適用する |
+| `Start-DesktopRunner.ps1` | instance 内 | ログオンタスクから起動され、永続 runner と JIT runner のどちらで起動するかを判定する |
 | `DesktopRunnerHost.psm1` | instance 内 | 適用内容を組み立てる（Pester で契約を固定する） |
 
 #### 1. IAM リソースの作成
@@ -250,7 +251,8 @@ instance profile が無い間は SSM Agent が登録されず、Run Command を�
 pwsh -File scripts\aws\Initialize-DesktopRunnerInstanceProfile.ps1 -InstanceId <instance-id> -Region us-east-1
 ```
 
-付与するのは `AmazonSSMManagedInstanceCore` と、自動ログオン用 parameter 1 件の読み取りだけとする。
+付与するのは `AmazonSSMManagedInstanceCore` と、自動ログオン用 parameter 1 件および JIT config を
+置く `/squirrel-notifier/desktop-e2e/jit/*` の読み取りだけとする。
 `kms:Decrypt` は `kms:ViaService` 条件で SSM 経由に限定する。
 
 #### 2. 自動ログオン用パスワードの登録
@@ -287,7 +289,14 @@ bootstrap は次を適用する。
   LSA secret（`DefaultPassword`）へ格納する。registry に残っていた平文の `DefaultPassword` と、
   自動ログオン回数を消費する `AutoLogonCount` は削除する
 - **ログオン時の runner 起動**: `LogonType=InteractiveToken`、`RunLevel=HighestAvailable`、
-  `ExecutionTimeLimit=PT0S` のタスクを登録する。runner が service として登録済みの場合は停止する
+  `ExecutionTimeLimit=PT0S` のタスクを登録する。runner が service として登録済みの場合は停止する。
+  タスクは `C:\ProgramData\SquirrelNotifier\desktop-runner\Start-DesktopRunner.ps1` を実行する。
+  bootstrap を適用した instance（`launcher.json` の `legacyInstanceId`）では `run.cmd` で永続 runner
+  を起動する。その instance から作った AMI で起動した別 instance では、AMI に残る永続 runner の
+  資格情報（`.runner` / `.credentials` / `.credentials_rsaparams`）を削除し、SSM Parameter Store の
+  `/squirrel-notifier/desktop-e2e/jit/<instance-id>` に JIT config が置かれるのを待って ephemeral
+  runner として起動する（#380）。JIT config は `ACTIONS_RUNNER_INPUT_JITCONFIG` 環境変数で渡し、
+  コマンドライン引数とログには載せない。判定の経過は同じディレクトリの `launcher.log` に残る
 - **セッション維持**: 画面ロック、スクリーンセーバー、スリープ、モニタ電源断、ディスク停止、
   休止を無効化する
 

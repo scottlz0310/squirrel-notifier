@@ -44,6 +44,7 @@ function ConvertTo-Base64File
 
 $moduleBase64 = ConvertTo-Base64File -Path (Join-Path $PSScriptRoot 'DesktopRunnerHost.psm1')
 $scriptBase64 = ConvertTo-Base64File -Path (Join-Path $PSScriptRoot 'Setup-DesktopRunnerHost.ps1')
+$launcherBase64 = ConvertTo-Base64File -Path (Join-Path $PSScriptRoot 'Start-DesktopRunner.ps1')
 
 # remote 側は ASCII だけで構成し、エンコーディングの影響を受けないようにする。
 $remoteCommands = @(
@@ -55,7 +56,8 @@ $remoteCommands = @(
     'New-Item -ItemType Directory -Path $dir -Force | Out-Null'
     "[IO.File]::WriteAllBytes((Join-Path `$dir 'DesktopRunnerHost.psm1'), [Convert]::FromBase64String('$moduleBase64'))"
     "[IO.File]::WriteAllBytes((Join-Path `$dir 'Setup-DesktopRunnerHost.ps1'), [Convert]::FromBase64String('$scriptBase64'))"
-    "& (Join-Path `$dir 'Setup-DesktopRunnerHost.ps1') -PasswordParameterName '$PasswordParameterName' -Region '$Region' -RunnerDirectory '$RunnerDirectory'"
+    "[IO.File]::WriteAllBytes((Join-Path `$dir 'Start-DesktopRunner.ps1'), [Convert]::FromBase64String('$launcherBase64'))"
+    "& (Join-Path `$dir 'Setup-DesktopRunnerHost.ps1') -PasswordParameterName '$PasswordParameterName' -Region '$Region' -LegacyInstanceId '$InstanceId' -RunnerDirectory '$RunnerDirectory'"
     'Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue'
 )
 

@@ -7,8 +7,8 @@
 
   付与する権限は次の 2 つに限定する。
   - AmazonSSMManagedInstanceCore（Run Command と Session Manager の最小セット）
-  - 自動ログオン用パスワードを置く 1 つの SSM parameter に対する読み取りと、
-    SSM 経由に限定した kms:Decrypt
+  - 自動ログオン用パスワードを置く 1 つの SSM parameter と、使い捨て instance 向けの
+    JIT config を置く prefix 配下（#380）に対する読み取りと、SSM 経由に限定した kms:Decrypt
 
   AWS 側の構成はこれまでリポジトリに記録が無かった。#380 で instance を使い捨てへ移行するときも
   同じ role を再利用できるよう、本スクリプトを唯一の手順とする。
@@ -31,7 +31,10 @@ param(
     [string]$InstanceProfileName = 'SquirrelNotifierDesktopE2ERunner',
 
     [ValidateNotNullOrEmpty()]
-    [string]$PasswordParameterName = '/squirrel-notifier/desktop-e2e/autologon-password'
+    [string]$PasswordParameterName = '/squirrel-notifier/desktop-e2e/autologon-password',
+
+    [ValidateNotNullOrEmpty()]
+    [string]$JitParameterPrefix = '/squirrel-notifier/desktop-e2e/jit'
 )
 
 Set-StrictMode -Version Latest
@@ -82,6 +85,7 @@ $accountId = Invoke-AwsCli -Arguments @('sts', 'get-caller-identity', '--query',
 Write-Verbose "AWS account: $accountId"
 
 $parameterArn = "arn:aws:ssm:${Region}:${accountId}:parameter${PasswordParameterName}"
+$jitParameterArn = "arn:aws:ssm:${Region}:${accountId}:parameter${JitParameterPrefix}/*"
 
 $trustPolicy = @'
 {
@@ -105,6 +109,12 @@ $inlinePolicy = @"
       "Effect": "Allow",
       "Action": "ssm:GetParameter",
       "Resource": "$parameterArn"
+    },
+    {
+      "Sid": "ReadJitRunnerConfig",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "$jitParameterArn"
     },
     {
       "Sid": "DecryptViaSsmOnly",
