@@ -487,8 +487,8 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Reviewer", "codex", "codex exec --skip-git-repo-check --json \"$thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\"")]
-    [InlineData("Reviewed", "codex", "codex exec --json \"$review-raven-thread-owl-cycle scottlz0310/squirrel-notifier#123 のレビュー指摘に対応してください\"")]
+    [InlineData("Reviewer", "codex", "codex exec --skip-git-repo-check --json '$thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください'")]
+    [InlineData("Reviewed", "codex", "codex exec --json '$review-raven-thread-owl-cycle scottlz0310/squirrel-notifier#123 のレビュー指摘に対応してください'")]
     public async Task BuildCommandLine_ShouldUseSkillInvocationForCodex(string roleName, string presetId, string expected)
     {
         LauncherRole role = Enum.Parse<LauncherRole>(roleName);

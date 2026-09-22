@@ -19,6 +19,8 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 
 全プリセットが正式 skill 名をプロンプトの先頭で呼び出す（codex は `$`、他は `/` プレフィックス）。skill 本体の配布・更新と MCP 接続設定は Mcp-Docker の責務であり、squirrel-notifier は起動テンプレートだけを管理する。skill が未配布、または CLI が skill 呼び出しに未対応の場合は、起動プロセスの stderr と失敗メッセージに原因を残す。
 
+「コマンドをコピー」の出力は、`$` / `` ` `` を含む引数だけを PowerShell の単一引用符形式（`'$thread-owl-pr-reviewer ...'`）で出力する。二重引用符のままだと PowerShell が `$thread` を変数展開して skill 名が壊れるため。この形式は cmd.exe への貼り付けには対応しない。
+
 ## Settings UI での挙動
 
 - reviewer / reviewed 各スロットにプリセット選択 ComboBox を用意する。選択すると command / arguments が既定値で上書きされる

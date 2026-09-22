@@ -14,7 +14,9 @@ namespace SquirrelNotifier.WinUI3.Helpers;
 /// </summary>
 internal static class CommandLineFormatter
 {
-    private static readonly char[] _charsRequiringQuotes = [' ', '\t', '"'];
+    private static readonly char[] _charsRequiringQuotes = [' ', '\t', '"', '$', '`'];
+
+    private static readonly char[] _powerShellExpansionChars = ['$', '`'];
 
     public static string Format(string commandPath, IReadOnlyList<string> arguments)
     {
@@ -36,6 +38,15 @@ internal static class CommandLineFormatter
         if (value.Length > 0 && value.IndexOfAny(_charsRequiringQuotes) < 0)
         {
             return value;
+        }
+
+        // PowerShell は二重引用符内の $ / ` を変数展開・エスケープとして解釈し、codex の
+        // $skill 呼び出し（#395）が壊れる。両シェルで literal になる引用形式は無いため、
+        // これらを含む引数だけは PowerShell の単一引用符形式（' は '' に二重化）で出力する。
+        // この引数を含むコマンドは cmd.exe への貼り付けに対応しない。
+        if (value.IndexOfAny(_powerShellExpansionChars) >= 0)
+        {
+            return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
         }
 
         // cmd.exe / PowerShell の双方で、貼り付け後に単一引数として再解釈されるのは
