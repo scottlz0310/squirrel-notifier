@@ -74,7 +74,7 @@ dotnet build winui3\SquirrelNotifier.WinUI3.sln -c Release -p:Platform=x64
 前提と運用:
 
 - 認証情報は `.mcp.json` に書きません。ローカルの AWS プロファイル（`default`）へ委ねます。session が切れていると proxy が `LoginRefreshRequired` で落ちるため、その場合は `aws login` で再認証してください。
-- `default` には root ではなく、`scripts/aws/Initialize-DeveloperAccess.ps1` で作る IAM ユーザーで `aws login` したものを使います。このユーザーの権限は desktop E2E runner の操作（instance の起動・停止、Run Command、`/squirrel-notifier/desktop-e2e/*` の Parameter）に限定しています。IAM の変更などの範囲外の作業は、Admin ロール（`--profile admin`）へ明示的に切り替えて行います。セットアップ手順はスクリプトのヘルプ（`.NOTES`）にあります。
+- `default` には root ではなく、`scripts/aws/Initialize-DeveloperAccess.ps1` で作る IAM ユーザーで `aws login` したものを使います。このユーザーの権限は desktop E2E runner の操作（instance の起動・停止、Run Command、`/squirrel-notifier/desktop-e2e/*` の Parameter）と、Admin が作ったリソースを検証するための読み取り（EC2 の `Describe*`、本プロジェクトの IAM ロールの参照と `SimulatePrincipalPolicy`）に限定しています。IAM の変更などの範囲外の作業は、Admin ロール（`--profile admin`）へ明示的に切り替えて行います。セットアップ手順はスクリプトのヘルプ（`.NOTES`）にあります。
 - リージョンは `--metadata AWS_REGION=us-east-1` で渡し、`scripts/aws/*.ps1` の既定値と揃えています。片方を変える場合は両方を合わせてください。
 - 変更操作（mutating operations）を許可しています。read-only に絞る場合は `--read-only` を付けるか IAM 側で制限します。EC2 instance の停止・削除、SSM Parameter の上書き、AMI の削除などは実行前にユーザーへ確認してください。
 - `awslabs.aws-api-mcp-server` は end of development のため採用しません（起動時に deprecation notice が出ます）。後継の AWS MCP Server はマネージドのリモートエンドポイントで、リクエストは `aws-mcp.<region>.api.aws` へ送られます。

@@ -7,7 +7,8 @@
 
   - Admin ロール（-AdminRoleName）。AdministratorAccess を付け、下記の IAM ユーザーだけを MFA 付きで信頼する
   - IAM ユーザー（-UserName）。アクセスキーもコンソールパスワードも作らない
-    - inline policy SquirrelNotifierDesktopE2EOperator（desktop E2E runner の操作と Admin ロールへの AssumeRole）
+    - inline policy SquirrelNotifierDesktopE2EOperator（desktop E2E runner の操作、EC2 と本プロジェクトの
+      IAM ロールの読み取り、Admin ロールへの AssumeRole）
     - SignInLocalDevelopmentAccess（IAM ユーザーで aws login するのに必要）
 
   default プロファイル（.mcp.json の AWS MCP Server、エージェント、scripts/aws/*.ps1）は、
@@ -60,7 +61,16 @@ param(
     [string]$AdminRoleName = 'SquirrelNotifierAdmin',
 
     [ValidateNotNullOrEmpty()]
-    [string]$ParameterPrefix = '/squirrel-notifier/desktop-e2e'
+    [string]$ParameterPrefix = '/squirrel-notifier/desktop-e2e',
+
+    [ValidateNotNullOrEmpty()]
+    [string]$RunnerRoleName = 'SquirrelNotifierDesktopE2ERunner',
+
+    [ValidateNotNullOrEmpty()]
+    [string]$RunnerInstanceProfileName = 'SquirrelNotifierDesktopE2ERunner',
+
+    [ValidateNotNullOrEmpty()]
+    [string]$OidcRoleName = 'GitHubActionsSquirrelNotifierDesktopE2E'
 )
 
 Set-StrictMode -Version Latest
@@ -156,7 +166,10 @@ $operatorPolicy = New-DeveloperOperatorPolicy `
     -Region $Region `
     -InstanceId $InstanceId `
     -ParameterPrefix $ParameterPrefix `
-    -AdminRoleName $AdminRoleName
+    -AdminRoleName $AdminRoleName `
+    -RunnerRoleName $RunnerRoleName `
+    -InstanceProfileName $RunnerInstanceProfileName `
+    -OidcRoleName $OidcRoleName
 $trustPolicy = New-DeveloperAdminTrustPolicy -AccountId $accountId -UserName $UserName
 
 $existingUser = Invoke-AwsCli -Arguments @('iam', 'get-user', '--user-name', $UserName, '--query', 'User.UserName', '--output', 'text') -AllowFailure
