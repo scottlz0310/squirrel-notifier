@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- desktop E2E の version 不一致失敗で原因を追えなかったのを修正した。失敗メッセージに実際の ProductVersion / FileVersion と参照した実行ファイルを含め、失敗時は msiexec の install / uninstall ログを runRoot 削除前にサニタイズして artifact（`msi-logs/`）へ退避する。判定と退避は `tests/e2e/scripts/DesktopE2EEvidence.psm1` へ切り出し、Pester で固定した（#397）
+
 ## [0.14.0] - 2026-09-22
 
 desktop E2E 基盤の自動化と、購読 preflight 失敗時のクラッシュ修正を含むリリースです。release 経路で desktop E2E（DesktopSmoke）を実行しますが、publish はまだその結果に依存しません。

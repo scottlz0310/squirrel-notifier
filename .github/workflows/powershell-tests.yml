@@ -3,11 +3,13 @@ name: PowerShell Tests
 # scripts/ 配下の Pester テスト。
 # - extract-release-notes.ps1: 公開 release 本文を生成する主要経路のため、版系列境界・前版選択を固定する。
 # - scripts/aws/DesktopRunnerHost.psm1: desktop E2E runner の自動ログオンと起動タスクの契約を固定する（#392）。
+# - tests/e2e/scripts/DesktopE2EEvidence.psm1: desktop E2E の version 照合と失敗時証跡を固定する（#397）。
 
 on:
   pull_request:
     paths:
       - 'scripts/**'
+      - 'tests/e2e/scripts/**'
       - '.github/workflows/powershell-tests.yml'
   workflow_dispatch:
 
@@ -30,7 +32,7 @@ jobs:
         shell: pwsh
         run: |
           $cfg = New-PesterConfiguration
-          $cfg.Run.Path = './scripts'
+          $cfg.Run.Path = @('./scripts', './tests/e2e/scripts')
           $cfg.Run.Exit = $true
           $cfg.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $cfg
