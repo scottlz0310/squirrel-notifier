@@ -5,31 +5,36 @@
   root には IAM permission boundary も SCP も適用できず、権限の上限を固定する手段が無い。
   本スクリプトは次を冪等に作成し、日常の作業を最小権限の IAM ユーザーへ移す。
 
+  - Admin ロール（-AdminRoleName）。AdministratorAccess を付け、下記の IAM ユーザーだけを MFA 付きで信頼する
   - IAM ユーザー（-UserName）。アクセスキーもコンソールパスワードも作らない
-    - SignInLocalDevelopmentAccess（IAM ユーザーで aws login するのに必要）
     - inline policy SquirrelNotifierDesktopE2EOperator（desktop E2E runner の操作と Admin ロールへの AssumeRole）
-  - Admin ロール（-AdminRoleName）。AdministratorAccess を付け、上記 IAM ユーザーだけを信頼する
+    - SignInLocalDevelopmentAccess（IAM ユーザーで aws login するのに必要）
 
   default プロファイル（.mcp.json の AWS MCP Server、エージェント、scripts/aws/*.ps1）は、
   この IAM ユーザーで aws login したものを使う。IAM の変更などこの範囲を外れる作業だけ Admin ロールへ切り替える。
-  ポリシーの中身は DeveloperAccess.psm1 にあり、境界は DeveloperAccess.Tests.ps1 で固定している。
+  ポリシーの中身と入力値の検証は DeveloperAccess.psm1 にあり、境界は DeveloperAccess.Tests.ps1 で固定している。
+
+  書き込みの前にすべてのポリシー文書を組み立て、入力値を検証する。ユーザーへの権限付与は最後に行い、
+  Admin ロールの作成・更新が失敗したときに、AssumeRole や SSM の権限を持つユーザーが残らないようにする。
 
   root（または管理者権限）で実行する。何度実行しても同じ状態に収束する。
 .NOTES
   実行後の手作業:
   1. root で IAM コンソールを開き、作成したユーザーにコンソールパスワードを設定する。
      aws iam create-login-profile はパスワードをコマンドライン引数へ載せるため使わない。
-  2. 同じ画面でそのユーザーに MFA デバイスを登録する。
+  2. 同じ画面でそのユーザーに MFA デバイスを登録する。未登録のままでは Admin ロールを引き受けられない。
   3. aws login で IAM ユーザーとしてサインインし直す。default の login_session が置き換わる。
      aws sts get-caller-identity の Arn が user/<UserName> になっていることを確認する。
   4. Admin が必要な作業のために ~/.aws/config へ次を追加する。aws login の資格情報を
      source_profile へ直接渡せるかは文書化されていないため、公式に案内されている
-     credential_process を経由する。
+     credential_process を経由する。mfa_serial を指定すると AssumeRole の呼び出しで MFA コードを
+     求められ、信頼ポリシーの MFA 条件を aws login 側の挙動に依存せず満たせる。
        [profile signin-process]
        credential_process = aws configure export-credentials --profile default --format process
        [profile admin]
        role_arn = <出力の adminRoleArn>
        source_profile = signin-process
+       mfa_serial = <手順 2 で登録した MFA デバイスの ARN>
   5. 以降、root は請求とアカウント設定だけに使う。
 .EXAMPLE
   .\Initialize-DeveloperAccess.ps1 -UserName developer -InstanceId i-0123456789abcdef0
@@ -37,11 +42,11 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)]
-    [ValidatePattern('^[\w+=,.@-]{1,64}$')]
+    [ValidateNotNullOrEmpty()]
     [string]$UserName,
 
     [Parameter(Mandatory)]
-    [ValidatePattern('^i-[0-9a-f]{8,17}$')]
+    [ValidateNotNullOrEmpty()]
     [string]$InstanceId,
 
     [ValidateNotNullOrEmpty()]
@@ -141,6 +146,15 @@ function Invoke-AwsCliWithPolicyDocument
 $accountId = Invoke-AwsCli -Arguments @('sts', 'get-caller-identity', '--query', 'Account', '--output', 'text')
 Write-Verbose "AWS account: $accountId"
 
+# 書き込みより前に組み立てる。入力値の検証もここで行われ、不正な値では何も作らずに止まる。
+$operatorPolicy = New-DeveloperOperatorPolicy `
+    -AccountId $accountId `
+    -Region $Region `
+    -InstanceId $InstanceId `
+    -ParameterPrefix $ParameterPrefix `
+    -AdminRoleName $AdminRoleName
+$trustPolicy = New-DeveloperAdminTrustPolicy -AccountId $accountId -UserName $UserName
+
 $existingUser = Invoke-AwsCli -Arguments @('iam', 'get-user', '--user-name', $UserName, '--query', 'User.UserName', '--output', 'text') -AllowFailure
 $userCreated = $false
 if ($null -eq $existingUser)
@@ -156,39 +170,13 @@ else
     Write-Verbose "IAM ユーザーは作成済みです: $UserName"
 }
 
-if ($PSCmdlet.ShouldProcess($UserName, 'SignInLocalDevelopmentAccess をアタッチ'))
-{
-    Invoke-AwsCli -Arguments @(
-        'iam', 'attach-user-policy',
-        '--user-name', $UserName,
-        '--policy-arn', 'arn:aws:iam::aws:policy/SignInLocalDevelopmentAccess'
-    ) | Out-Null
-}
-
-$operatorPolicy = New-DeveloperOperatorPolicy `
-    -AccountId $accountId `
-    -Region $Region `
-    -InstanceId $InstanceId `
-    -ParameterPrefix $ParameterPrefix `
-    -AdminRoleName $AdminRoleName
-
-if ($PSCmdlet.ShouldProcess($UserName, "inline policy $operatorPolicyName を適用"))
-{
-    Invoke-AwsCliWithPolicyDocument `
-        -Arguments @('iam', 'put-user-policy', '--user-name', $UserName, '--policy-name', $operatorPolicyName) `
-        -OptionName '--policy-document' `
-        -Document $operatorPolicy
-}
-
-$trustPolicy = New-DeveloperAdminTrustPolicy -AccountId $accountId -UserName $UserName
-
 $existingRole = Invoke-AwsCli -Arguments @('iam', 'get-role', '--role-name', $AdminRoleName, '--query', 'Role.RoleName', '--output', 'text') -AllowFailure
 if ($null -eq $existingRole)
 {
     if ($PSCmdlet.ShouldProcess($AdminRoleName, 'Admin ロールを作成'))
     {
         Invoke-AwsCliWithPolicyDocument `
-            -Arguments @('iam', 'create-role', '--role-name', $AdminRoleName, '--description', 'squirrel-notifier developer admin role assumed from the IAM user (#405)') `
+            -Arguments @('iam', 'create-role', '--role-name', $AdminRoleName, '--description', 'squirrel-notifier developer admin role assumed from the IAM user with MFA (#405)') `
             -OptionName '--assume-role-policy-document' `
             -Document $trustPolicy `
             -RetryUntilPropagated:$userCreated
@@ -196,7 +184,7 @@ if ($null -eq $existingRole)
 }
 else
 {
-    # 既存ロールの信頼ポリシーを上書きし、別のユーザーを信頼したままにならないようにする。
+    # 既存ロールの信頼ポリシーを上書きし、別のユーザーや MFA 条件なしの信頼が残らないようにする。
     if ($PSCmdlet.ShouldProcess($AdminRoleName, '信頼ポリシーを更新'))
     {
         Invoke-AwsCliWithPolicyDocument `
@@ -213,6 +201,24 @@ if ($PSCmdlet.ShouldProcess($AdminRoleName, 'AdministratorAccess をアタッチ
         'iam', 'attach-role-policy',
         '--role-name', $AdminRoleName,
         '--policy-arn', 'arn:aws:iam::aws:policy/AdministratorAccess'
+    ) | Out-Null
+}
+
+# ユーザーへの権限付与はここから。ここまでのどこかで失敗した場合、ユーザーは権限を持たないまま残る。
+if ($PSCmdlet.ShouldProcess($UserName, "inline policy $operatorPolicyName を適用"))
+{
+    Invoke-AwsCliWithPolicyDocument `
+        -Arguments @('iam', 'put-user-policy', '--user-name', $UserName, '--policy-name', $operatorPolicyName) `
+        -OptionName '--policy-document' `
+        -Document $operatorPolicy
+}
+
+if ($PSCmdlet.ShouldProcess($UserName, 'SignInLocalDevelopmentAccess をアタッチ'))
+{
+    Invoke-AwsCli -Arguments @(
+        'iam', 'attach-user-policy',
+        '--user-name', $UserName,
+        '--policy-arn', 'arn:aws:iam::aws:policy/SignInLocalDevelopmentAccess'
     ) | Out-Null
 }
 

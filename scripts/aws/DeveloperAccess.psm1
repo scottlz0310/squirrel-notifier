@@ -4,6 +4,31 @@
 
 Set-StrictMode -Version Latest
 
+# ARN へ埋め込む値の形式。wildcard や広すぎる値を通すと、ポリシーが意図より広い範囲を許可する
+# （例: ParameterPrefix '/' は parameter/*、AdminRoleName '*' は role/* になる）。
+$script:ArnValuePatterns = @{
+    AccountId       = '^\d{12}$'
+    Region          = '^[a-z]{2}(-[a-z]+)+-\d{1,2}$'
+    InstanceId      = '^i-[0-9a-f]{8,17}$'
+    # 1 階層（/squirrel-notifier など）はアプリ全体の parameter を含んでしまうため、2 階層以上を要求する。
+    ParameterPrefix = '^(/[A-Za-z0-9_.-]+){2,}/?$'
+    AdminRoleName   = '^[A-Za-z0-9+=,.@_-]{1,64}$'
+    UserName        = '^[A-Za-z0-9+=,.@_-]{1,64}$'
+}
+
+function Assert-ArnValue
+{
+    param(
+        [string]$Name,
+        [string]$Value
+    )
+
+    if ($Value -cnotmatch $script:ArnValuePatterns[$Name])
+    {
+        throw "$Name '$Value' は ARN に埋め込めない形式です。期待する形式: $($script:ArnValuePatterns[$Name])"
+    }
+}
+
 function New-DeveloperOperatorPolicy
 {
     <#
@@ -13,9 +38,8 @@ function New-DeveloperOperatorPolicy
       変更系の操作は runner instance、Run Command のドキュメント、parameter prefix に限定する。
       Describe 系と Run Command の結果取得はリソース単位の制限をサポートしないため "*" とする。
 
-      IAM の書き込み権限は持たせない。このユーザーの資格情報を得る経路を MFA 付きの
-      コンソールサインイン（aws login）だけに限る前提（アクセスキーを作らない）を、
-      ユーザー自身の権限で崩せないようにするため。
+      IAM の書き込み権限は持たせない。アクセスキーを作らず、資格情報を aws login の
+      一時資格情報に限る前提を、ユーザー自身の権限で崩せないようにするため。
     #>
     param(
         [Parameter(Mandatory)]
@@ -33,6 +57,12 @@ function New-DeveloperOperatorPolicy
         [Parameter(Mandatory)]
         [string]$AdminRoleName
     )
+
+    Assert-ArnValue -Name 'AccountId' -Value $AccountId
+    Assert-ArnValue -Name 'Region' -Value $Region
+    Assert-ArnValue -Name 'InstanceId' -Value $InstanceId
+    Assert-ArnValue -Name 'ParameterPrefix' -Value $ParameterPrefix
+    Assert-ArnValue -Name 'AdminRoleName' -Value $AdminRoleName
 
     $instanceArn = "arn:aws:ec2:${Region}:${AccountId}:instance/$InstanceId"
     $documentArn = "arn:aws:ssm:${Region}::document/AWS-RunPowerShellScript"
@@ -102,12 +132,14 @@ function New-DeveloperAdminTrustPolicy
 {
     <#
     .SYNOPSIS
-      Admin ロールの信頼ポリシーを返す。指定した IAM ユーザーだけを信頼する。
+      Admin ロールの信頼ポリシーを返す。指定した IAM ユーザーだけを、MFA 付きで信頼する。
     .DESCRIPTION
-      MFA 条件は付けない。このユーザーの資格情報を得る経路は MFA 付きのコンソールサインイン
-      （aws login）だけで、MFA は認証の時点で必ず通る。aws login が発行する資格情報が
-      MFA コンテキストを持つかは文書化されておらず、条件を付けると Admin を使えなくなり、
-      結局 root へ戻る運用を招く。
+      MFA を AssumeRole の条件にする。IAM ユーザーに MFA を登録したかをスクリプトは強制できないため、
+      未登録のまま AdministratorAccess を引き受けられる状態を信頼ポリシー側で塞ぐ。
+
+      aws login の一時資格情報が MFA コンテキストを持つかは文書化されていない。そのため Admin
+      プロファイルには mfa_serial を指定し、AssumeRole の呼び出し自体で MFA コードを渡す。
+      これなら aws login 側の挙動に依存せず、MFA 未登録なら引き受けられない（fail-closed）。
     #>
     param(
         [Parameter(Mandatory)]
@@ -117,6 +149,9 @@ function New-DeveloperAdminTrustPolicy
         [string]$UserName
     )
 
+    Assert-ArnValue -Name 'AccountId' -Value $AccountId
+    Assert-ArnValue -Name 'UserName' -Value $UserName
+
     return [ordered]@{
         Version   = '2012-10-17'
         Statement = @(
@@ -124,6 +159,9 @@ function New-DeveloperAdminTrustPolicy
                 Effect    = 'Allow'
                 Principal = [ordered]@{ AWS = "arn:aws:iam::${AccountId}:user/$UserName" }
                 Action    = 'sts:AssumeRole'
+                Condition = [ordered]@{
+                    Bool = [ordered]@{ 'aws:MultiFactorAuthPresent' = 'true' }
+                }
             }
         )
     }

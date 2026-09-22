@@ -2,7 +2,8 @@
 # 開発者用 IAM ポリシーの権限境界を固定する（#405）。
 # - 変更系の操作を "*" に広げない（runner instance / Run Command ドキュメント / parameter prefix に限定）
 # - default の IAM ユーザーに IAM の操作を持たせない（アクセスキーを自分で作れないようにする）
-# - Admin ロールは指定した IAM ユーザーだけを信頼する
+# - Admin ロールは指定した IAM ユーザーだけを、MFA 付きで信頼する
+# - ARN へ埋め込む値に wildcard や広すぎる値を受け付けない
 # 実際に IAM へ渡る形で検証するため、JSON へ変換して読み戻したものを対象にする。
 
 BeforeAll {
@@ -83,6 +84,24 @@ Describe 'New-DeveloperOperatorPolicy' {
         $statement = (Get-StatementForAction -Document $document -Action 'ssm:GetParameter')[0]
         $statement.Resource | Should -Be 'arn:aws:ssm:us-east-1:123456789012:parameter/squirrel-notifier/desktop-e2e/*'
     }
+
+    It '<Name> に <Value> を渡すと ARN を広げずに拒否する' -ForEach @(
+        @{ Name = 'ParameterPrefix'; Value = '/' }
+        @{ Name = 'ParameterPrefix'; Value = '/*' }
+        @{ Name = 'ParameterPrefix'; Value = '/squirrel-notifier' }
+        @{ Name = 'ParameterPrefix'; Value = '/squirrel-notifier/*' }
+        @{ Name = 'ParameterPrefix'; Value = 'squirrel-notifier/desktop-e2e' }
+        @{ Name = 'AdminRoleName'; Value = '*' }
+        @{ Name = 'AdminRoleName'; Value = 'path/SquirrelNotifierAdmin' }
+        @{ Name = 'InstanceId'; Value = '*' }
+        @{ Name = 'Region'; Value = '*' }
+        @{ Name = 'AccountId'; Value = '*' }
+    ) {
+        $policyArgs = $script:PolicyArgs.Clone()
+        $policyArgs[$Name] = $Value
+
+        { New-DeveloperOperatorPolicy @policyArgs } | Should -Throw "*$Name*"
+    }
 }
 
 Describe 'New-DeveloperAdminTrustPolicy' {
@@ -103,5 +122,23 @@ Describe 'New-DeveloperAdminTrustPolicy' {
         $principal = $script:Trust.Statement[0].Principal
 
         @($principal.PSObject.Properties.Name) | Should -Be @('AWS')
+    }
+
+    It 'MFA を AssumeRole の条件にする（MFA 未登録では AdministratorAccess を引き受けられない）' {
+        $condition = $script:Trust.Statement[0].Condition
+
+        @($condition.PSObject.Properties.Name) | Should -Be @('Bool')
+        $condition.Bool.'aws:MultiFactorAuthPresent' | Should -Be 'true'
+    }
+
+    It '<Name> に <Value> を渡すと拒否する' -ForEach @(
+        @{ Name = 'UserName'; Value = '*' }
+        @{ Name = 'UserName'; Value = 'path/developer' }
+        @{ Name = 'AccountId'; Value = '*' }
+    ) {
+        $trustArgs = @{ AccountId = '123456789012'; UserName = 'developer' }
+        $trustArgs[$Name] = $Value
+
+        { New-DeveloperAdminTrustPolicy @trustArgs } | Should -Throw "*$Name*"
     }
 }
