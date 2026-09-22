@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- リポジトリスコープの MCP サーバー設定 `.mcp.json` を追加した。desktop E2E runner の EC2 / SSM を扱うために AWS MCP Server（`mcp-proxy-for-aws` 経由）を `aws` として定義する。認証はローカルの AWS プロファイルへ委ね、リポジトリにシークレットは置かない。end of development の `awslabs.aws-api-mcp-server` ではなく後継を採用した
+
 ### Changed
 
 - desktop E2E runner のログオンタスクが `run.cmd` を直接起動せず、`scripts/aws/Start-DesktopRunner.ps1` を経由するようにした。bootstrap を適用した instance では従来どおり永続 runner を起動し、その instance から作った AMI で起動した使い捨て instance では、AMI に残る永続 runner の資格情報を削除したうえで SSM Parameter Store の JIT config を待って ephemeral runner として起動する。EC2 instance の on-demand 作成・破棄へ移行する準備（#380）
