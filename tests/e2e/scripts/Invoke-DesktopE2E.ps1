@@ -1008,6 +1008,28 @@ function Get-ProcessWindowSnapshot {
     return $windows.ToArray()
 }
 
+function Save-MsiLogsForFailure {
+    # 退避の失敗は scenario の結果を変えない（Save-DiagnosticEvidence と同じ best-effort 契約）。
+    if (-not $artifactDirectoryReady) {
+        return $false
+    }
+
+    try {
+        $savedMsiLogs = Save-MsiLogArtifact `
+            -LogPath @($installLogPath, $uninstallLogPath) `
+            -ArtifactDirectory $scenarioArtifactDirectory `
+            -Sanitize { param($Text) ConvertTo-SanitizedText -Text $Text }
+        if ($savedMsiLogs.Count -eq 0) {
+            Write-ScenarioLog 'msiexec のログが見つかりませんでした。'
+        }
+        return $true
+    }
+    catch {
+        Write-ScenarioLog 'msiexec のログの退避に失敗しました。scenario の結果には影響しません。'
+        return $false
+    }
+}
+
 function Save-DiagnosticEvidence {
     <#
         失敗原因を artifact だけで判別できるようにするための証跡を収集する（#386）。
@@ -1408,20 +1430,10 @@ finally {
     # msiexec のログは runRoot と一緒に削除されるため、失敗時は削除前に退避する（#397）。
     # uninstall ログと cleanup 失敗も対象にするため、cleanup と残留検査の後・runRoot 削除の前に行う。
     # この時点の $result.status は cleanup 失敗をまだ反映しないため、$cleanupErrors も条件に含める。
-    # 退避の失敗は scenario の結果を変えない。
-    if (($result.status -ne 'passed' -or $cleanupErrors.Count -ne 0) -and $artifactDirectoryReady) {
-        try {
-            $savedMsiLogs = Save-MsiLogArtifact `
-                -LogPath @($installLogPath, $uninstallLogPath) `
-                -ArtifactDirectory $scenarioArtifactDirectory `
-                -Sanitize { param($Text) ConvertTo-SanitizedText -Text $Text }
-            if ($savedMsiLogs.Count -eq 0) {
-                Write-ScenarioLog 'msiexec のログが見つかりませんでした。'
-            }
-        }
-        catch {
-            Write-ScenarioLog 'msiexec のログの退避に失敗しました。scenario の結果には影響しません。'
-        }
+    # runRoot 自体の削除失敗は削除後にしか分からないため、その場合は削除試行の後に退避する。
+    $msiLogsSaved = $false
+    if ($result.status -ne 'passed' -or $cleanupErrors.Count -ne 0) {
+        $msiLogsSaved = Save-MsiLogsForFailure
     }
 
     $runRootRemoved = $false
@@ -1436,6 +1448,9 @@ finally {
     }
     catch {
         $cleanupErrors.Add('専用 temporary root を削除できませんでした。')
+        if (-not $msiLogsSaved) {
+            $msiLogsSaved = Save-MsiLogsForFailure
+        }
     }
 
     try {
