@@ -94,7 +94,7 @@ public class LauncherAgentCatalogTests
 
     [Theory]
     [InlineData("claude", "/thread-owl-pr-reviewer", "/review-raven-thread-owl-cycle")]
-    [InlineData("codex", "/thread-owl-pr-reviewer", "/review-raven-thread-owl-cycle")]
+    [InlineData("codex", "$thread-owl-pr-reviewer", "$review-raven-thread-owl-cycle")]
     [InlineData("agy", "/thread-owl-pr-reviewer", "/review-raven-thread-owl-cycle")]
     [InlineData("copilot", "/thread-owl-pr-reviewer", "/review-raven-thread-owl-cycle")]
     public void All_ShouldInvokeOfficialReviewSkills(
@@ -147,8 +147,8 @@ public class LauncherAgentCatalogTests
     [InlineData("claude", "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     [InlineData("agy", "--print-timeout 30m --output-format stream-json -p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "agy")]
     [InlineData("agy", "--print-timeout 30m --output-format stream-json -p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"", "reviewed", "agy")]
-    [InlineData("codex", "exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "codex")]
-    [InlineData("codex", "exec --json \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"", "reviewed", "codex")]
+    [InlineData("codex", "exec --skip-git-repo-check --json \"$thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"", "reviewer", "codex")]
+    [InlineData("codex", "exec --json \"$review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"", "reviewed", "codex")]
     [InlineData("claude", "--something-else", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     [InlineData("unknown-cmd", "unknown-args", "reviewer", LauncherAgentCatalog.CustomPresetId)]
     public void ResolvePresetId_ShouldMatchExactCommandAndArguments(string command, string arguments, string roleName, string expectedPresetId)

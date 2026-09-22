@@ -394,15 +394,17 @@ public class ReviewLauncherServiceTests : IDisposable
         log.Should().NotContain(secret);
     }
 
-    [Fact]
-    public async Task LaunchAsync_ShouldExplainSkillInvocationFailure()
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
+    public async Task LaunchAsync_ShouldExplainSkillInvocationFailure(string presetId)
     {
-        LauncherAgentDefinition codex = LauncherAgentCatalog.Find("codex")!;
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
         ConfigureSettings(
-            reviewerCmd: codex.Command,
-            reviewerArgs: codex.ReviewerArgumentsTemplate,
-            reviewerResumeArgs: codex.ReviewerResumeArgumentsTemplate,
-            reviewerPresetId: codex.Id);
+            reviewerCmd: definition.Command,
+            reviewerArgs: definition.ReviewerArgumentsTemplate,
+            reviewerResumeArgs: definition.ReviewerResumeArgumentsTemplate,
+            reviewerPresetId: definition.Id);
         Mock<IProcessInstance> process = CreateMockProcess(
             42,
             string.Empty,
@@ -485,8 +487,8 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Reviewer", "codex", "codex exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\"")]
-    [InlineData("Reviewed", "codex", "codex exec --json \"/review-raven-thread-owl-cycle scottlz0310/squirrel-notifier#123 のレビュー指摘に対応してください\"")]
+    [InlineData("Reviewer", "codex", "codex exec --skip-git-repo-check --json \"$thread-owl-pr-reviewer scottlz0310/squirrel-notifier#123 を opened モードでレビューしてください\"")]
+    [InlineData("Reviewed", "codex", "codex exec --json \"$review-raven-thread-owl-cycle scottlz0310/squirrel-notifier#123 のレビュー指摘に対応してください\"")]
     public async Task BuildCommandLine_ShouldUseSkillInvocationForCodex(string roleName, string presetId, string expected)
     {
         LauncherRole role = Enum.Parse<LauncherRole>(roleName);
@@ -764,8 +766,8 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedArguments.Should().HaveCount(2);
         capturedArguments[0].Should().NotContain(resumeOption);
         capturedArguments[1].Should().ContainInOrder(resumeOption, sessionId.ToString("D"));
-        string.Join(" ", capturedArguments[0]).Should().Contain("/thread-owl-pr-reviewer");
-        string.Join(" ", capturedArguments[1]).Should().Contain("/thread-owl-pr-reviewer");
+        string.Join(" ", capturedArguments[0]).Should().Contain("thread-owl-pr-reviewer");
+        string.Join(" ", capturedArguments[1]).Should().Contain("thread-owl-pr-reviewer");
         store.SavedSessionIds.Should().Equal(sessionId, sessionId);
         (first.Stdout.Contains("thread.started", StringComparison.Ordinal)
             || first.Stdout.Contains("step_update", StringComparison.Ordinal)).Should().BeTrue();

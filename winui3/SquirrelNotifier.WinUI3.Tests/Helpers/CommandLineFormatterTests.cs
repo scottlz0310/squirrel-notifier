@@ -40,11 +40,11 @@ public class CommandLineFormatterTests
                 "exec",
                 "--skip-git-repo-check",
                 "--json",
-                "/thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください",
+                "$thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください",
             });
 
         result.Should().Be(
-            "codex exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください\"");
+            "codex exec --skip-git-repo-check --json \"$thread-owl-pr-reviewer owner/repo#123 を opened モードでレビューしてください\"");
     }
 
     [Fact]

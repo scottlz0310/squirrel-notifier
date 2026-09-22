@@ -218,6 +218,21 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // #353 の codex 既定値は skill を / で呼んでいたが、codex の skill 呼び出し構文は $ で始まる（#395）。
+        // 旧既定値と完全一致するスロットだけ一回限り移行し、自由編集された値は保持する.
+        if (!_settings.CodexSkillPromptPrefixMigrated)
+        {
+            MigrateLauncherSkillPrompt(
+                command: "codex",
+                legacyReviewerArguments: "exec --skip-git-repo-check --json \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+                legacyReviewedArguments: "exec --json \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
+                legacyReviewerResumeArguments: "exec resume --skip-git-repo-check --json {sessionId} \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+                legacyReviewedResumeArguments: "exec resume --json {sessionId} \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"");
+
+            _settings.CodexSkillPromptPrefixMigrated = true;
+            SaveSettings();
+        }
+
         // #305 より前の settings.json には resume テンプレートが無い。command / 通常引数が
         // 現行プリセットと完全一致するスロットだけを補完し、自由編集された設定は空のまま保つ。
         if (!_settings.LauncherResumeTemplatesMigrated)
@@ -656,6 +671,9 @@ internal sealed class AppSettings
 
     // launcher の MCP 全文プロンプトを正式 skill 呼び出しへ移行する一回限り migration（#353）
     public bool LauncherSkillPromptMigrated { get; set; }
+
+    // codex の skill 呼び出しプレフィックスを / から $ へ移行する一回限り migration（#395）
+    public bool CodexSkillPromptPrefixMigrated { get; set; }
 
     // launcher スロットに選択されているエージェントプリセット ID（LauncherAgentCatalog 参照）。
     // 自由編集でどのプリセットとも一致しなくなった場合は LauncherAgentCatalog.CustomPresetId になる.
