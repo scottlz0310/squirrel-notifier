@@ -25,6 +25,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'DesktopE2EEvidence.psm1') -Force
+
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $scenarioManifestFile = switch ($Scenario) {
     'DesktopSmoke' { 'desktop-smoke.json' }
@@ -290,20 +292,6 @@ function Get-ScenarioRemainingMilliseconds {
     return [int][Math]::Min($remainingMilliseconds, [int]::MaxValue)
 }
 
-function ConvertTo-ReleaseVersion {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Value
-    )
-
-    $match = [regex]::Match($Value.Trim(), '^v?(\d+)\.(\d+)\.(\d+)(?:\.0)?(?:[-+][0-9A-Za-z.-]+)?$')
-    if (-not $match.Success) {
-        return $null
-    }
-
-    return '{0}.{1}.{2}' -f $match.Groups[1].Value, $match.Groups[2].Value, $match.Groups[3].Value
-}
-
 function Invoke-Msi {
     param(
         [Parameter(Mandatory)]
@@ -364,11 +352,14 @@ function Assert-InstalledVersion {
     }
 
     $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($installedExecutable)
-    $expectedVersionKey = ConvertTo-ReleaseVersion -Value $ExpectedVersion
-    $actualVersionKey = ConvertTo-ReleaseVersion -Value $versionInfo.ProductVersion
-    if ($null -eq $expectedVersionKey -or $null -eq $actualVersionKey -or $actualVersionKey -cne $expectedVersionKey) {
+    $check = Test-InstalledVersion `
+        -ExpectedVersion $ExpectedVersion `
+        -ProductVersion $versionInfo.ProductVersion `
+        -FileVersion $versionInfo.FileVersion `
+        -ExecutablePath $installedExecutable
+    if (-not $check.Matches) {
         Set-FailureCategory -Category 'CONTRACT_VERSION_MISMATCH'
-        throw "インストールされた製品 version が期待値と異なります。期待値=$ExpectedVersion"
+        throw $check.Message
     }
 }
 
@@ -1017,6 +1008,28 @@ function Get-ProcessWindowSnapshot {
     return $windows.ToArray()
 }
 
+function Save-MsiLogsForFailure {
+    # 退避の失敗は scenario の結果を変えない（Save-DiagnosticEvidence と同じ best-effort 契約）。
+    if (-not $artifactDirectoryReady) {
+        return $false
+    }
+
+    try {
+        $savedMsiLogs = Save-MsiLogArtifact `
+            -LogPath @($installLogPath, $uninstallLogPath) `
+            -ArtifactDirectory $scenarioArtifactDirectory `
+            -Sanitize { param($Text) ConvertTo-SanitizedText -Text $Text }
+        if ($savedMsiLogs.Count -eq 0) {
+            Write-ScenarioLog 'msiexec のログが見つかりませんでした。'
+        }
+        return $true
+    }
+    catch {
+        Write-ScenarioLog 'msiexec のログの退避に失敗しました。scenario の結果には影響しません。'
+        return $false
+    }
+}
+
 function Save-DiagnosticEvidence {
     <#
         失敗原因を artifact だけで判別できるようにするための証跡を収集する（#386）。
@@ -1414,6 +1427,15 @@ finally {
         $cleanupErrors.Add("残留が検出されました: $($residuals -join ', ')")
     }
 
+    # msiexec のログは runRoot と一緒に削除されるため、失敗時は削除前に退避する（#397）。
+    # uninstall ログと cleanup 失敗も対象にするため、cleanup と残留検査の後・runRoot 削除の前に行う。
+    # この時点の $result.status は cleanup 失敗をまだ反映しないため、$cleanupErrors も条件に含める。
+    # runRoot 自体の削除失敗は削除後にしか分からないため、その場合は削除試行の後に退避する。
+    $msiLogsSaved = $false
+    if ($result.status -ne 'passed' -or $cleanupErrors.Count -ne 0) {
+        $msiLogsSaved = Save-MsiLogsForFailure
+    }
+
     $runRootRemoved = $false
     try {
         if (Test-Path -LiteralPath $runRoot) {
@@ -1426,6 +1448,9 @@ finally {
     }
     catch {
         $cleanupErrors.Add('専用 temporary root を削除できませんでした。')
+        if (-not $msiLogsSaved) {
+            $msiLogsSaved = Save-MsiLogsForFailure
+        }
     }
 
     try {
