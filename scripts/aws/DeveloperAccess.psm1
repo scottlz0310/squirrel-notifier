@@ -11,9 +11,12 @@ $script:ArnValuePatterns = @{
     Region          = '^[a-z]{2}(-[a-z]+)+-\d{1,2}$'
     InstanceId      = '^i-[0-9a-f]{8,17}$'
     # 1 階層（/squirrel-notifier など）はアプリ全体の parameter を含んでしまうため、2 階層以上を要求する。
-    ParameterPrefix = '^(/[A-Za-z0-9_.-]+){2,}/?$'
-    AdminRoleName   = '^[A-Za-z0-9+=,.@_-]{1,64}$'
-    UserName        = '^[A-Za-z0-9+=,.@_-]{1,64}$'
+    ParameterPrefix     = '^(/[A-Za-z0-9_.-]+){2,}/?$'
+    AdminRoleName       = '^[A-Za-z0-9+=,.@_-]{1,64}$'
+    RunnerRoleName      = '^[A-Za-z0-9+=,.@_-]{1,64}$'
+    OidcRoleName        = '^[A-Za-z0-9+=,.@_-]{1,64}$'
+    InstanceProfileName = '^[A-Za-z0-9+=,.@_-]{1,128}$'
+    UserName            = '^[A-Za-z0-9+=,.@_-]{1,64}$'
 }
 
 function Assert-ArnValue
@@ -38,8 +41,13 @@ function New-DeveloperOperatorPolicy
       変更系の操作は runner instance、Run Command のドキュメント、parameter prefix に限定する。
       Describe 系と Run Command の結果取得はリソース単位の制限をサポートしないため "*" とする。
 
+      EC2 の読み取りは ec2:Describe* とする。Admin が作る AMI・Launch Template・Security Group を
+      この権限で検証するため（#380）、個別に列挙すると検証のたびに Admin での再適用が要る。
+
       IAM の書き込み権限は持たせない。アクセスキーを作らず、資格情報を aws login の
       一時資格情報に限る前提を、ユーザー自身の権限で崩せないようにするため。
+      IAM の読み取りは、Admin が適用したロールのポリシーを検証できるよう、本プロジェクトの
+      ロールと instance profile に限って許可する。
     #>
     param(
         [Parameter(Mandatory)]
@@ -55,7 +63,16 @@ function New-DeveloperOperatorPolicy
         [string]$ParameterPrefix,
 
         [Parameter(Mandatory)]
-        [string]$AdminRoleName
+        [string]$AdminRoleName,
+
+        [Parameter(Mandatory)]
+        [string]$RunnerRoleName,
+
+        [Parameter(Mandatory)]
+        [string]$InstanceProfileName,
+
+        [Parameter(Mandatory)]
+        [string]$OidcRoleName
     )
 
     Assert-ArnValue -Name 'AccountId' -Value $AccountId
@@ -63,11 +80,21 @@ function New-DeveloperOperatorPolicy
     Assert-ArnValue -Name 'InstanceId' -Value $InstanceId
     Assert-ArnValue -Name 'ParameterPrefix' -Value $ParameterPrefix
     Assert-ArnValue -Name 'AdminRoleName' -Value $AdminRoleName
+    Assert-ArnValue -Name 'RunnerRoleName' -Value $RunnerRoleName
+    Assert-ArnValue -Name 'InstanceProfileName' -Value $InstanceProfileName
+    Assert-ArnValue -Name 'OidcRoleName' -Value $OidcRoleName
 
     $instanceArn = "arn:aws:ec2:${Region}:${AccountId}:instance/$InstanceId"
     $documentArn = "arn:aws:ssm:${Region}::document/AWS-RunPowerShellScript"
     $parameterArn = "arn:aws:ssm:${Region}:${AccountId}:parameter$($ParameterPrefix.TrimEnd('/'))/*"
     $adminRoleArn = "arn:aws:iam::${AccountId}:role/$AdminRoleName"
+    $projectIamArns = @(
+        $adminRoleArn,
+        "arn:aws:iam::${AccountId}:role/$RunnerRoleName",
+        "arn:aws:iam::${AccountId}:role/$OidcRoleName",
+        "arn:aws:iam::${AccountId}:instance-profile/$InstanceProfileName",
+        "arn:aws:iam::${AccountId}:oidc-provider/token.actions.githubusercontent.com"
+    )
 
     return [ordered]@{
         Version   = '2012-10-17'
@@ -75,15 +102,29 @@ function New-DeveloperOperatorPolicy
             [ordered]@{
                 # ssm:DescribeInstanceInformation はスクリプトからは呼ばないが、Run Command が
                 # 届かないときに最初に確認する SSM 登録状態の読み取りなので含める。
-                Sid      = 'DescribeDesktopE2ERunner'
+                # ssm:DescribeParameters は値を返さず、名前と型などのメタデータだけを返す。
+                Sid      = 'DescribeDesktopE2EResources'
                 Effect   = 'Allow'
                 Action   = @(
-                    'ec2:DescribeInstances',
-                    'ec2:DescribeInstanceStatus',
-                    'ec2:DescribeIamInstanceProfileAssociations',
-                    'ssm:DescribeInstanceInformation'
+                    'ec2:Describe*',
+                    'ssm:DescribeInstanceInformation',
+                    'ssm:DescribeParameters'
                 )
                 Resource = '*'
+            }
+            [ordered]@{
+                Sid      = 'ReadDesktopE2EIamRoles'
+                Effect   = 'Allow'
+                Action   = @(
+                    'iam:GetRole',
+                    'iam:GetRolePolicy',
+                    'iam:ListRolePolicies',
+                    'iam:ListAttachedRolePolicies',
+                    'iam:SimulatePrincipalPolicy',
+                    'iam:GetInstanceProfile',
+                    'iam:GetOpenIDConnectProvider'
+                )
+                Resource = $projectIamArns
             }
             [ordered]@{
                 Sid      = 'StartStopDesktopE2ERunner'

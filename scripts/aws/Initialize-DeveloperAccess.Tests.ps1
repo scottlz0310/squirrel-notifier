@@ -66,6 +66,7 @@ Describe 'Initialize-DeveloperAccess.ps1' {
     It '<Name> が不正なら何も書き込まずに止まる' -ForEach @(
         @{ Name = 'ParameterPrefix'; Value = '/' }
         @{ Name = 'AdminRoleName'; Value = '*' }
+        @{ Name = 'OidcRoleName'; Value = '*' }
         @{ Name = 'InstanceId'; Value = '*' }
         @{ Name = 'UserName'; Value = '*' }
     ) {
