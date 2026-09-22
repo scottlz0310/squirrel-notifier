@@ -1377,23 +1377,6 @@ finally {
         }
     }
 
-    # msiexec のログは runRoot と一緒に削除されるため、失敗時は削除前に退避する（#397）。
-    # uninstall ログも含めるため uninstall の後に行う。退避の失敗は scenario の結果を変えない。
-    if ($result.status -ne 'passed' -and $artifactDirectoryReady) {
-        try {
-            $savedMsiLogs = Save-MsiLogArtifact `
-                -LogPath @($installLogPath, $uninstallLogPath) `
-                -ArtifactDirectory $scenarioArtifactDirectory `
-                -Sanitize { param($Text) ConvertTo-SanitizedText -Text $Text }
-            if ($savedMsiLogs.Count -eq 0) {
-                Write-ScenarioLog 'msiexec のログが見つかりませんでした。'
-            }
-        }
-        catch {
-            Write-ScenarioLog 'msiexec のログの退避に失敗しました。scenario の結果には影響しません。'
-        }
-    }
-
     if (-not $settingsExistedBefore -and (Test-Path -LiteralPath $settingsDirectory -PathType Container)) {
         try {
             Remove-Item -LiteralPath $settingsDirectory -Recurse -Force -ErrorAction Stop
@@ -1420,6 +1403,25 @@ finally {
     }
     if ($residuals.Count -ne 0) {
         $cleanupErrors.Add("残留が検出されました: $($residuals -join ', ')")
+    }
+
+    # msiexec のログは runRoot と一緒に削除されるため、失敗時は削除前に退避する（#397）。
+    # uninstall ログと cleanup 失敗も対象にするため、cleanup と残留検査の後・runRoot 削除の前に行う。
+    # この時点の $result.status は cleanup 失敗をまだ反映しないため、$cleanupErrors も条件に含める。
+    # 退避の失敗は scenario の結果を変えない。
+    if (($result.status -ne 'passed' -or $cleanupErrors.Count -ne 0) -and $artifactDirectoryReady) {
+        try {
+            $savedMsiLogs = Save-MsiLogArtifact `
+                -LogPath @($installLogPath, $uninstallLogPath) `
+                -ArtifactDirectory $scenarioArtifactDirectory `
+                -Sanitize { param($Text) ConvertTo-SanitizedText -Text $Text }
+            if ($savedMsiLogs.Count -eq 0) {
+                Write-ScenarioLog 'msiexec のログが見つかりませんでした。'
+            }
+        }
+        catch {
+            Write-ScenarioLog 'msiexec のログの退避に失敗しました。scenario の結果には影響しません。'
+        }
     }
 
     $runRootRemoved = $false
