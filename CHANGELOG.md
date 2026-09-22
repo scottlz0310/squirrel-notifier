@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- release workflow の publish を desktop E2E（DesktopSmoke）に依存させ、desktop E2E が成功した配布物だけを公開するようにした。release 経路での DesktopSmoke の通過は workflow_dispatch（publish なし）で確認した。DesktopFull への引き上げは引き続き #381 で追跡する
+
 ### Fixed
 
 - desktop E2E が使い回しの self-hosted runner に残った前回の MSI（例: 0.13.1）を選んでインストールし、`CONTRACT_VERSION_MISMATCH` で失敗していたのを修正した。download / build の前に `release-output` と `artifacts/e2e/desktop` を空にし、MSI はちょうど 1 個を要求する。前回 run の証跡が artifact へ混ざる問題も解消する（#399）
