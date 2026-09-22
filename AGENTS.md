@@ -69,7 +69,7 @@ dotnet build winui3\SquirrelNotifier.WinUI3.sln -c Release -p:Platform=x64
 
 | サーバー | 用途 |
 |---|---|
-| `aws` | AWS MCP Server（`mcp-proxy-for-aws` 経由）。desktop E2E runner の EC2 instance と SSM（Run Command / Parameter Store）を扱う。`scripts/aws/*.ps1` と同じ対象を、スクリプト化前の調査・復旧で直接操作するために使う |
+| `aws` | AWS MCP Server（`mcp-proxy-for-aws-cli` 経由）。desktop E2E runner の EC2 instance と SSM（Run Command / Parameter Store）を扱う。`scripts/aws/*.ps1` と同じ対象を、スクリプト化前の調査・復旧で直接操作するために使う |
 
 前提と運用:
 
@@ -77,6 +77,7 @@ dotnet build winui3\SquirrelNotifier.WinUI3.sln -c Release -p:Platform=x64
 - リージョンは `--metadata AWS_REGION=us-east-1` で渡し、`scripts/aws/*.ps1` の既定値と揃えています。片方を変える場合は両方を合わせてください。
 - 変更操作（mutating operations）を許可しています。read-only に絞る場合は `--read-only` を付けるか IAM 側で制限します。EC2 instance の停止・削除、SSM Parameter の上書き、AMI の削除などは実行前にユーザーへ確認してください。
 - `awslabs.aws-api-mcp-server` は end of development のため採用しません（起動時に deprecation notice が出ます）。後継の AWS MCP Server はマネージドのリモートエンドポイントで、リクエストは `aws-mcp.<region>.api.aws` へ送られます。
+- 配布物は library 版の `mcp-proxy-for-aws` ではなく、依存が pin された CLI 版 `mcp-proxy-for-aws-cli` を使います（上流が MCP クライアント向けに案内しているのは CLI 版です）。
 - バージョンは `@latest` で解決します。Renovate は `.mcp.json` を認識しないため、ピン留めするとバージョンが更新されないまま残ります。
 - クライアント側（Claude Code 等）は `.mcp.json` のサーバーを初回に承認する必要があります。承認状態は個人環境に保存され、リポジトリには残りません。
 
