@@ -81,11 +81,11 @@ jobs:
 
   # TEMPORARY: DesktopFull の実行前提（DESKTOP_E2E_GATEWAY_URL 等の secret と
   # mcp-docker / mcp-gateway / thread-owl / mcp-resource-subscriber の外部 component stack）
-  # が未整備で、gate は導入以来一度も成功していない。v0.13.1 を出すため一時的に無効化する。
-  # publish はこの job の結果に依存しない状態へ戻すこと。復帰は #381 で追跡する。
+  # が未整備のため、release 経路では DesktopSmoke を観測目的で実行する。
+  # release 経路での通過を確認するまで publish はこの job に依存させない。
+  # publish の依存復帰と DesktopFull への引き上げは #381 で追跡する。
   desktop-e2e:
     needs: build-package
-    if: false
     uses: ./.github/workflows/desktop-e2e.yml
     permissions:
       contents: read
@@ -94,13 +94,13 @@ jobs:
     with:
       release_artifact_name: release-payload-x64
       expected_version: ${{ needs.build-package.outputs.version }}
-      scenario: DesktopFull
+      scenario: DesktopSmoke
       artifact_retention_days: 90
     secrets: inherit
 
   publish:
     needs: build-package
-    # TEMPORARY: desktop E2E gate の無効化に伴い、desktop-e2e への依存を外している（#381）。
+    # TEMPORARY: release 経路での desktop E2E の通過を確認するまで、desktop-e2e への依存を外している（#381）。
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     permissions:

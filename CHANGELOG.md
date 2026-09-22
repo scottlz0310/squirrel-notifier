@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-22
+
+desktop E2E 基盤の自動化と、購読 preflight 失敗時のクラッシュ修正を含むリリースです。release 経路で desktop E2E（DesktopSmoke）を実行しますが、publish はまだその結果に依存しません。
+
 ### Added
 
 - desktop E2E runner を EC2 起動だけで online にする bootstrap を `scripts/aws/` に追加した。SSM Run Command で自動ログオン・ログオン時の runner 起動・対話セッション維持を適用し、RDP でログオンして `run.cmd` を実行する手作業をなくす。自動ログオンのパスワードは registry へ平文で書かず、SSM Parameter Store から取得して LSA secret へ格納する（#392）
@@ -19,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 購読 preflight 失敗直後にトレイアイコンの初期化前へバルーン通知を表示し、Windows Server / RDP 環境でプロセスがクラッシュすることがある問題を修正した。通知をトレイアイコン生成後へ保留し、表示失敗はログへ記録してプロセスを継続する（#388）
 - desktop E2E の UI Automation 待機が、製品プロセスの終了を検知せず scenario timeout まで待ち切っていたのを修正した。終了を検知した時点で失敗させ、失敗分類を `TIMEOUT` から `PRODUCT_UI_FAILED` へ改めて終了コードを記録する（#385）
 - Desktop E2E Dispatch が再利用ワークフローのジョブを生成できず run が失敗していたのを修正した。`workflow_dispatch` の入力を文字列として受け、`fromJSON` で数値化してから `type: number` の入力へ渡すようにし、あわせて保持日数の範囲を dispatcher 側で検証するようにした（#374）
+
+### Changed
+
+- release workflow の desktop E2E を DesktopSmoke で再有効化した。release 経路で EC2 runner の起動から停止までが人手なしで通ることを観測するためで、publish はまだこの job の結果に依存しない。publish の依存復帰と DesktopFull への引き上げは #381 で追跡する
 
 ## [0.13.1] - 2026-09-21
 
@@ -506,7 +514,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.11.0...v0.12.0
