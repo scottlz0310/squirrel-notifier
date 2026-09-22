@@ -23,6 +23,10 @@
   1. root で IAM コンソールを開き、作成したユーザーにコンソールパスワードを設定する。
      aws iam create-login-profile はパスワードをコマンドライン引数へ載せるため使わない。
   2. 同じ画面でそのユーザーに MFA デバイスを登録する。未登録のままでは Admin ロールを引き受けられない。
+     CLI から Admin を引き受けるには、認証アプリ（TOTP）型のデバイスが必要になる。AWS CLI の mfa_serial は
+     パスキーやセキュリティキーを扱えない。パスキーはコンソールのサインイン用として併用してよい。
+     IAM ユーザー自身は IAM の権限を持たないため、後から MFA を追加するときは、コンソールで Admin ロールへ
+     切り替えてから（または root で）登録する。
   3. aws login で IAM ユーザーとしてサインインし直す。default の login_session が置き換わる。
      aws sts get-caller-identity の Arn が user/<UserName> になっていることを確認する。
   4. Admin が必要な作業のために ~/.aws/config へ次を追加する。aws login の資格情報を
@@ -34,7 +38,7 @@
        [profile admin]
        role_arn = <出力の adminRoleArn>
        source_profile = signin-process
-       mfa_serial = <手順 2 で登録した MFA デバイスの ARN>
+       mfa_serial = <手順 2 で登録した TOTP デバイスの ARN（arn:aws:iam::<account>:mfa/<デバイス名>）>
   5. 以降、root は請求とアカウント設定だけに使う。
 .EXAMPLE
   .\Initialize-DeveloperAccess.ps1 -UserName developer -InstanceId i-0123456789abcdef0
