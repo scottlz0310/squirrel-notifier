@@ -56,6 +56,8 @@ function New-DesktopRunnerLogonTaskXml
       desktop E2E の harness は対話ログオン済み session と非 SYSTEM ユーザーを要求するため、
       service（session 0）として起動する構成を取ってはならない（#378）。
       ExecutionTimeLimit は PT0S（無制限）とし、runner が長時間待機しても打ち切られないようにする。
+      run.cmd を直接起動せず Start-DesktopRunner.ps1 を経由させ、永続 runner と JIT runner の
+      どちらで起動するかを instance ごとに判定させる（#380）。
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -68,6 +70,14 @@ function New-DesktopRunnerLogonTaskXml
         [ValidateNotNullOrEmpty()]
         [string]$RunnerDirectory,
 
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$LauncherPath,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ConfigPath,
+
         [ValidateRange(0, 3600)]
         [int]$StartDelaySeconds = 30,
 
@@ -78,6 +88,8 @@ function New-DesktopRunnerLogonTaskXml
     $escapedUser = [System.Security.SecurityElement]::Escape($TaskUserId)
     $escapedDirectory = [System.Security.SecurityElement]::Escape($RunnerDirectory)
     $escapedDescription = [System.Security.SecurityElement]::Escape($Description)
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ConfigPath "{1}"' -f $LauncherPath, $ConfigPath
+    $escapedArguments = [System.Security.SecurityElement]::Escape($arguments)
     $delay = 'PT{0}S' -f $StartDelaySeconds
 
     return @"
@@ -123,13 +135,69 @@ function New-DesktopRunnerLogonTaskXml
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>cmd.exe</Command>
-      <Arguments>/c run.cmd</Arguments>
+      <Command>powershell.exe</Command>
+      <Arguments>$escapedArguments</Arguments>
       <WorkingDirectory>$escapedDirectory</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>
 "@
+}
+
+function New-DesktopRunnerLaunchPlan
+{
+    <#
+    .SYNOPSIS
+      ログオン時に runner をどの方式で起動するかを決める。
+    .DESCRIPTION
+      AMI は永続 runner を登録済みの instance から作るため、AMI から起動した instance にも
+      永続 runner の資格情報（.runner / .credentials）が残る。これを使うと複数 instance が同じ
+      runner として接続し、job を取り合う。そこで bootstrap を適用した instance（LegacyInstanceId）
+      だけを永続 runner とし、それ以外は資格情報を削除したうえで JIT runner として起動する（#380）。
+
+      CurrentInstanceId と LegacyInstanceId の比較だけで決め、tag や SSM parameter の有無には依存しない。
+      parameter の書き込み遅延で永続 runner へ落ちる経路を作らないためである。
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^i-[0-9a-f]{8,17}$')]
+        [string]$CurrentInstanceId,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^i-[0-9a-f]{8,17}$')]
+        [string]$LegacyInstanceId,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RunnerDirectory,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^/[A-Za-z0-9_.\-/]*[A-Za-z0-9_.\-]$')]
+        [string]$JitParameterPrefix
+    )
+
+    if ($CurrentInstanceId -eq $LegacyInstanceId)
+    {
+        return [pscustomobject]@{
+            Mode                    = 'persistent'
+            JitParameterName        = $null
+            CredentialFilesToRemove = @()
+        }
+    }
+
+    # Join-Path は PowerShell provider でドライブを解決するため、Linux の Pester では C: が無く失敗する。
+    # 対象は常に Windows instance 上のパスなので、区切り文字を固定して連結する。
+    $runnerRoot = $RunnerDirectory.TrimEnd('\')
+    $credentialFiles = @('.runner', '.credentials', '.credentials_rsaparams') |
+        ForEach-Object { '{0}\{1}' -f $runnerRoot, $_ }
+
+    return [pscustomobject]@{
+        Mode                 = 'jit'
+        JitParameterName     = '{0}/{1}' -f $JitParameterPrefix, $CurrentInstanceId
+        CredentialFilesToRemove = @($credentialFiles)
+    }
 }
 
 function New-DesktopRunnerSessionPolicyPlan
@@ -294,6 +362,7 @@ function New-DesktopRunnerBootstrapReport
 Export-ModuleMember -Function @(
     'New-DesktopRunnerWinlogonPlan'
     'New-DesktopRunnerLogonTaskXml'
+    'New-DesktopRunnerLaunchPlan'
     'New-DesktopRunnerSessionPolicyPlan'
     'Get-DesktopRunnerInstanceProfileDecision'
     'New-DesktopRunnerBootstrapReport'

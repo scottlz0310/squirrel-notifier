@@ -5,6 +5,10 @@
   自動ログオンを有効化し、ログオン時に GitHub Actions self-hosted runner を起動する
   タスクを登録し、対話セッションを失わせる電源・ロック設定を無効化する。
 
+  ログオンタスクは run.cmd を直接起動せず、Start-DesktopRunner.ps1 を経由する（#380）。
+  本スクリプトを適用した instance（-LegacyInstanceId）では永続 runner を起動し、この instance から
+  作った AMI で起動した使い捨て instance では JIT runner を起動する。
+
   自動ログオンのパスワードは registry へ平文で書かず、LSA secret（DefaultPassword）へ格納する。
   パスワードの出所は SSM Parameter Store の SecureString を既定とし、RDP から手で流す場合のみ
   -Password を使う。
@@ -16,9 +20,9 @@
   SSM Run Command（AWS-RunPowerShellScript）から SYSTEM 権限で実行することを想定し、
   Windows PowerShell 5.1 で動く構文だけを使う。
 .EXAMPLE
-  .\Setup-DesktopRunnerHost.ps1 -PasswordParameterName /squirrel-notifier/desktop-e2e/autologon-password -Region us-east-1
+  .\Setup-DesktopRunnerHost.ps1 -LegacyInstanceId i-0123456789abcdef0 -PasswordParameterName /squirrel-notifier/desktop-e2e/autologon-password -Region us-east-1
 .EXAMPLE
-  .\Setup-DesktopRunnerHost.ps1 -Password (Read-Host -AsSecureString '自動ログオンするユーザーのパスワード')
+  .\Setup-DesktopRunnerHost.ps1 -LegacyInstanceId i-0123456789abcdef0 -Region us-east-1 -Password (Read-Host -AsSecureString '自動ログオンするユーザーのパスワード')
 #>
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'SsmParameter')]
 param(
@@ -26,13 +30,17 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$PasswordParameterName,
 
-    [Parameter(ParameterSetName = 'SsmParameter')]
-    [ValidateNotNullOrEmpty()]
-    [string]$Region,
-
     [Parameter(Mandatory, ParameterSetName = 'DirectPassword')]
     [ValidateNotNull()]
     [securestring]$Password,
+
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Region,
+
+    [Parameter(Mandatory)]
+    [ValidatePattern('^i-[0-9a-f]{8,17}$')]
+    [string]$LegacyInstanceId,
 
     [ValidateNotNullOrEmpty()]
     [string]$RunnerDirectory = 'C:\Users\Administrator\actions-runner',
@@ -42,6 +50,15 @@ param(
 
     [ValidateNotNullOrEmpty()]
     [string]$TaskName = 'GitHubActionsRunner-SquirrelNotifierDesktop',
+
+    [ValidateNotNullOrEmpty()]
+    [string]$LauncherDirectory = 'C:\ProgramData\SquirrelNotifier\desktop-runner',
+
+    [ValidateNotNullOrEmpty()]
+    [string]$JitParameterPrefix = '/squirrel-notifier/desktop-e2e/jit',
+
+    [ValidateRange(60, 7200)]
+    [int]$JitWaitSeconds = 1800,
 
     [ValidateRange(0, 3600)]
     [int]$StartDelaySeconds = 30,
@@ -356,7 +373,33 @@ if ($PSCmdlet.ShouldProcess($winlogonPlan.Path, '自動ログオンを有効化�
     $completedSteps.Add('winlogon-registry')
 }
 
-$taskXml = New-DesktopRunnerLogonTaskXml -TaskUserId $autoLogonUserId -RunnerDirectory $RunnerDirectory -StartDelaySeconds $StartDelaySeconds
+$launcherPath = Join-Path $LauncherDirectory 'Start-DesktopRunner.ps1'
+$launcherConfigPath = Join-Path $LauncherDirectory 'launcher.json'
+if ($PSCmdlet.ShouldProcess($LauncherDirectory, 'runner 起動ラッパーを配置'))
+{
+    New-Item -ItemType Directory -Path $LauncherDirectory -Force | Out-Null
+    foreach ($name in @('Start-DesktopRunner.ps1', 'DesktopRunnerHost.psm1'))
+    {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $LauncherDirectory $name) -Force
+    }
+
+    $launcherConfig = [ordered]@{
+        legacyInstanceId   = $LegacyInstanceId
+        runnerDirectory    = $RunnerDirectory
+        region             = $Region
+        jitParameterPrefix = $JitParameterPrefix
+        jitWaitSeconds     = $JitWaitSeconds
+    }
+    Set-Content -LiteralPath $launcherConfigPath -Value ($launcherConfig | ConvertTo-Json) -Encoding UTF8
+    $completedSteps.Add('launcher')
+}
+
+$taskXml = New-DesktopRunnerLogonTaskXml `
+    -TaskUserId $autoLogonUserId `
+    -RunnerDirectory $RunnerDirectory `
+    -LauncherPath $launcherPath `
+    -ConfigPath $launcherConfigPath `
+    -StartDelaySeconds $StartDelaySeconds
 if ($PSCmdlet.ShouldProcess($TaskName, 'ログオン時に runner を起動するタスクを登録'))
 {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
