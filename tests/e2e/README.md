@@ -97,8 +97,12 @@ DesktopFull は secret-bearing driver と target package が同じ runner 上で
 
 秘密鍵はworkflowログへ出力しません。
 
-IAM role には対象 instance に対する `DescribeInstances`、`DescribeInstanceStatus`、
-`StartInstances`、`StopInstances` だけを許可し、長期 AWS access key は使用しません。
+IAM role の信頼ポリシーと権限は `scripts/aws/Initialize-DesktopE2EOidcRole.ps1` で管理し、
+長期 AWS access key は使用しません。信頼は `desktop-e2e` environment の job だけ
+（sub = `repo:<owner>/<repo>:environment:desktop-e2e`）に限ります。現行 workflow が使うのは対象
+instance の `DescribeInstances`、`DescribeInstanceStatus`、`StartInstances`、`StopInstances` だけです。
+使い捨て instance 向けの Launch Template 経由の起動と、タグで限定した terminate も許可していますが、
+workflow が使うのは #380 で使い捨て方式へ移行してからです。
 workflow 開始前から instance が稼働していた場合は、別の運用主体の状態を保護するため停止しません。
 停止中の instance をこの workflow が起動した場合だけ、E2E の成功・失敗・キャンセル後に停止します。
 同一 instance の同時利用は `concurrency` で直列化します。
