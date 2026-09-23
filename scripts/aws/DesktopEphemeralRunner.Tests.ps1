@@ -120,8 +120,8 @@ Describe 'Select-OrphanedDesktopEphemeralRunner / Select-InconsistentDesktopEphe
 
 Describe 'Test-DesktopEphemeralInstanceGone' {
     It '取り直した状態が <State> なら <Expected>' -ForEach @(
-        @{ State = $null; Expected = $true }
-        @{ State = ''; Expected = $true }
+        @{ State = $null; Expected = $false }
+        @{ State = ''; Expected = $false }
         @{ State = 'shutting-down'; Expected = $true }
         @{ State = 'terminated'; Expected = $true }
         @{ State = 'pending'; Expected = $false }

@@ -383,8 +383,10 @@ cleanup 自体の失敗に備え、`desktop-e2e-reaper.yml` が 1 時間ごと�
   有効期限ポリシーも付けるため、これは二重の保険になる
 - instance が無くなった使い捨て runner（`squirrel-notifier-ephemeral-<instance-id>`）の登録を削除する。
   候補は offline で job を実行していないものだけで、削除の直前に instance ID ごとに状態を取り直し、
-  NotFound か破棄中・破棄済みのときだけ削除する（一覧の取得後に起動・登録された runner を消さないため）。
-  名前の形式が違う永続 runner は削除しない。使われなかった ephemeral runner は GitHub も 1 日で自動削除する
+  破棄中・破棄済みを確認できたときだけ削除する（一覧の取得後に起動・登録された runner を消さないため）。
+  取り直しが NotFound や空応答のときは、作成直後で Describe に未反映の instance や region の設定違いと
+  見分けられないため残す。名前の形式が違う永続 runner は削除しない。残った登録も含め、使われなかった
+  ephemeral runner は GitHub が 1 日で自動削除する
 - online の使い捨て runner に対応する instance が一覧に無い場合は、一覧の取得が誤っている
   （region の設定違い、空応答など）として、何も書き込まずに失敗する
 

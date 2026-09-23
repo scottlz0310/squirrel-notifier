@@ -2,8 +2,8 @@
 # 回収の範囲と失敗時の扱いを固定する（#380）。
 # - terminate するのは期限切れの使い捨て instance だけ
 # - JIT parameter は terminate した instance と破棄済みの instance の分だけ削除し、NotFound は無視する
-# - runner 登録は、削除の直前に取り直した instance が無くなっている offline の使い捨て runner だけを削除する
-#   （一覧の取得後に起動・登録された runner は残す）
+# - runner 登録は、削除の直前に取り直した instance が破棄中・破棄済みと確認できた offline の使い捨て runner だけを削除する
+#   （一覧の取得後に起動・登録された runner と、取り直しが NotFound・空応答の runner は残す）
 # - online の使い捨て runner に対応する instance が一覧に無ければ（region 違い・空応答）、何も書き込まずに止まる
 # - NotFound 以外の失敗は握り潰さない。-WhatIf では何も書き込まない
 # aws / gh CLI は、呼び出しを記録して状態に応じた応答を返す関数で置き換える。
@@ -130,6 +130,7 @@ Describe 'Invoke-DesktopE2EReaper.ps1' {
             CurrentStates        = @{
                 'i-0aaaaaaaaaaaaaaaa' = 'running'
                 'i-0bbbbbbbbbbbbbbbb' = 'shutting-down'
+                'i-0cccccccccccccccc' = 'terminated'
             }
             MissingParameters    = @()
             DeleteParameterError = $null
@@ -212,14 +213,18 @@ Describe 'Invoke-DesktopE2EReaper.ps1' {
         Get-WriteCalls | Should -BeNullOrEmpty
     }
 
-    It 'instance が 0 台で offline の使い捨て runner は、取り直しても無ければ削除する' {
+    It '取り直しが <Case> の offline runner は、作成直後の未反映や region 違いと見分けられないため削除しない' -ForEach @(
+        @{ Case = 'NotFound'; Setup = { param($s) $s.CurrentStates = @{} } }
+        @{ Case = '空応答'; Setup = { param($s) $s.CurrentStates = @{ 'i-0aaaaaaaaaaaaaaaa' = '' } } }
+    ) {
         $global:FakeState.Instances = @()
-        $global:FakeState.CurrentStates = @{}
         $global:FakeState.Runners = @(New-Runner -Id 8 -Name 'squirrel-notifier-ephemeral-i-0aaaaaaaaaaaaaaaa')
+        & $Setup $global:FakeState
 
-        Invoke-Reaper | Out-Null
+        $result = Invoke-Reaper
 
-        Get-DeletedRunnerCalls | Should -Be @('gh api -X DELETE repos/scottlz0310/squirrel-notifier/actions/runners/8')
+        Get-DeletedRunnerCalls | Should -BeNullOrEmpty
+        @($result.keptRunners) | Should -Be @('squirrel-notifier-ephemeral-i-0aaaaaaaaaaaaaaaa')
     }
 
     It '使い捨て instance も runner も無ければ何もしない' {

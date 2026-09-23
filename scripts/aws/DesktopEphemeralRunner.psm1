@@ -190,10 +190,14 @@ function Test-DesktopEphemeralInstanceGone
 {
     <#
     .SYNOPSIS
-      削除直前に取り直した instance の状態から、instance が無くなったかを返す。
+      instance の状態から、instance が無くなったことを確認できるかを返す。
     .DESCRIPTION
-      $null（InvalidInstanceID.NotFound）、shutting-down、terminated を「無くなった」とみなす。
-      それ以外（pending など）は、一覧の取得後に起動された instance として扱い、runner を残す。
+      shutting-down と terminated だけを「無くなった」とみなす。
+
+      $null や空文字（InvalidInstanceID.NotFound や空応答）は false とする。NotFound は破棄から
+      時間がたった instance だけでなく、作成直後でまだ Describe に反映されていない instance や
+      region の設定違いでも返るため、見分けられない。削除の判断には使わず、runner を残す
+      （使われなかった ephemeral runner の登録は GitHub が 1 日で自動削除する）。
     #>
     param(
         [AllowNull()]
@@ -201,7 +205,7 @@ function Test-DesktopEphemeralInstanceGone
         [string]$State
     )
 
-    return [string]::IsNullOrEmpty($State) -or $State -in @('shutting-down', 'terminated')
+    return $State -in @('shutting-down', 'terminated')
 }
 
 Export-ModuleMember -Function @(

@@ -9,8 +9,10 @@
   2. terminate した instance と、破棄中・破棄済みの instance の JIT config parameter を削除する
      （parameter には有効期限ポリシーも付けるため、ここでの削除は二重の保険）
   3. 対応する instance が無くなった使い捨て runner の登録を削除する。候補は offline で job を実行して
-     いないものだけで、削除の直前に instance ID ごとに状態を取り直し、NotFound か破棄中・破棄済みの
-     ときだけ削除する（一覧の取得後に起動・登録された runner を消さないため）
+     いないものだけで、削除の直前に instance ID ごとに状態を取り直し、破棄中・破棄済みを確認できた
+     ときだけ削除する（一覧の取得後に起動・登録された runner を消さないため）。取り直しが
+     InvalidInstanceID.NotFound や空応答のときは、作成直後の未反映・region の設定違いと見分けられない
+     ため残す。使われなかった ephemeral runner の登録は GitHub が 1 日で自動削除する
 
   読み取り（instance 一覧と runner 一覧）はすべて書き込みより前に行う。online の使い捨て runner に
   対応する instance が一覧に無ければ、一覧の取得が誤っている（region の設定違い、空応答など）として
@@ -148,6 +150,7 @@ $keptRunners = @()
 foreach ($runner in $candidates)
 {
     # 一覧の取得後に起動・登録された runner を消さないよう、削除の直前に instance を取り直す。
+    # 破棄中・破棄済みを確認できたときだけ削除し、NotFound や空応答では残す（fail-closed）。
     $instanceId = Get-DesktopEphemeralInstanceIdFromRunnerName -RunnerName $runner.name
     $state = Invoke-AwsCli -Arguments @(
         'ec2', 'describe-instances',
@@ -159,7 +162,8 @@ foreach ($runner in $candidates)
 
     if (-not (Test-DesktopEphemeralInstanceGone -State $state))
     {
-        Write-Verbose "runner $($runner.name) の instance は $state のため残します。"
+        $observed = if ([string]::IsNullOrEmpty($state)) { 'NotFound または空応答（判断できない）' } else { $state }
+        Write-Verbose "runner $($runner.name) の instance は $observed のため残します。"
         $keptRunners += $runner.name
         continue
     }
