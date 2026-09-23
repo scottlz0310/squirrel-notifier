@@ -42,6 +42,8 @@ function Invoke-AwsDryRun
     .DESCRIPTION
       DryRun は認可されても終了コードが 0 以外（DryRunOperation）になるため、例外へ変換しない。
       分類は Resolve-DesktopE2EDryRunOutcome が行う。
+      非 0 の終了コードは戻り値で消費したので $LASTEXITCODE を 0 へ戻す。残すと、GitHub Actions の
+      shell: pwsh がスクリプト末尾で exit $LASTEXITCODE を行い、正常な判定でも step が失敗する。
     #>
     param(
         [Parameter(Mandatory)]
@@ -49,8 +51,10 @@ function Invoke-AwsDryRun
     )
 
     $output = & aws @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    $global:LASTEXITCODE = 0
     return [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
+        ExitCode = $exitCode
         Output   = ($output | Out-String).Trim()
     }
 }
