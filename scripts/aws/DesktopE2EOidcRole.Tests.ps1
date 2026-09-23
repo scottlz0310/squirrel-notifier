@@ -2,8 +2,9 @@
 # desktop E2E workflow の OIDC ロールの権限境界を固定する（#380）。
 # - 信頼は指定 repository の指定 environment の job だけ。前方一致（StringLike / wildcard）を使わない
 # - 既存 instance は Start / Stop だけで、terminate できない
-# - 使い捨て instance は Launch Template 経由でだけ起動でき、ephemeral-runner タグのものだけ terminate できる
-# - 起動元は自アカウント所有で runner-image タグの付いた AMI だけ
+# - 使い捨て instance は Launch Template 経由でだけ起動でき、Launch Template の値を上書きできない。
+#   terminate できるのは ephemeral-runner タグのものだけ
+# - 起動元は自アカウント所有で runner-image タグの付いた AMI と snapshot だけ
 # - 変更系の操作を "*" に広げない。ARN へ埋め込む値に wildcard を受け付けない
 # 実際に IAM へ渡る形で検証するため、JSON へ変換して読み戻したものを対象にする。
 
@@ -121,18 +122,26 @@ Describe 'New-DesktopE2EOidcPermissionPolicy' {
         $statement.Condition.ArnEquals.'ec2:LaunchTemplate' | Should -Be 'arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0'
     }
 
-    It 'RunInstances の起動元 AMI は自アカウント所有で runner-image タグの付いたものだけ' {
-        $statement = @($script:Policy.Statement | Where-Object { $_.Sid -eq 'RunFromRunnerImage' })[0]
+    It 'RunInstances の起動元 <Resource> は自アカウント所有で runner-image タグの付いたものだけ（他アカウントが共有した同じタグのものを除く）' -ForEach @(
+        @{ Sid = 'RunFromRunnerImage'; Resource = 'arn:aws:ec2:us-east-1::image/*' }
+        @{ Sid = 'RunFromRunnerImageSnapshot'; Resource = 'arn:aws:ec2:us-east-1::snapshot/*' }
+    ) {
+        $statement = @($script:Policy.Statement | Where-Object { $_.Sid -eq $Sid })[0]
 
+        $statement.Resource | Should -Be $Resource
         $statement.Condition.StringEquals.'ec2:Owner' | Should -Be '123456789012'
         $statement.Condition.StringEquals."aws:ResourceTag/$($script:Tag.Key)" | Should -Be $script:Tag.ImageValue
     }
 
-    It 'RunInstances の各 statement は条件なしで許可されない' {
+    It 'RunInstances の各 statement は Launch Template 由来のリソースだけを許可する（Launch Template の値を上書きさせない）' {
         $statements = Get-StatementForAction -Document $script:Policy -Action 'ec2:RunInstances'
 
-        $statements.Count | Should -BeGreaterThan 0
-        @($statements | Where-Object { $null -eq $_.PSObject.Properties['Condition'] }) | Should -BeNullOrEmpty
+        $statements.Count | Should -Be 4
+        foreach ($statement in $statements)
+        {
+            $statement.Condition.ArnEquals.'ec2:LaunchTemplate' | Should -Be 'arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0' -Because $statement.Sid
+            $statement.Condition.Bool.'ec2:IsLaunchTemplateResource' | Should -Be 'true' -Because $statement.Sid
+        }
     }
 
     It 'PassRole は runner role を EC2 へ渡す場合だけ' {

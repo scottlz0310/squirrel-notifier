@@ -359,7 +359,9 @@ Remove-Item Env:AWS_PROFILE
   `repo:<owner>/<repo>:*` のような前方一致は使わない
 - 既存 instance（`-LegacyInstanceId`）は Start / Stop だけを許可し、terminate は許可しない
 - 使い捨て instance は、Launch Template の default version と同じ instance type・subnet・Security Group で、
-  `runner-image` タグの付いた自アカウントの AMI からだけ起動できる。タグ付けは起動と同時に限り、
+  `runner-image` タグの付いた自アカウントの AMI（と snapshot）からだけ起動できる。Launch Template が
+  指定する値の上書きは `ec2:IsLaunchTemplateResource` で拒否する。UserData の中身を制限する条件キーは
+  IAM に無いため、UserData は上記の信頼条件と runner role の権限で守る。タグ付けは起動と同時に限り、
   terminate は `ephemeral-runner` タグの付いた instance だけに限る
 - JIT config を置く `/squirrel-notifier/desktop-e2e/jit/*` への Put / Delete を許可する。JIT config は
   約 4 KB で Standard tier の上限（4,096 バイト）を超えることがあるため、Advanced tier で置く

@@ -92,7 +92,10 @@ function New-DesktopE2EOidcPermissionPolicy
 
       - RunInstances: Launch Template（-LaunchTemplateId）経由で、その default version と同じ
         instance type・subnet・Security Group だけ。起動元は自アカウント所有で runner-image タグの
-        付いた AMI だけ
+        付いた AMI と snapshot だけ。すべての statement に ec2:IsLaunchTemplateResource=true を付け、
+        Launch Template が指定する subnet・Security Group・AMI・ENI・volume を呼び出し側で上書きさせない
+        （AWS の例 "Tags in a launch template" と同じ形）。UserData の中身を制限する条件キーは IAM に
+        無いため、UserData は信頼ポリシー（environment を main / v* に限る）と runner role の権限で守る
       - CreateTags: RunInstances と同時のタグ付けだけ。既存 instance にタグを付けて terminate の
         条件を満たすことはできない
       - TerminateInstances: ephemeral-runner タグの付いた instance だけ。既存 instance には
@@ -147,6 +150,22 @@ function New-DesktopE2EOidcPermissionPolicy
     $launchTemplateArn = "${ec2}:launch-template/$LaunchTemplateId"
     $jitParameterArn = "arn:aws:ssm:${Region}:${AccountId}:parameter$($JitParameterPrefix.TrimEnd('/'))/*"
 
+    # RunInstances の各 statement に共通する条件。呼び出しごとに新しい hashtable を返し、
+    # statement 間で同じオブジェクトを共有しないようにする。
+    $fromLaunchTemplate = {
+        param([System.Collections.Specialized.OrderedDictionary]$Extra = [ordered]@{})
+
+        $condition = [ordered]@{
+            ArnEquals = [ordered]@{ 'ec2:LaunchTemplate' = $launchTemplateArn }
+            Bool      = [ordered]@{ 'ec2:IsLaunchTemplateResource' = 'true' }
+        }
+        foreach ($key in $Extra.Keys)
+        {
+            $condition[$key] = $Extra[$key]
+        }
+        return $condition
+    }
+
     return [ordered]@{
         Version   = '2012-10-17'
         Statement = @(
@@ -167,10 +186,9 @@ function New-DesktopE2EOidcPermissionPolicy
                 Effect    = 'Allow'
                 Action    = 'ec2:RunInstances'
                 Resource  = "${ec2}:instance/*"
-                Condition = [ordered]@{
-                    ArnEquals    = [ordered]@{ 'ec2:LaunchTemplate' = $launchTemplateArn }
-                    StringEquals = [ordered]@{ 'ec2:InstanceType' = $InstanceType }
-                }
+                Condition = & $fromLaunchTemplate ([ordered]@{
+                        StringEquals = [ordered]@{ 'ec2:InstanceType' = $InstanceType }
+                    })
             }
             [ordered]@{
                 Sid       = 'RunEphemeralRunnerResources'
@@ -183,30 +201,33 @@ function New-DesktopE2EOidcPermissionPolicy
                     "${ec2}:network-interface/*",
                     "${ec2}:volume/*"
                 )
-                Condition = [ordered]@{
-                    ArnEquals = [ordered]@{ 'ec2:LaunchTemplate' = $launchTemplateArn }
-                }
+                Condition = & $fromLaunchTemplate
             }
             [ordered]@{
                 Sid       = 'RunFromRunnerImage'
                 Effect    = 'Allow'
                 Action    = 'ec2:RunInstances'
                 Resource  = "arn:aws:ec2:${Region}::image/*"
-                Condition = [ordered]@{
-                    StringEquals = [ordered]@{
-                        'ec2:Owner'                    = $AccountId
-                        "aws:ResourceTag/$($tag.Key)" = $tag.ImageValue
-                    }
-                }
+                Condition = & $fromLaunchTemplate ([ordered]@{
+                        StringEquals = [ordered]@{
+                            'ec2:Owner'                    = $AccountId
+                            "aws:ResourceTag/$($tag.Key)" = $tag.ImageValue
+                        }
+                    })
             }
             [ordered]@{
+                # タグは snapshot の所有者なら誰でも付けられるため、所有者も条件にして
+                # 他アカウントが共有した同じタグの snapshot を除く。
                 Sid       = 'RunFromRunnerImageSnapshot'
                 Effect    = 'Allow'
                 Action    = 'ec2:RunInstances'
                 Resource  = "arn:aws:ec2:${Region}::snapshot/*"
-                Condition = [ordered]@{
-                    StringEquals = [ordered]@{ "aws:ResourceTag/$($tag.Key)" = $tag.ImageValue }
-                }
+                Condition = & $fromLaunchTemplate ([ordered]@{
+                        StringEquals = [ordered]@{
+                            'ec2:Owner'                    = $AccountId
+                            "aws:ResourceTag/$($tag.Key)" = $tag.ImageValue
+                        }
+                    })
             }
             [ordered]@{
                 Sid       = 'TagEphemeralRunnerOnLaunch'
