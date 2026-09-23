@@ -254,6 +254,8 @@ Describe 'Get-DesktopE2EOidcBoundaryCase' {
     It '<Name> は拒否される想定で、<Option> を上書きする' -ForEach @(
         @{ Name = 'override-network-interface'; Option = '--network-interfaces' }
         @{ Name = 'override-block-device'; Option = '--block-device-mappings' }
+        @{ Name = 'override-volume-type'; Option = '--block-device-mappings' }
+        @{ Name = 'add-extra-volume'; Option = '--block-device-mappings' }
         @{ Name = 'override-instance-type'; Option = '--instance-type' }
     ) {
         $case = $script:Cases | Where-Object Name -EQ $Name

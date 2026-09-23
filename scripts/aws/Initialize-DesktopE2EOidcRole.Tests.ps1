@@ -51,11 +51,24 @@ BeforeAll {
                     LaunchTemplateId   = 'lt-0123456789abcdef0'
                     VersionNumber      = 2
                     LaunchTemplateData = [ordered]@{
+                        ImageId           = 'ami-0123456789abcdef0'
                         InstanceType      = 'm7i.2xlarge'
                         NetworkInterfaces = @([ordered]@{ SubnetId = 'subnet-0fedcba9876543210'; Groups = @('sg-0fedcba9876543210') })
                     }
                 }
                 return (ConvertTo-Json -InputObject ([ordered]@{ LaunchTemplateVersions = @($version) }) -Depth 10)
+            }
+            'ec2 describe-images'
+            {
+                # root 以外の EBS と instance store のマッピングも混ぜ、root device のものだけを使うことを確かめる。
+                return (ConvertTo-Json -Depth 10 -InputObject ([ordered]@{
+                            RootDeviceName      = $fake.RootDeviceName
+                            BlockDeviceMappings = @(
+                                [ordered]@{ DeviceName = '/dev/sdf'; Ebs = [ordered]@{ VolumeSize = 500; VolumeType = 'io2'; Iops = 64000 } }
+                                [ordered]@{ DeviceName = '/dev/sda1'; Ebs = [ordered]@{ VolumeSize = 40; VolumeType = 'gp3'; Iops = 3000; Throughput = 125 } }
+                                [ordered]@{ DeviceName = 'xvdca'; VirtualName = 'ephemeral0' }
+                            )
+                        }))
             }
             'iam get-role'
             {
@@ -103,6 +116,7 @@ Describe 'Initialize-DesktopE2EOidcRole.ps1' {
             LaunchTemplateExists = $true
             RoleExists           = $true
             InlinePolicies       = @('SquirrelNotifierDesktopE2EInstanceControl')
+            RootDeviceName       = '/dev/sda1'
             FailOn               = $null
             FailWith             = $null
         }
@@ -114,6 +128,8 @@ Describe 'Initialize-DesktopE2EOidcRole.ps1' {
         @{ Case = 'OIDC provider が無い状態'; Setup = { param($s) $s.ProviderExists = $false }; Overrides = @{}; Message = '*OIDC provider*' }
         @{ Case = 'Launch Template が無い状態'; Setup = { param($s) $s.LaunchTemplateExists = $false }; Overrides = @{}; Message = '*Initialize-DesktopRunnerLaunchTemplate.ps1*' }
         @{ Case = 'ロールの存在確認が権限不足で失敗した状態'; Setup = { param($s) $s.FailOn = 'iam get-role'; $s.FailWith = 'AccessDenied' }; Overrides = @{}; Message = '*AccessDenied*' }
+        @{ Case = 'AMI に root device の EBS マッピングが無い状態'; Setup = { param($s) $s.RootDeviceName = '/dev/xvda' }; Overrides = @{}; Message = '*root device*' }
+        @{ Case = 'AMI の読み取りが権限不足で失敗した状態'; Setup = { param($s) $s.FailOn = 'ec2 describe-images'; $s.FailWith = 'UnauthorizedOperation' }; Overrides = @{}; Message = '*UnauthorizedOperation*' }
     ) {
         & $Setup $global:FakeAwsState
 
@@ -162,6 +178,20 @@ Describe 'Initialize-DesktopE2EOidcRole.ps1' {
         @($network.Resource) | Should -Contain 'arn:aws:ec2:us-east-1:123456789012:subnet/subnet-0fedcba9876543210'
         @($network.Resource) | Should -Contain 'arn:aws:ec2:us-east-1:123456789012:security-group/sg-0fedcba9876543210'
         $result.launchTemplateVersion | Should -Be 2
+    }
+
+    It 'volume の上限は Launch Template の AMI の root device のマッピングから読む' {
+        $result = Invoke-InitializeScript
+
+        $policy = $global:FakeAwsDocuments['iam put-role-policy']
+        $volume = @($policy.Statement | Where-Object { $_.Sid -eq 'RunEphemeralRunnerRootVolume' })[0]
+        $volume.Condition.NumericLessThanEquals.'ec2:VolumeSize' | Should -Be 40
+        $volume.Condition.StringEquals.'ec2:VolumeType' | Should -Be 'gp3'
+        $volume.Condition.NumericLessThanEqualsIfExists.'ec2:VolumeIops' | Should -Be 3000
+        $volume.Condition.NumericLessThanEqualsIfExists.'ec2:VolumeThroughput' | Should -Be 125
+        @($global:FakeAwsCalls) | Should -Contain 'ec2 describe-images'
+        $result.rootVolume.imageId | Should -Be 'ami-0123456789abcdef0'
+        $result.rootVolume.deviceName | Should -Be '/dev/sda1'
     }
 
     It '管理外の inline policy を削除せずに出力へ列挙する' {

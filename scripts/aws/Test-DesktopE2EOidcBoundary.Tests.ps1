@@ -20,6 +20,8 @@ BeforeAll {
         $case = switch -Wildcard ($args -join ' ')
         {
             '*--network-interfaces*' { 'override-network-interface'; break }
+            '*VolumeType=io2*' { 'override-volume-type'; break }
+            '*DeviceName=/dev/sdf*' { 'add-extra-volume'; break }
             '*--block-device-mappings*' { 'override-block-device'; break }
             '*--instance-type*' { 'override-instance-type'; break }
             'ec2 terminate-instances*' { 'terminate-persistent-instance'; break }
@@ -48,6 +50,8 @@ Describe 'Test-DesktopE2EOidcBoundary.ps1' {
             'launch-template-default'       = 'DryRunOperation'
             'override-network-interface'    = 'UnauthorizedOperation'
             'override-block-device'         = 'UnauthorizedOperation'
+            'override-volume-type'          = 'UnauthorizedOperation'
+            'add-extra-volume'              = 'UnauthorizedOperation'
             'override-instance-type'        = 'UnauthorizedOperation'
             'terminate-persistent-instance' = 'UnauthorizedOperation'
         }
@@ -56,7 +60,7 @@ Describe 'Test-DesktopE2EOidcBoundary.ps1' {
     It '期待どおりなら全件の結果を返す' {
         $report = Invoke-Boundary | ConvertFrom-Json
 
-        @($report.results).Count | Should -Be 5
+        @($report.results).Count | Should -Be 7
         @($report.results | Where-Object { $_.actual -ne $_.expected }) | Should -BeNullOrEmpty
     }
 
@@ -64,7 +68,7 @@ Describe 'Test-DesktopE2EOidcBoundary.ps1' {
         Invoke-Boundary | Out-Null
 
         $dryRuns = @($global:FakeCalls | Where-Object { $_ -like '*--dry-run*' })
-        $dryRuns.Count | Should -Be 5
+        $dryRuns.Count | Should -Be 7
         $dryRuns | ForEach-Object { $_ | Should -BeLike '*--region us-east-1*' }
         @($dryRuns | Where-Object { $_ -like '*DeviceIndex=0,SubnetId=subnet-05a6dbdf30e0b6664,Groups=sg-0f5751845b3fa696b*' }).Count | Should -Be 1
         @($global:FakeCalls | Where-Object { $_ -notlike '*--dry-run*' -and $_ -notlike 'ec2 describe-instances*' }) | Should -BeNullOrEmpty

@@ -376,10 +376,22 @@ function Get-DesktopE2EOidcBoundaryCase
             Expected  = 'denied'
             Arguments = $launch + @('--network-interfaces', "DeviceIndex=0,SubnetId=$ReferenceSubnetId,Groups=$ReferenceSecurityGroupId")
         }
+        # root volume（/dev/sda1）の変更は ec2:IsLaunchTemplateResource では拒否されない（2026-09-23 の実測）。
+        # OIDC ロールの volume の条件（AMI の root volume の容量・種類が上限）で拒否されることを確かめる。
         [pscustomobject]@{
             Name      = 'override-block-device'
             Expected  = 'denied'
             Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sda1,Ebs={VolumeSize=128}')
+        }
+        [pscustomobject]@{
+            Name      = 'override-volume-type'
+            Expected  = 'denied'
+            Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sda1,Ebs={VolumeType=io2,Iops=3000}')
+        }
+        [pscustomobject]@{
+            Name      = 'add-extra-volume'
+            Expected  = 'denied'
+            Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sdf,Ebs={VolumeSize=8,VolumeType=gp3}')
         }
         [pscustomobject]@{ Name = 'override-instance-type'; Expected = 'denied'; Arguments = $launch + @('--instance-type', 't3.micro') }
         [pscustomobject]@{
