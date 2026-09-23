@@ -82,14 +82,18 @@ function Get-InstanceTagValue
 {
     <#
     .DESCRIPTION
-      起動直後の instance は Describe に反映されるまで InvalidInstanceID.NotFound を返すことがあるため、
-      NotFound の間だけ再試行する。
+      起動直後の instance は、Describe に反映されるまで InvalidInstanceID.NotFound を返すことがあり、
+      反映された直後もタグがまだ返らないことがある（--output text は結果が無いと 'None' を返す）。
+      どちらも反映待ちとして回数を限って再試行し、最後に観測した値を返す（NotFound のままなら $null）。
+      タグが付かないまま terminate の判断に進むと、OIDC ロールでも reaper でも回収できなくなるため、
+      反映を待たずに不一致と判断しない。
     #>
     param(
         [string]$InstanceId,
         [string]$Key
     )
 
+    $value = $null
     for ($attempt = 1; $attempt -le 12; $attempt++)
     {
         $value = Invoke-AwsCli -Arguments @(
@@ -100,7 +104,7 @@ function Get-InstanceTagValue
             '--output', 'text'
         ) -AbsentErrorCode 'InvalidInstanceID.NotFound'
 
-        if ($null -ne $value)
+        if (-not [string]::IsNullOrEmpty($value) -and $value -cne 'None')
         {
             return $value
         }
@@ -108,7 +112,7 @@ function Get-InstanceTagValue
         Start-Sleep -Seconds $PollSeconds
     }
 
-    throw "起動した instance が Describe に現れません: $InstanceId"
+    return $value
 }
 
 $tag = Get-DesktopRunnerResourceTag
@@ -133,7 +137,8 @@ Write-Verbose "使い捨て instance を起動しました: $instanceId"
 $tagValue = Get-InstanceTagValue -InstanceId $instanceId -Key $tag.Key
 if ($tagValue -cne $tag.EphemeralInstanceValue)
 {
-    throw "起動した instance $instanceId に $($tag.Key)=$($tag.EphemeralInstanceValue) のタグがありません（実際: $tagValue）。Launch Template のタグ指定を確認してください。この instance は OIDC ロールでは terminate できないため、Admin で削除してください。"
+    $observed = if ($null -eq $tagValue) { 'Describe に現れない' } else { $tagValue }
+    throw "起動した instance $instanceId に $($tag.Key)=$($tag.EphemeralInstanceValue) のタグを確認できません（最後の観測: $observed）。Launch Template のタグ指定を確認してください。タグが付いていなければ OIDC ロールでも reaper でも terminate できないため、Admin で削除してください。"
 }
 
 $request = New-DesktopEphemeralJitConfigRequest -InstanceId $instanceId -RunId $RunId
@@ -149,6 +154,7 @@ if ([string]::IsNullOrEmpty($jit.encoded_jit_config))
 $parameterName = "$JitParameterPrefix/$instanceId"
 $expiresAt = [datetimeoffset]::UtcNow.AddMinutes($ParameterExpirationMinutes)
 $inputPath = Join-Path $TempDirectory "desktop-e2e-jit-$instanceId.json"
+$putError = $null
 try
 {
     # 値を書く前に所有者だけが読める状態にする。
@@ -156,17 +162,49 @@ try
     if ($IsLinux -or $IsMacOS)
     {
         & chmod 600 $inputPath
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "JIT config の一時ファイルの権限を 600 にできませんでした: $inputPath"
+        }
     }
 
     $parameterRequest = New-DesktopEphemeralJitParameterRequest -Name $parameterName -Value $jit.encoded_jit_config -ExpiresAt $expiresAt
     [System.IO.File]::WriteAllText($inputPath, ($parameterRequest | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
     Invoke-AwsCli -Arguments @('ssm', 'put-parameter', '--region', $Region, '--cli-input-json', "file://$inputPath") | Out-Null
 }
+catch
+{
+    $putError = $_
+}
 finally
 {
-    Remove-Item -LiteralPath $inputPath -Force -ErrorAction SilentlyContinue
     $jit = $null
     $parameterRequest = $null
+}
+
+# JIT config を含む一時ファイルを残したまま先へ進まない。parameter を置けたかどうかにかかわらず、
+# 削除できたことを確かめる。削除の失敗で parameter の失敗が隠れないよう、両方を伝える。
+try
+{
+    if (Test-Path -LiteralPath $inputPath)
+    {
+        Remove-Item -LiteralPath $inputPath -Force -ErrorAction Stop
+    }
+}
+catch
+{
+    $putResult = if ($null -eq $putError) { 'parameter は置いた' } else { "parameter の設定も失敗した: $($putError.Exception.Message)" }
+    throw "JIT config を書いた一時ファイルを削除できませんでした: $inputPath（$($_.Exception.Message)）。$putResult。"
+}
+
+if (Test-Path -LiteralPath $inputPath)
+{
+    throw "JIT config を書いた一時ファイルが削除後も残っています: $inputPath"
+}
+
+if ($null -ne $putError)
+{
+    throw $putError
 }
 
 $deadline = [datetimeoffset]::UtcNow.AddSeconds($RunnerWaitSeconds)

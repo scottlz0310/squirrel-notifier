@@ -1,8 +1,10 @@
 ﻿# Pester v5 tests for Start-DesktopEphemeralRunner.ps1
 # 使い捨て runner の起動手順を固定する（#380）。
 # - Launch Template の default version だけで起動し、値を上書きしない
-# - ephemeral-runner タグを確かめてから JIT config を発行する（タグが無ければ発行しない）
-# - JIT config は一時ファイル経由で Advanced tier の parameter に置き、コマンドライン・出力に載せない
+# - ephemeral-runner タグを確かめてから JIT config を発行する。反映待ち（NotFound / None）は回数を限って再試行し、
+#   タグを確認できなければ発行しない
+# - JIT config は一時ファイル経由で Advanced tier の parameter に置き、コマンドライン・出力に載せない。
+#   一時ファイルを削除できなければ runner を待たずに失敗させ、parameter の失敗時も一時ファイルを消す
 # - instance_id / runner_label / runner_name は分かった時点で GITHUB_OUTPUT に書き、後続の失敗でも cleanup できる
 # - run 固有ラベルの無い runner、待機中の instance の破棄は失敗させる
 # aws / gh CLI は、呼び出しを記録して状態に応じた応答を返す関数で置き換える。
@@ -41,6 +43,12 @@ BeforeAll {
                         $global:LASTEXITCODE = 254
                         return 'An error occurred (InvalidInstanceID.NotFound) when calling the DescribeInstances operation'
                     }
+                    # Describe に現れた直後はタグがまだ返らず、--output text は 'None' を返す。
+                    if ($fake.TagNoneCount -gt 0)
+                    {
+                        $fake.TagNoneCount--
+                        return 'None'
+                    }
                     return $fake.TagValue
                 }
                 return $fake.InstanceState
@@ -51,6 +59,11 @@ BeforeAll {
                 $path = $uri.Substring('file://'.Length)
                 $fake.ParameterInput = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
                 $fake.ParameterInputPath = $path
+                if ($fake.PutParameterError)
+                {
+                    $global:LASTEXITCODE = 254
+                    return "An error occurred ($($fake.PutParameterError)) when calling the PutParameter operation"
+                }
                 return '{"Version": 1, "Tier": "Advanced"}'
             }
             default { throw "想定外の aws 呼び出し: $($args -join ' ')" }
@@ -116,6 +129,8 @@ Describe 'Start-DesktopEphemeralRunner.ps1' {
         $global:FakeState = @{
             TagValue           = 'ephemeral-runner'
             TagNotFoundCount   = 1
+            TagNoneCount       = 2
+            PutParameterError  = $null
             InstanceState      = 'running'
             RunnerStates       = $states
             JitError           = $false
@@ -175,12 +190,46 @@ Describe 'Start-DesktopEphemeralRunner.ps1' {
         }
     }
 
-    It 'ephemeral-runner タグが無ければ JIT config を発行せずに失敗し、instance_id は書き出す' {
+    It 'タグの反映待ち（NotFound と None）は再試行し、反映されたら先へ進む' {
+        $global:FakeState.TagNotFoundCount = 2
+        $global:FakeState.TagNoneCount = 3
+
+        (Invoke-Start | ConvertFrom-Json).instanceId | Should -Be $script:InstanceId
+        @($global:FakeCalls | Where-Object { $_ -like 'ec2 describe-instances*Tags*' }).Count | Should -Be 6
+    }
+
+    It 'タグが None のままなら、回数を限って再試行したうえで JIT config を発行せずに失敗し、instance_id は書き出す' {
         $global:FakeState.TagValue = 'None'
 
-        { Invoke-Start } | Should -Throw '*のタグがありません*'
+        { Invoke-Start } | Should -Throw '*のタグを確認できません*'
+        @($global:FakeCalls | Where-Object { $_ -like 'ec2 describe-instances*Tags*' }).Count | Should -Be 12
         @($global:FakeCalls | Where-Object { $_ -like '*generate-jitconfig*' }).Count | Should -Be 0
         (Get-Outputs)['instance_id'] | Should -Be $script:InstanceId
+    }
+
+    It '別の値のタグは反映待ちとみなさず、再試行せずに失敗する' {
+        $global:FakeState.TagNotFoundCount = 0
+        $global:FakeState.TagNoneCount = 0
+        $global:FakeState.TagValue = 'runner-image'
+
+        { Invoke-Start } | Should -Throw '*のタグを確認できません*runner-image*'
+        @($global:FakeCalls | Where-Object { $_ -like 'ec2 describe-instances*Tags*' }).Count | Should -Be 1
+        @($global:FakeCalls | Where-Object { $_ -like '*generate-jitconfig*' }).Count | Should -Be 0
+    }
+
+    It '一時ファイルを削除できなければ runner を待たずに失敗させる' {
+        Mock Remove-Item { throw 'The process cannot access the file because it is being used by another process.' } -ParameterFilter { $LiteralPath -like '*desktop-e2e-jit-*' }
+
+        { Invoke-Start } | Should -Throw '*一時ファイルを削除できませんでした*parameter は置いた*'
+        @($global:FakeCalls | Where-Object { $_ -like 'gh api repos/*/actions/runners?per_page=100*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'parameter の設定に失敗しても一時ファイルを削除し、parameter の失敗を伝える' {
+        $global:FakeState.PutParameterError = 'ParameterAlreadyExists'
+
+        { Invoke-Start } | Should -Throw '*ParameterAlreadyExists*'
+        Test-Path -LiteralPath $global:FakeState.ParameterInputPath | Should -BeFalse
+        @($global:FakeCalls | Where-Object { $_ -like 'gh api repos/*/actions/runners?per_page=100*' }) | Should -BeNullOrEmpty
     }
 
     It 'JIT config の発行に失敗したら parameter を置かない' {
