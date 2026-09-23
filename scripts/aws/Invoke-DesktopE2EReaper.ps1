@@ -47,47 +47,7 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'DesktopEphemeralRunner.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DesktopRunnerImage.psm1') -Force
-
-function Invoke-AwsCli
-{
-    <#
-    .SYNOPSIS
-      aws CLI を呼び出し、失敗を例外へ変換する。
-    .DESCRIPTION
-      -AbsentErrorCode は「存在しない」を成功とみなしたい場合だけに使い、その AWS エラーコードの
-      失敗に限って $null を返す。権限不足まで握り潰すと、回収できていないことに気付けない。
-    #>
-    param(
-        [string[]]$Arguments,
-        [string]$AbsentErrorCode
-    )
-
-    $output = & aws @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0)
-    {
-        if ($AbsentErrorCode -and ($output | Out-String).Contains("($AbsentErrorCode)"))
-        {
-            return $null
-        }
-
-        throw "aws CLI が失敗しました: aws $($Arguments -join ' ')`n$output"
-    }
-
-    return ($output | Out-String).Trim()
-}
-
-function Invoke-GhApi
-{
-    param([string[]]$Arguments)
-
-    $output = & gh api @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0)
-    {
-        throw "gh api が失敗しました: gh api $($Arguments -join ' ')`n$output"
-    }
-
-    return $output
-}
+Import-Module (Join-Path $PSScriptRoot 'DesktopE2ECli.psm1') -Force
 
 $tag = Get-DesktopRunnerResourceTag
 $now = [datetimeoffset]::UtcNow
