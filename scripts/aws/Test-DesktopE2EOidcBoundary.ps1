@@ -13,7 +13,8 @@
   ここでしか確かめられない。すべて --dry-run のため instance は作られず、terminate もされない。
 
   期待と違う結果、または認可の判定にならなかった結果（入力の誤り・通信の失敗など）が 1 件でもあれば
-  失敗させる。ポリシーが後から変わった場合にも、使い捨て instance を作る前に気付けるようにする。
+  失敗させる。ただし期待が observe の操作（root の DeleteOnTermination=false。IAM の条件キーが無く
+  拒否できない）は結果を記録するだけにする。ポリシーが後から変わった場合にも、使い捨て instance を作る前に気付けるようにする。
 
   上書きの値は永続 instance の subnet と Security Group から取る（OIDC ロールは Describe 系を
   instance にしか持たないため）。
@@ -77,7 +78,8 @@ $report = [pscustomobject]@{
 } | ConvertTo-Json -Depth 4
 $report
 
-$mismatches = @($results | Where-Object { $_.actual -ne $_.expected })
+# observe は IAM で拒否できない操作の記録（残った volume は cleanup と reaper で補う）で、判定には使わない。
+$mismatches = @($results | Where-Object { $_.expected -ne 'observe' -and $_.actual -ne $_.expected })
 if ($mismatches.Count -gt 0)
 {
     $summary = ($mismatches | ForEach-Object { "$($_.name)（期待 $($_.expected) / 実際 $($_.actual)）" }) -join ', '

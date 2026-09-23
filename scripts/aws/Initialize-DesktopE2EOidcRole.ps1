@@ -139,6 +139,25 @@ if ($null -eq $launchTemplate)
 $version = @(($launchTemplate | ConvertFrom-Json).LaunchTemplateVersions)[0]
 $networkInterface = @($version.LaunchTemplateData.NetworkInterfaces)[0]
 
+# volume の上限は Launch Template の AMI の root volume から取る。AMI を作り直して Launch Template の
+# version を更新したら、本スクリプトを再実行してポリシーを合わせる。
+$image = Invoke-AwsCli -Arguments @(
+    'ec2', 'describe-images',
+    '--region', $Region,
+    '--image-ids', $version.LaunchTemplateData.ImageId,
+    '--query', 'Images[0].{RootDeviceName: RootDeviceName, BlockDeviceMappings: BlockDeviceMappings}',
+    '--output', 'json'
+) | ConvertFrom-Json
+$rootVolume = @($image.BlockDeviceMappings | Where-Object { $_.DeviceName -ceq $image.RootDeviceName -and $null -ne $_.PSObject.Properties['Ebs'] }) |
+    Select-Object -First 1 | ForEach-Object { $_.Ebs }
+if ($null -eq $rootVolume)
+{
+    throw "Launch Template の AMI $($version.LaunchTemplateData.ImageId) に root device $($image.RootDeviceName) の EBS マッピングがありません。"
+}
+# gp2 など IOPS・スループットを持たない種類では、上限を 0 にする（キーが無ければ IfExists で素通りする）。
+$rootIops = if ($null -ne $rootVolume.PSObject.Properties['Iops']) { [int]$rootVolume.Iops } else { 0 }
+$rootThroughput = if ($null -ne $rootVolume.PSObject.Properties['Throughput']) { [int]$rootVolume.Throughput } else { 0 }
+
 $trustPolicy = New-DesktopE2EOidcTrustPolicy -AccountId $accountId -Repository $Repository -Environment $Environment
 $permissionPolicy = New-DesktopE2EOidcPermissionPolicy `
     -AccountId $accountId `
@@ -148,6 +167,10 @@ $permissionPolicy = New-DesktopE2EOidcPermissionPolicy `
     -InstanceType $version.LaunchTemplateData.InstanceType `
     -SubnetId $networkInterface.SubnetId `
     -SecurityGroupId @($networkInterface.Groups)[0] `
+    -RootVolumeSize ([int]$rootVolume.VolumeSize) `
+    -RootVolumeType $rootVolume.VolumeType `
+    -RootVolumeIops $rootIops `
+    -RootVolumeThroughput $rootThroughput `
     -RunnerRoleName $RunnerRoleName `
     -JitParameterPrefix $JitParameterPrefix
 
@@ -206,6 +229,14 @@ if ($PSCmdlet.ShouldProcess($RoleName, "inline policy $PolicyName を適用"))
     instanceType            = $version.LaunchTemplateData.InstanceType
     subnetId                = $networkInterface.SubnetId
     securityGroupId         = @($networkInterface.Groups)[0]
+    rootVolume              = [ordered]@{
+        imageId    = $version.LaunchTemplateData.ImageId
+        deviceName = $image.RootDeviceName
+        size       = [int]$rootVolume.VolumeSize
+        type       = $rootVolume.VolumeType
+        iops       = $rootIops
+        throughput = $rootThroughput
+    }
     unmanagedInlinePolicies = $unmanagedInline
     attachedPolicies        = $attached
 } | ConvertTo-Json -Depth 4

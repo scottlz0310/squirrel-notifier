@@ -1,6 +1,7 @@
 ﻿# Pester v5 tests for Invoke-DesktopE2EReaper.ps1
 # 回収の範囲と失敗時の扱いを固定する（#380）。
 # - terminate するのは期限切れの使い捨て instance だけ
+# - 削除する volume は ephemeral-runner タグでどこにも接続されていないもの（DeleteOnTermination=false で残ったもの）だけ
 # - JIT parameter は terminate した instance と破棄済みの instance の分だけ削除し、NotFound は無視する
 # - runner 登録は、削除の直前に取り直した instance が破棄中・破棄済みと確認できた offline の使い捨て runner だけを削除する
 #   （一覧の取得後に起動・登録された runner と、取り直しが NotFound・空応答の runner は残す）
@@ -39,6 +40,16 @@ BeforeAll {
                 return (ConvertTo-Json -InputObject @($fake.Instances) -Depth 5)
             }
             'ec2 terminate-instances' { return '{}' }
+            'ec2 describe-volumes'
+            {
+                # タグと available の両方で絞り込んでいることを確かめてから返す。
+                if (($args -join ' ') -notlike '*Name=tag:squirrel-notifier:desktop-e2e,Values=ephemeral-runner*Name=status,Values=available*')
+                {
+                    throw "describe-volumes の絞り込みが想定と違う: $($args -join ' ')"
+                }
+                return (ConvertTo-Json -InputObject @($fake.RetainedVolumes))
+            }
+            'ec2 delete-volume' { return '' }
             'ssm delete-parameter'
             {
                 $name = $args[[array]::IndexOf($args, '--name') + 1]
@@ -102,7 +113,7 @@ BeforeAll {
 
     function Get-WriteCalls
     {
-        return @($global:FakeCalls | Where-Object { $_ -match '^(ec2 terminate-instances|ssm delete-parameter|gh api -X DELETE)' })
+        return @($global:FakeCalls | Where-Object { $_ -match '^(ec2 terminate-instances|ec2 delete-volume|ssm delete-parameter|gh api -X DELETE)' })
     }
 
     function Get-DeletedRunnerCalls
@@ -134,6 +145,7 @@ Describe 'Invoke-DesktopE2EReaper.ps1' {
             }
             MissingParameters    = @()
             DeleteParameterError = $null
+            RetainedVolumes      = @()
             Runners              = @(
                 (New-Runner -Id 1 -Name 'squirrel-notifier-desktop')
                 (New-Runner -Id 2 -Name 'squirrel-notifier-ephemeral-i-0aaaaaaaaaaaaaaaa' -Status 'online')
@@ -238,8 +250,30 @@ Describe 'Invoke-DesktopE2EReaper.ps1' {
     }
 
     It '-WhatIf では何も書き込まない' {
+        $global:FakeState.RetainedVolumes = @('vol-0aaaaaaaaaaaaaaaa')
+
         Invoke-Reaper -WhatIf 6>$null | Out-Null
 
+        Get-WriteCalls | Should -BeNullOrEmpty
+    }
+
+    It 'どこにも接続されていない使い捨て volume（DeleteOnTermination=false で残ったもの）を削除する' {
+        $global:FakeState.RetainedVolumes = @('vol-0aaaaaaaaaaaaaaaa', 'vol-0bbbbbbbbbbbbbbbb')
+
+        $result = Invoke-Reaper
+
+        @($result.deletedVolumes) | Should -Be @('vol-0aaaaaaaaaaaaaaaa', 'vol-0bbbbbbbbbbbbbbbb')
+        @($global:FakeCalls | Where-Object { $_ -like 'ec2 delete-volume*' }) | Should -Be @(
+            'ec2 delete-volume --region us-east-1 --volume-id vol-0aaaaaaaaaaaaaaaa'
+            'ec2 delete-volume --region us-east-1 --volume-id vol-0bbbbbbbbbbbbbbbb'
+        )
+    }
+
+    It '不整合を見つけたら volume も削除しない' {
+        $global:FakeState.Instances = @()
+        $global:FakeState.RetainedVolumes = @('vol-0aaaaaaaaaaaaaaaa')
+
+        { Invoke-Reaper } | Should -Throw
         Get-WriteCalls | Should -BeNullOrEmpty
     }
 }

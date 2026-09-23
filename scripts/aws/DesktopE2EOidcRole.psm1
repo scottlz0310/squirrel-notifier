@@ -17,6 +17,7 @@ $script:ValuePatterns = @{
     SubnetId           = '^subnet-[0-9a-f]{8,17}$'
     SecurityGroupId    = '^sg-[0-9a-f]{8,17}$'
     InstanceType       = '^[a-z][a-z0-9-]*\.[a-z0-9]+$'
+    RootVolumeType     = '^(gp2|gp3|io1|io2|st1|sc1|standard)$'
     RunnerRoleName     = '^[A-Za-z0-9+=,.@_-]{1,64}$'
     # 1 階層（/squirrel-notifier など）はアプリ全体の parameter を含んでしまうため、2 階層以上を要求する。
     JitParameterPrefix = '^(/[A-Za-z0-9_.-]+){2,}/?$'
@@ -96,10 +97,16 @@ function New-DesktopE2EOidcPermissionPolicy
         Launch Template が指定する subnet・Security Group・AMI・ENI・volume を呼び出し側で上書きさせない
         （AWS の例 "Tags in a launch template" と同じ形）。UserData の中身を制限する条件キーは IAM に
         無いため、UserData は信頼ポリシー（environment を main / v* に限る）と runner role の権限で守る
+      - volume: ec2:IsLaunchTemplateResource だけでは足りない。AMI の root マッピング（/dev/sda1）の
+        容量を要求で変えても true と評価され、DryRun で許可された（2026-09-23 の実測、#380）。
+        そのため AMI の root volume の容量・種類・IOPS・スループットを上限として条件に加える。
+        IOPS とスループットは種類によってはキーが無いため IfExists にする（無いと既定の起動まで拒否される）
       - CreateTags: RunInstances と同時のタグ付けだけ。既存 instance にタグを付けて terminate の
         条件を満たすことはできない
       - TerminateInstances: ephemeral-runner タグの付いた instance だけ。既存 instance には
         このタグが無いため terminate できない
+      - DeleteVolume: ephemeral-runner タグの付いた volume だけ。root の DeleteOnTermination は IAM で
+        制限できない（RunInstances に対応する条件キーが無い）ため、残った volume を削除して補う
       - PassRole: runner の instance role を EC2 へ渡す場合だけ
       - JIT config の parameter prefix への Put / Delete
 
@@ -128,6 +135,22 @@ function New-DesktopE2EOidcPermissionPolicy
         [Parameter(Mandatory)]
         [string]$SecurityGroupId,
 
+        # AMI の root volume（BlockDeviceMappings の RootDeviceName）の値。上書きの上限にする。
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 65536)]
+        [int]$RootVolumeSize,
+
+        [Parameter(Mandatory)]
+        [string]$RootVolumeType,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(0, 256000)]
+        [int]$RootVolumeIops,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(0, 4000)]
+        [int]$RootVolumeThroughput,
+
         [Parameter(Mandatory)]
         [string]$RunnerRoleName,
 
@@ -142,6 +165,7 @@ function New-DesktopE2EOidcPermissionPolicy
     Assert-OidcRoleValue -Name 'InstanceType' -Value $InstanceType
     Assert-OidcRoleValue -Name 'SubnetId' -Value $SubnetId
     Assert-OidcRoleValue -Name 'SecurityGroupId' -Value $SecurityGroupId
+    Assert-OidcRoleValue -Name 'RootVolumeType' -Value $RootVolumeType
     Assert-OidcRoleValue -Name 'RunnerRoleName' -Value $RunnerRoleName
     Assert-OidcRoleValue -Name 'JitParameterPrefix' -Value $JitParameterPrefix
 
@@ -172,7 +196,7 @@ function New-DesktopE2EOidcPermissionPolicy
             [ordered]@{
                 Sid      = 'DescribeDesktopE2ERunner'
                 Effect   = 'Allow'
-                Action   = @('ec2:DescribeInstances', 'ec2:DescribeInstanceStatus')
+                Action   = @('ec2:DescribeInstances', 'ec2:DescribeInstanceStatus', 'ec2:DescribeVolumes')
                 Resource = '*'
             }
             [ordered]@{
@@ -198,10 +222,23 @@ function New-DesktopE2EOidcPermissionPolicy
                     $launchTemplateArn,
                     "${ec2}:subnet/$SubnetId",
                     "${ec2}:security-group/$SecurityGroupId",
-                    "${ec2}:network-interface/*",
-                    "${ec2}:volume/*"
+                    "${ec2}:network-interface/*"
                 )
                 Condition = & $fromLaunchTemplate
+            }
+            [ordered]@{
+                Sid       = 'RunEphemeralRunnerRootVolume'
+                Effect    = 'Allow'
+                Action    = 'ec2:RunInstances'
+                Resource  = "${ec2}:volume/*"
+                Condition = & $fromLaunchTemplate ([ordered]@{
+                        StringEquals                   = [ordered]@{ 'ec2:VolumeType' = $RootVolumeType }
+                        NumericLessThanEquals          = [ordered]@{ 'ec2:VolumeSize' = $RootVolumeSize }
+                        NumericLessThanEqualsIfExists = [ordered]@{
+                            'ec2:VolumeIops'       = $RootVolumeIops
+                            'ec2:VolumeThroughput' = $RootVolumeThroughput
+                        }
+                    })
             }
             [ordered]@{
                 Sid       = 'RunFromRunnerImage'
@@ -243,6 +280,18 @@ function New-DesktopE2EOidcPermissionPolicy
                 Effect    = 'Allow'
                 Action    = 'ec2:TerminateInstances'
                 Resource  = "${ec2}:instance/*"
+                Condition = [ordered]@{
+                    StringEquals = [ordered]@{ "aws:ResourceTag/$($tag.Key)" = $tag.EphemeralInstanceValue }
+                }
+            }
+            [ordered]@{
+                # RunInstances の要求で root の DeleteOnTermination=false を指定されると、terminate 後も
+                # volume が残る。この属性を制限する IAM 条件キーは無いため、残った volume を cleanup と
+                # reaper が削除できるようにする。Launch Template は volume にも ephemeral-runner タグを付ける。
+                Sid       = 'DeleteRetainedEphemeralRunnerVolume'
+                Effect    = 'Allow'
+                Action    = 'ec2:DeleteVolume'
+                Resource  = "${ec2}:volume/*"
                 Condition = [ordered]@{
                     StringEquals = [ordered]@{ "aws:ResourceTag/$($tag.Key)" = $tag.EphemeralInstanceValue }
                 }

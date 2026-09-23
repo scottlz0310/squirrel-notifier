@@ -21,6 +21,10 @@ BeforeAll {
         InstanceType       = 'm7i.xlarge'
         SubnetId           = 'subnet-0123456789abcdef0'
         SecurityGroupId    = 'sg-0123456789abcdef0'
+        RootVolumeSize       = 64
+        RootVolumeType       = 'gp3'
+        RootVolumeIops       = 3000
+        RootVolumeThroughput = 125
         RunnerRoleName     = 'SquirrelNotifierDesktopE2ERunner'
         JitParameterPrefix = '/squirrel-notifier/desktop-e2e/jit'
     }
@@ -97,6 +101,14 @@ Describe 'New-DesktopE2EOidcPermissionPolicy' {
         $statements[0].Condition.StringEquals."aws:ResourceTag/$($script:Tag.Key)" | Should -Be $script:Tag.EphemeralInstanceValue
     }
 
+    It 'DeleteVolume は ephemeral-runner タグの付いた volume だけに限定される（残った root volume の削除用）' {
+        $statements = Get-StatementForAction -Document $script:Policy -Action 'ec2:DeleteVolume'
+
+        $statements.Count | Should -Be 1
+        $statements[0].Resource | Should -Be 'arn:aws:ec2:us-east-1:123456789012:volume/*'
+        $statements[0].Condition.StringEquals."aws:ResourceTag/$($script:Tag.Key)" | Should -Be $script:Tag.EphemeralInstanceValue
+    }
+
     It 'CreateTags は RunInstances と同時のタグ付けだけに限定される（既存 instance に terminate 用のタグを付けられない）' {
         $statements = Get-StatementForAction -Document $script:Policy -Action 'ec2:CreateTags'
 
@@ -122,6 +134,29 @@ Describe 'New-DesktopE2EOidcPermissionPolicy' {
         $statement.Condition.ArnEquals.'ec2:LaunchTemplate' | Should -Be 'arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0'
     }
 
+    It 'RunInstances の volume は AMI の root volume の容量・種類・IOPS・スループットを上限にする（IsLaunchTemplateResource では root の変更を防げない）' {
+        $volumeStatements = @($script:Policy.Statement | Where-Object { @($_.Resource) -contains 'arn:aws:ec2:us-east-1:123456789012:volume/*' -and @($_.Action) -contains 'ec2:RunInstances' })
+
+        $volumeStatements.Count | Should -Be 1
+        $statement = $volumeStatements[0]
+        @($statement.Resource) | Should -Be @('arn:aws:ec2:us-east-1:123456789012:volume/*')
+        $statement.Condition.StringEquals.'ec2:VolumeType' | Should -Be 'gp3'
+        $statement.Condition.NumericLessThanEquals.'ec2:VolumeSize' | Should -Be 64
+        $statement.Condition.NumericLessThanEqualsIfExists.'ec2:VolumeIops' | Should -Be 3000
+        $statement.Condition.NumericLessThanEqualsIfExists.'ec2:VolumeThroughput' | Should -Be 125
+    }
+
+    It 'RootVolumeType に <Value> を渡すと拒否する' -ForEach @(
+        @{ Value = '*' }
+        @{ Value = 'gp3*' }
+        @{ Value = 'GP3' }
+    ) {
+        $policyArgs = $script:PolicyArgs.Clone()
+        $policyArgs['RootVolumeType'] = $Value
+
+        { New-DesktopE2EOidcPermissionPolicy @policyArgs } | Should -Throw '*RootVolumeType*'
+    }
+
     It 'RunInstances の起動元 <Resource> は自アカウント所有で runner-image タグの付いたものだけ（他アカウントが共有した同じタグのものを除く）' -ForEach @(
         @{ Sid = 'RunFromRunnerImage'; Resource = 'arn:aws:ec2:us-east-1::image/*' }
         @{ Sid = 'RunFromRunnerImageSnapshot'; Resource = 'arn:aws:ec2:us-east-1::snapshot/*' }
@@ -136,7 +171,7 @@ Describe 'New-DesktopE2EOidcPermissionPolicy' {
     It 'RunInstances の各 statement は Launch Template 由来のリソースだけを許可する（Launch Template の値を上書きさせない）' {
         $statements = Get-StatementForAction -Document $script:Policy -Action 'ec2:RunInstances'
 
-        $statements.Count | Should -Be 4
+        $statements.Count | Should -Be 5
         foreach ($statement in $statements)
         {
             $statement.Condition.ArnEquals.'ec2:LaunchTemplate' | Should -Be 'arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0' -Because $statement.Sid
@@ -166,7 +201,7 @@ Describe 'New-DesktopE2EOidcPermissionPolicy' {
     It 'Resource "*" は Describe 系と SSM 経由の kms:Encrypt だけ' {
         $unscoped = @($script:Policy.Statement | Where-Object { @($_.Resource) -contains '*' })
 
-        @($unscoped | ForEach-Object { @($_.Action) }) | Should -Be @('ec2:DescribeInstances', 'ec2:DescribeInstanceStatus', 'kms:Encrypt')
+        @($unscoped | ForEach-Object { @($_.Action) }) | Should -Be @('ec2:DescribeInstances', 'ec2:DescribeInstanceStatus', 'ec2:DescribeVolumes', 'kms:Encrypt')
         $kms = @($unscoped | Where-Object { @($_.Action) -contains 'kms:Encrypt' })[0]
         $kms.Condition.StringEquals.'kms:ViaService' | Should -Be 'ssm.us-east-1.amazonaws.com'
     }

@@ -437,6 +437,7 @@ jobs:
           @(
             '### EC2 cleanup (ephemeral)'
             "- instance: ``$($result.instanceId)`` ($($result.instance))"
+            "- retained volumes deleted: $(@($result.deletedVolumes).Count)"
             "- JIT parameter: $($result.parameter)"
             "- runner: ``$($result.runnerName)`` ($($result.runner))"
           ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
