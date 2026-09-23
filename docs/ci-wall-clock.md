@@ -167,10 +167,54 @@ overlay database も有効化できるため候補に挙げたが、**不採用*
 
 品質ゲートの完全性を優先し、`build-mode` は manual のまま維持する。
 
+#### 再測定（2026-09-23 / CodeQL 2.27.0）
+
+`security-scan` が 392〜452 秒で CI の律速になっていたため、CodeQL 2.27.0 で取り直した
+（計測用の一時 workflow、PR #413 / run `35834677195`。解析結果は code scanning へ上げていない）。
+抽出範囲は CodeQL データベースの `src.zip` に入った `.cs` の**物理行数**（空行・コメントを含み、
+テストプロジェクトも含む）で数えたため、上の表の LOC とは直接比べられない。
+
+| 区分 | manual（Windows） | none（Windows） | none（ubuntu） |
+|---|---:|---:|---:|
+| job 全体 | 418 秒 | 298 秒 | 162 秒 |
+| 内訳 | Setup .NET 98 / init 70 / build 143 / analyze 76 | init 138 / analyze 146 | init 15 / analyze 133 |
+| `winui3/` 配下の手書きソース | 260 files / 40,647 行 | 260 files / 40,647 行 | 260 files / 40,647 行 |
+| ビルド生成コード（`obj/` 配下） | 32 files / 8,993 行 | 0 | 0 |
+| extractor の error 通知 | 0 件 | 15 件 | 19 件 |
+| `rules` / `results` | 55 / 0 | 55 / 0 | 55 / 0 |
+
+ubuntu の none は job を約 61% 短くするが、**引き続き不採用**とした。
+
+1. 生成コード（約 9,000 行）の欠落は前回と同じ。
+2. 前回は 0 件だった extractor の error 通知が 15〜19 件あり、いずれも型を解決できない
+   `Compiler error` だった。`McpSubscriptionService.cs`、`MainWindow.xaml.cs`、
+   `AgentExecutionSession.cs`、`App.xaml.cs` などアプリ本体の主要ファイルが含まれ、
+   それらのファイルでは呼び出しとデータフローの追跡が不完全になる。
+3. 両モードとも検出 0 件のため、この欠落は結果の差として現れず、見逃しに気付けない。
+   #220 の受け入れ条件「CodeQL が従来どおり失敗を検出する」を満たすと言えない。
+
+### CodeQL の `tools: toolcache`
+
+`Initialize CodeQL`（63〜91 秒）を縮める候補として、runner の toolcache にある CodeQL を
+使う指定を試したが（2026-09-23、同じ run）、**効果が無いため不採用**とした。
+
+- runner の toolcache の CodeQL は、CodeQL action の既定と同じ 2.27.0 だった。action は
+  版が一致すれば元から toolcache を使うため、指定しても処理は変わらない
+- 実測も init 79 秒（既定は 70 秒）で、差は runner のばらつきの範囲だった
+
 ### PR CI から CodeQL を外す
 
 `push` / schedule のみで実行すれば critical path から約 250 秒を除去できるが、
 #220 の制約「CodeQL を省略しない」に反するため検討対象外とした。
+
+2026-09-23 には、C# に関わるファイル（`winui3/**`、`*.props`、`global.json`、`nuget.config` など）が
+変わらない PR だけ省略し、main への push と週次の定期実行では常に実行する案も検討した。
+C# が変わらなければ解析結果も変わらないが、制約の文言に反するため、**制約を維持して見送った**。
+
+### CodeQL のビルド対象をアプリ本体に絞る
+
+テストプロジェクトをビルドと解析の対象から外せば `Build for CodeQL` と解析を短縮できるが
+（推定 40〜80 秒）、解析範囲を狭めることになるため、2026-09-23 に**見送った**。
 
 ## Phase 1 E2E の時間予算
 
