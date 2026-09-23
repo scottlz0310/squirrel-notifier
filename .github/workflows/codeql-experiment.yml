@@ -1,0 +1,144 @@
+name: CodeQL timing experiment (temporary)
+
+# security-scan の最適化候補を実測するための一時 workflow。main へはマージしない。
+# - manual-windows: 現行の security-scan と同じ構成（比較の基準）
+# - manual-windows-toolcache: runner の toolcache にある CodeQL を使う（初期化の短縮）
+# - none-windows / none-ubuntu: build-mode: none（#220 で不採用。CodeQL 2.27.0 で再測定）
+# 解析結果は code scanning へ上げず、抽出したソースの内訳と CodeQL の version を artifact に残す。
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/codeql-experiment.yml'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+env:
+  SOLUTION_PATH: "winui3/SquirrelNotifier.WinUI3.sln"
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  codeql:
+    name: codeql (${{ matrix.variant }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: manual-windows
+            os: windows-2025
+            build-mode: manual
+            tools: ''
+          - variant: manual-windows-toolcache
+            os: windows-2025
+            build-mode: manual
+            tools: toolcache
+          - variant: none-windows
+            os: windows-2025
+            build-mode: none
+            tools: ''
+          - variant: none-ubuntu
+            os: ubuntu-latest
+            build-mode: none
+            tools: ''
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        if: matrix.build-mode == 'manual'
+        uses: ./.github/actions/dotnet-setup
+
+      - name: Initialize CodeQL
+        id: init
+        uses: github/codeql-action/init@v4
+        with:
+          languages: csharp
+          build-mode: ${{ matrix.build-mode }}
+          tools: ${{ matrix.tools }}
+
+      - name: Restore for CodeQL
+        if: matrix.build-mode == 'manual'
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+      - name: Prepare WinRT generator output folders
+        if: matrix.build-mode == 'manual'
+        shell: pwsh
+        run: |
+          $base = Join-Path "winui3/SquirrelNotifier.WinUI3" "obj/x64/Release/net10.0-windows10.0.26100.0/generated/WinRT.SourceGenerator/Generator.WinRTAotSourceGenerator"
+          New-Item -ItemType Directory -Force -Path $base | Out-Null
+
+      - name: Build for CodeQL
+        if: matrix.build-mode == 'manual'
+        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore /p:Platform=x64 /p:IncludeWindowsSdkBuildTools=false
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: experiment-${{ matrix.variant }}
+          upload: never
+          output: sarif-results
+
+      - name: Summarize extraction
+        if: always()
+        shell: pwsh
+        env:
+          CODEQL_PATH: ${{ steps.init.outputs.codeql-path }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = Join-Path $env:RUNNER_TEMP 'codeql_databases/csharp/src.zip'
+          $groups = @{}
+          $archive = [IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            foreach ($entry in $archive.Entries | Where-Object { $_.FullName -like '*.cs' }) {
+              $path = $entry.FullName.Replace('\', '/')
+              $group = if ($path -match '/winui3/' -and $path -match '/obj/') { 'generated' }
+                       elseif ($path -match '/winui3/') { 'handwritten' }
+                       else { 'external' }
+              $reader = [IO.StreamReader]::new($entry.Open())
+              try { $lines = ($reader.ReadToEnd() -split "`n").Count } finally { $reader.Dispose() }
+              if (-not $groups.ContainsKey($group)) { $groups[$group] = [ordered]@{ files = 0; lines = 0 } }
+              $groups[$group].files++
+              $groups[$group].lines += $lines
+            }
+          } finally {
+            $archive.Dispose()
+          }
+
+          $version = (& $env:CODEQL_PATH version --format=json | ConvertFrom-Json).version
+          $sarif = Get-ChildItem -Path sarif-results -Filter '*.sarif' | Select-Object -First 1 | Get-Content -Raw | ConvertFrom-Json
+          $run = $sarif.runs[0]
+          $notifications = @($run.invocations | ForEach-Object { $_.toolExecutionNotifications } | Where-Object { $_ })
+          $summary = [ordered]@{
+            variant = $env:VARIANT
+            codeqlVersion = $version
+            results = @($run.results).Count
+            rules = @($run.tool.driver.rules).Count + (@($run.tool.extensions | ForEach-Object { @($_.rules).Count }) | Measure-Object -Sum).Sum
+            extraction = $groups
+            notifications = [ordered]@{
+              error = @($notifications | Where-Object { $_.level -eq 'error' }).Count
+              warning = @($notifications | Where-Object { $_.level -eq 'warning' }).Count
+            }
+          }
+          $json = $summary | ConvertTo-Json -Depth 5
+          $json
+          New-Item -ItemType Directory -Force -Path experiment | Out-Null
+          Set-Content -LiteralPath "experiment/$($env:VARIANT).json" -Value $json -Encoding utf8
+          "### $($env:VARIANT)`n``````json`n$json`n``````" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Upload experiment summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: codeql-experiment-${{ matrix.variant }}
+          path: |
+            experiment
+            sarif-results
+          retention-days: 7
