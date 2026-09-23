@@ -2,7 +2,8 @@
 # 使い捨て runner の名前付けと TTL 回収の対象選定を固定する（#380）。
 # - runner 名と instance ID は相互に変換でき、永続 runner の名前とは重ならない
 # - 起動から MaxAge を超え、まだ破棄されていない instance だけを回収の対象にする
-# - instance が無くなった使い捨て runner だけを削除の対象にし、job 実行中と永続 runner は除く
+# - instance が無くなった offline の使い捨て runner だけを削除の候補にし、job 実行中・online・永続 runner は除く
+# - online なのに instance が一覧に無い使い捨て runner は、一覧の誤り（region 違い・空応答）として検出する
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'DesktopEphemeralRunner.psm1') -Force
@@ -79,26 +80,55 @@ Describe 'Select-ExpiredDesktopEphemeralInstance' {
     }
 }
 
-Describe 'Select-OrphanedDesktopEphemeralRunner' {
+Describe 'Select-OrphanedDesktopEphemeralRunner / Select-InconsistentDesktopEphemeralRunner' {
     BeforeAll {
         $script:Runners = @(
             [pscustomobject]@{ id = 1; name = 'squirrel-notifier-desktop'; status = 'offline'; busy = $false }
             [pscustomobject]@{ id = 2; name = 'squirrel-notifier-ephemeral-i-0aaaaaaaaaaaaaaaa'; status = 'online'; busy = $false }
             [pscustomobject]@{ id = 3; name = 'squirrel-notifier-ephemeral-i-0bbbbbbbbbbbbbbbb'; status = 'offline'; busy = $false }
             [pscustomobject]@{ id = 4; name = 'squirrel-notifier-ephemeral-i-0cccccccccccccccc'; status = 'online'; busy = $true }
+            [pscustomobject]@{ id = 5; name = 'squirrel-notifier-ephemeral-i-0dddddddddddddddd'; status = 'online'; busy = $false }
         )
-        $script:Selected = @(Select-OrphanedDesktopEphemeralRunner -Runners $script:Runners -LiveInstanceIds @('i-0aaaaaaaaaaaaaaaa'))
+        $script:Known = @('i-0aaaaaaaaaaaaaaaa', 'i-0cccccccccccccccc')
+        $script:Orphaned = @(Select-OrphanedDesktopEphemeralRunner -Runners $script:Runners -KnownInstanceIds $script:Known)
+        $script:Inconsistent = @(Select-InconsistentDesktopEphemeralRunner -Runners $script:Runners -KnownInstanceIds $script:Known)
     }
 
-    It 'instance が無くなった使い捨て runner を選ぶ' {
-        @($script:Selected.id) | Should -Contain 3
+    It '一覧に instance が無い offline の使い捨て runner だけを削除の候補にする' {
+        @($script:Orphaned.id) | Should -Be @(3)
     }
 
-    It '<Case> は選ばない' -ForEach @(
+    It '<Case> は削除の候補にしない' -ForEach @(
         @{ Case = '永続 runner'; Id = 1 }
-        @{ Case = 'instance が生きている runner'; Id = 2 }
+        @{ Case = 'instance が一覧にある runner'; Id = 2 }
         @{ Case = 'job を実行中の runner'; Id = 4 }
+        @{ Case = 'instance が一覧に無くても online の runner'; Id = 5 }
     ) {
-        @($script:Selected.id) | Should -Not -Contain $Id
+        @($script:Orphaned.id) | Should -Not -Contain $Id
+    }
+
+    It 'online なのに instance が一覧に無い使い捨て runner を不整合として返す' {
+        @($script:Inconsistent.id) | Should -Be @(5)
+    }
+
+    It 'instance 一覧が空で online の使い捨て runner があれば不整合になる（region の設定違い・空応答）' {
+        $runners = @([pscustomobject]@{ id = 7; name = 'squirrel-notifier-ephemeral-i-0aaaaaaaaaaaaaaaa'; status = 'online'; busy = $false })
+
+        @(Select-InconsistentDesktopEphemeralRunner -Runners $runners -KnownInstanceIds @()).id | Should -Be @(7)
+    }
+}
+
+Describe 'Test-DesktopEphemeralInstanceGone' {
+    It '取り直した状態が <State> なら <Expected>' -ForEach @(
+        @{ State = $null; Expected = $true }
+        @{ State = ''; Expected = $true }
+        @{ State = 'shutting-down'; Expected = $true }
+        @{ State = 'terminated'; Expected = $true }
+        @{ State = 'pending'; Expected = $false }
+        @{ State = 'running'; Expected = $false }
+        @{ State = 'stopping'; Expected = $false }
+        @{ State = 'stopped'; Expected = $false }
+    ) {
+        Test-DesktopEphemeralInstanceGone -State $State | Should -Be $Expected
     }
 }

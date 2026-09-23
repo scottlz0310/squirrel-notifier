@@ -121,11 +121,14 @@ function Select-OrphanedDesktopEphemeralRunner
 {
     <#
     .SYNOPSIS
-      instance が無くなった使い捨て runner の登録を返す。
+      instance が無くなった可能性のある使い捨て runner の登録（削除の候補）を返す。
     .DESCRIPTION
       使い捨て runner の名前（Get-DesktopEphemeralRunnerName）を持ち、対応する instance が
-      LiveInstanceIds に無く、job を実行中でないものを選ぶ。永続 runner など、名前の形式が
-      違う runner は対象にしない。
+      KnownInstanceIds に無く、offline で job を実行中でないものを選ぶ。online の runner は
+      どこかの instance から接続しているため候補にしない。
+
+      instance 一覧は取得した時点のものなので、その後に起動・登録された runner も候補に入り得る。
+      呼び出し側は削除の直前に instance ID ごとに状態を確かめ直すこと。
     #>
     param(
         [Parameter(Mandatory)]
@@ -134,14 +137,14 @@ function Select-OrphanedDesktopEphemeralRunner
 
         [Parameter(Mandatory)]
         [AllowEmptyCollection()]
-        [string[]]$LiveInstanceIds
+        [string[]]$KnownInstanceIds
     )
 
     return @(
         foreach ($runner in $Runners)
         {
             $instanceId = Get-DesktopEphemeralInstanceIdFromRunnerName -RunnerName $runner.name
-            if ($null -eq $instanceId -or $instanceId -in $LiveInstanceIds -or $runner.busy)
+            if ($null -eq $instanceId -or $instanceId -in $KnownInstanceIds -or $runner.busy -or $runner.status -ne 'offline')
             {
                 continue
             }
@@ -151,9 +154,61 @@ function Select-OrphanedDesktopEphemeralRunner
     )
 }
 
+function Select-InconsistentDesktopEphemeralRunner
+{
+    <#
+    .SYNOPSIS
+      online なのに対応する instance が一覧に無い使い捨て runner を返す。
+    .DESCRIPTION
+      online の runner は instance から接続しているため、instance 一覧に無いのは一覧の取得が
+      誤っていることを示す（region の設定違い、空応答など）。呼び出し側はこれが 1 件でもあれば、
+      何も書き込まずに止まること。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Runners,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$KnownInstanceIds
+    )
+
+    return @(
+        foreach ($runner in $Runners)
+        {
+            $instanceId = Get-DesktopEphemeralInstanceIdFromRunnerName -RunnerName $runner.name
+            if ($null -ne $instanceId -and $runner.status -eq 'online' -and $instanceId -notin $KnownInstanceIds)
+            {
+                $runner
+            }
+        }
+    )
+}
+
+function Test-DesktopEphemeralInstanceGone
+{
+    <#
+    .SYNOPSIS
+      削除直前に取り直した instance の状態から、instance が無くなったかを返す。
+    .DESCRIPTION
+      $null（InvalidInstanceID.NotFound）、shutting-down、terminated を「無くなった」とみなす。
+      それ以外（pending など）は、一覧の取得後に起動された instance として扱い、runner を残す。
+    #>
+    param(
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$State
+    )
+
+    return [string]::IsNullOrEmpty($State) -or $State -in @('shutting-down', 'terminated')
+}
+
 Export-ModuleMember -Function @(
     'Get-DesktopEphemeralRunnerName',
     'Get-DesktopEphemeralInstanceIdFromRunnerName',
     'Select-ExpiredDesktopEphemeralInstance',
-    'Select-OrphanedDesktopEphemeralRunner'
+    'Select-OrphanedDesktopEphemeralRunner',
+    'Select-InconsistentDesktopEphemeralRunner',
+    'Test-DesktopEphemeralInstanceGone'
 )

@@ -8,7 +8,13 @@
   1. ephemeral-runner タグの instance のうち、起動から -MaxAgeMinutes を超えたものを terminate する
   2. terminate した instance と、破棄中・破棄済みの instance の JIT config parameter を削除する
      （parameter には有効期限ポリシーも付けるため、ここでの削除は二重の保険）
-  3. 対応する instance が無くなった使い捨て runner の登録を削除する（job 実行中のものは除く）
+  3. 対応する instance が無くなった使い捨て runner の登録を削除する。候補は offline で job を実行して
+     いないものだけで、削除の直前に instance ID ごとに状態を取り直し、NotFound か破棄中・破棄済みの
+     ときだけ削除する（一覧の取得後に起動・登録された runner を消さないため）
+
+  読み取り（instance 一覧と runner 一覧）はすべて書き込みより前に行う。online の使い捨て runner に
+  対応する instance が一覧に無ければ、一覧の取得が誤っている（region の設定違い、空応答など）として
+  何も書き込まずに止まる。
 
   instance を terminate できるのは OIDC ロールの条件（ephemeral-runner タグ）を満たすものだけで、
   既存の永続 instance は対象にならない。runner 名の形式が違う永続 runner も削除しない。
@@ -96,8 +102,23 @@ $instances = @(
 )
 
 $expired = @(Select-ExpiredDesktopEphemeralInstance -Instances $instances -Now $now -MaxAge ([timespan]::FromMinutes($MaxAgeMinutes)))
-$gone = @($instances | Where-Object { $_.State.Name -in @('shutting-down', 'terminated') } | ForEach-Object { $_.InstanceId })
-$live = @($instances | Where-Object { $_.State.Name -notin @('shutting-down', 'terminated') -and $_.InstanceId -notin $expired } | ForEach-Object { $_.InstanceId })
+$gone = @($instances | Where-Object { Test-DesktopEphemeralInstanceGone -State $_.State.Name } | ForEach-Object { $_.InstanceId })
+$existing = @($instances | Where-Object { -not (Test-DesktopEphemeralInstanceGone -State $_.State.Name) } | ForEach-Object { $_.InstanceId })
+$live = @($existing | Where-Object { $_ -notin $expired })
+
+$runners = @(
+    Invoke-GhApi -Arguments @("repos/$Repository/actions/runners?per_page=100", '--paginate', '--jq', '.runners[] | {id, name, status, busy}') |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_ | ConvertFrom-Json }
+)
+
+# online の使い捨て runner は instance から接続している。その instance が一覧に無いなら、
+# 一覧の取得が誤っている（region の設定違い、空応答など）。回収の判断を誤らないよう、何も書き込まずに止まる。
+$inconsistent = @(Select-InconsistentDesktopEphemeralRunner -Runners $runners -KnownInstanceIds $existing)
+if ($inconsistent.Count -gt 0)
+{
+    throw "online の使い捨て runner に対応する instance が region $Region の一覧にありません: $($inconsistent.name -join ', ')。region の設定と instance の状態を確認してください。何も変更していません。"
+}
 
 $terminated = @()
 if ($expired.Count -gt 0 -and $PSCmdlet.ShouldProcess(($expired -join ', '), '期限切れの使い捨て instance を terminate'))
@@ -120,16 +141,29 @@ foreach ($instanceId in @($terminated + $gone | Select-Object -Unique))
     }
 }
 
-$runners = @(
-    Invoke-GhApi -Arguments @("repos/$Repository/actions/runners?per_page=100", '--paginate', '--jq', '.runners[] | {id, name, status, busy}') |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        ForEach-Object { $_ | ConvertFrom-Json }
-)
-$orphaned = @(Select-OrphanedDesktopEphemeralRunner -Runners $runners -LiveInstanceIds $live)
+$candidates = @(Select-OrphanedDesktopEphemeralRunner -Runners $runners -KnownInstanceIds $live)
 
 $deletedRunners = @()
-foreach ($runner in $orphaned)
+$keptRunners = @()
+foreach ($runner in $candidates)
 {
+    # 一覧の取得後に起動・登録された runner を消さないよう、削除の直前に instance を取り直す。
+    $instanceId = Get-DesktopEphemeralInstanceIdFromRunnerName -RunnerName $runner.name
+    $state = Invoke-AwsCli -Arguments @(
+        'ec2', 'describe-instances',
+        '--region', $Region,
+        '--instance-ids', $instanceId,
+        '--query', 'Reservations[0].Instances[0].State.Name',
+        '--output', 'text'
+    ) -AbsentErrorCode 'InvalidInstanceID.NotFound'
+
+    if (-not (Test-DesktopEphemeralInstanceGone -State $state))
+    {
+        Write-Verbose "runner $($runner.name) の instance は $state のため残します。"
+        $keptRunners += $runner.name
+        continue
+    }
+
     if ($PSCmdlet.ShouldProcess("$($runner.name) (id $($runner.id))", 'runner 登録を削除'))
     {
         Invoke-GhApi -Arguments @('-X', 'DELETE', "repos/$Repository/actions/runners/$($runner.id)") | Out-Null
@@ -145,4 +179,5 @@ foreach ($runner in $orphaned)
     terminatedInstances = $terminated
     deletedParameters   = $deletedParameters
     deletedRunners      = $deletedRunners
+    keptRunners         = $keptRunners
 } | ConvertTo-Json -Depth 4

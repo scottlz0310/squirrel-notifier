@@ -382,8 +382,11 @@ cleanup 自体の失敗に備え、`desktop-e2e-reaper.yml` が 1 時間ごと�
 - terminate した instance と破棄済みの instance の JIT config parameter を削除する。parameter には
   有効期限ポリシーも付けるため、これは二重の保険になる
 - instance が無くなった使い捨て runner（`squirrel-notifier-ephemeral-<instance-id>`）の登録を削除する。
-  job 実行中の runner と、名前の形式が違う永続 runner は削除しない。使われなかった ephemeral runner は
-  GitHub も 1 日で自動削除する
+  候補は offline で job を実行していないものだけで、削除の直前に instance ID ごとに状態を取り直し、
+  NotFound か破棄中・破棄済みのときだけ削除する（一覧の取得後に起動・登録された runner を消さないため）。
+  名前の形式が違う永続 runner は削除しない。使われなかった ephemeral runner は GitHub も 1 日で自動削除する
+- online の使い捨て runner に対応する instance が一覧に無い場合は、一覧の取得が誤っている
+  （region の設定違い、空応答など）として、何も書き込まずに失敗する
 
 instance を回収した run は、回収を済ませたうえで失敗として終わる。cleanup が漏れたことを意味するため、
 対応する desktop E2E run の `cleanup-runner` を調べる。手動実行では `dry_run` を指定すると、書き込まずに
