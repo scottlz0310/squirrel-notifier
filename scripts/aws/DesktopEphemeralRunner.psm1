@@ -1,5 +1,6 @@
-﻿# 使い捨て desktop E2E runner の名前付けと、TTL 回収の対象選定を行う（#380）。
-# AWS / GitHub への書き込みは Invoke-DesktopE2EReaper.ps1 と workflow が行い、ここでは
+﻿# 使い捨て desktop E2E runner の名前付け、起動・後片付けの要求の組み立て、TTL 回収の対象選定、
+# OIDC ロールの権限境界の確認を行う（#380）。
+# AWS / GitHub への書き込みは scripts/aws の Start / Stop / Test / Invoke スクリプトが行い、ここでは
 # 入力と出力だけで判定する。Pester で契約を固定する。
 
 Set-StrictMode -Version Latest
@@ -208,11 +209,229 @@ function Test-DesktopEphemeralInstanceGone
     return $State -in @('shutting-down', 'terminated')
 }
 
+function Get-DesktopEphemeralRunnerLabel
+{
+    <#
+    .SYNOPSIS
+      使い捨て runner だけに付ける run 固有のラベルを返す。
+    .DESCRIPTION
+      永続 runner のラベル（squirrel-notifier-desktop）は付けない。付けると、別の run の job や
+      永続 runner 向けの job をこの runner が拾い得る。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$RunId
+    )
+
+    if ($RunId -cnotmatch '^[1-9][0-9]{0,19}$')
+    {
+        throw "RunId '$RunId' の形式が不正です。GitHub Actions の run ID（数字）を指定してください。"
+    }
+
+    return "squirrel-notifier-desktop-$RunId"
+}
+
+function New-DesktopEphemeralJitConfigRequest
+{
+    <#
+    .SYNOPSIS
+      generate-jitconfig API の要求本文を返す。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$InstanceId,
+
+        [Parameter(Mandatory)]
+        [string]$RunId
+    )
+
+    return [ordered]@{
+        name            = Get-DesktopEphemeralRunnerName -InstanceId $InstanceId
+        # 1 は repository の既定の runner group（Default）。
+        runner_group_id = 1
+        labels          = @('self-hosted', 'windows', (Get-DesktopEphemeralRunnerLabel -RunId $RunId))
+        work_folder     = '_work'
+    }
+}
+
+function New-DesktopEphemeralJitParameterRequest
+{
+    <#
+    .SYNOPSIS
+      JIT config を置く ssm put-parameter の --cli-input-json に渡す値を返す。
+    .DESCRIPTION
+      JIT config は 4 KB を超えるため Advanced tier を使う（Standard の上限は 4,096 バイト）。
+      Advanced tier でだけ使える有効期限ポリシーを付け、cleanup と reaper の両方が漏れても
+      AWS が削除するようにする。値を --value で渡すとコマンドラインに載るため、ファイル経由で渡す。
+      Overwrite は false にし、同じ instance の parameter を上書きしない。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$Value,
+
+        [Parameter(Mandatory)]
+        [datetimeoffset]$ExpiresAt
+    )
+
+    $timestamp = $ExpiresAt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+    $policies = ConvertTo-Json -Compress -Depth 4 -InputObject @(
+        [ordered]@{ Type = 'Expiration'; Version = '1.0'; Attributes = [ordered]@{ Timestamp = $timestamp } }
+    )
+
+    return [ordered]@{
+        Name      = $Name
+        Value     = $Value
+        Type      = 'SecureString'
+        Tier      = 'Advanced'
+        Overwrite = $false
+        Policies  = $policies
+    }
+}
+
+function Get-DesktopEphemeralRunnerState
+{
+    <#
+    .SYNOPSIS
+      runner 一覧から、指定した使い捨て runner の状態を返す。
+    .DESCRIPTION
+      missing / offline / online / busy / invalid-label のいずれかを返す。invalid-label は同じ名前の
+      runner に run 固有のラベルが無いことを示し、待っても解消しないため呼び出し側は失敗させる。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Runners,
+
+        [Parameter(Mandatory)]
+        [string]$RunnerName,
+
+        [Parameter(Mandatory)]
+        [string]$Label
+    )
+
+    $runner = @($Runners | Where-Object { $_.name -ceq $RunnerName }) | Select-Object -First 1
+    if ($null -eq $runner)
+    {
+        return 'missing'
+    }
+
+    if ($Label -notin @($runner.labels | ForEach-Object { $_.name }))
+    {
+        return 'invalid-label'
+    }
+
+    if ($runner.status -ne 'online')
+    {
+        return 'offline'
+    }
+
+    if ($runner.busy)
+    {
+        return 'busy'
+    }
+
+    return 'online'
+}
+
+function Get-DesktopE2EOidcBoundaryCase
+{
+    <#
+    .SYNOPSIS
+      OIDC ロールの権限境界を DryRun で確かめる操作の一覧を返す（#380）。
+    .DESCRIPTION
+      RunInstances は Launch Template の default version のままなら許可され、network interface
+      （subnet / Security Group）・block device・instance type を要求で上書きすると拒否されること、
+      ephemeral-runner タグの無い instance（永続 instance）は terminate できないことを確かめる。
+
+      上書きの値には永続 instance の subnet と Security Group を使う。subnet は Launch Template と
+      同じ値でも、要求で指定した時点で Launch Template 由来のリソースではなくなるため拒否される想定。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^lt-[0-9a-f]{8,17}$')]
+        [string]$LaunchTemplateId,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^i-[0-9a-f]{8,17}$')]
+        [string]$ReferenceInstanceId,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^subnet-[0-9a-f]{8,17}$')]
+        [string]$ReferenceSubnetId,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^sg-[0-9a-f]{8,17}$')]
+        [string]$ReferenceSecurityGroupId
+    )
+
+    $launch = @('ec2', 'run-instances', '--dry-run', '--count', '1', '--launch-template', "LaunchTemplateId=$LaunchTemplateId,Version=`$Default")
+
+    return @(
+        [pscustomobject]@{ Name = 'launch-template-default'; Expected = 'allowed'; Arguments = $launch }
+        [pscustomobject]@{
+            Name      = 'override-network-interface'
+            Expected  = 'denied'
+            Arguments = $launch + @('--network-interfaces', "DeviceIndex=0,SubnetId=$ReferenceSubnetId,Groups=$ReferenceSecurityGroupId")
+        }
+        [pscustomobject]@{
+            Name      = 'override-block-device'
+            Expected  = 'denied'
+            Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sda1,Ebs={VolumeSize=128}')
+        }
+        [pscustomobject]@{ Name = 'override-instance-type'; Expected = 'denied'; Arguments = $launch + @('--instance-type', 't3.micro') }
+        [pscustomobject]@{
+            Name      = 'terminate-persistent-instance'
+            Expected  = 'denied'
+            Arguments = @('ec2', 'terminate-instances', '--dry-run', '--instance-ids', $ReferenceInstanceId)
+        }
+    )
+}
+
+function Resolve-DesktopE2EDryRunOutcome
+{
+    <#
+    .SYNOPSIS
+      aws CLI の --dry-run の結果を allowed / denied / unknown に分類する。
+    .DESCRIPTION
+      DryRunOperation は認可された、UnauthorizedOperation は IAM で拒否されたことを示す。
+      それ以外（入力の誤り、存在しないリソース、通信の失敗など）は認可の判定になっていないため
+      unknown とし、呼び出し側は境界を確かめられなかったとして失敗させる。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [int]$ExitCode,
+
+        [AllowEmptyString()]
+        [string]$Output
+    )
+
+    if ($ExitCode -ne 0 -and $Output.Contains('(DryRunOperation)'))
+    {
+        return 'allowed'
+    }
+
+    if ($ExitCode -ne 0 -and $Output.Contains('(UnauthorizedOperation)'))
+    {
+        return 'denied'
+    }
+
+    return 'unknown'
+}
+
 Export-ModuleMember -Function @(
     'Get-DesktopEphemeralRunnerName',
     'Get-DesktopEphemeralInstanceIdFromRunnerName',
     'Select-ExpiredDesktopEphemeralInstance',
     'Select-OrphanedDesktopEphemeralRunner',
     'Select-InconsistentDesktopEphemeralRunner',
-    'Test-DesktopEphemeralInstanceGone'
+    'Test-DesktopEphemeralInstanceGone',
+    'Get-DesktopEphemeralRunnerLabel',
+    'New-DesktopEphemeralJitConfigRequest',
+    'New-DesktopEphemeralJitParameterRequest',
+    'Get-DesktopEphemeralRunnerState',
+    'Get-DesktopE2EOidcBoundaryCase',
+    'Resolve-DesktopE2EDryRunOutcome'
 )
