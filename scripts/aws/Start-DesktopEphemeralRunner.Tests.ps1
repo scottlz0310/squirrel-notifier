@@ -1,11 +1,11 @@
-﻿# Pester v5 tests for Start-DesktopEphemeralRunner.ps1
+# Pester v5 tests for Start-DesktopEphemeralRunner.ps1
 # 使い捨て runner の起動手順を固定する（#380）。
-# - Launch Template の default version だけで起動し、値を上書きしない
+# - 固定 SSM Automation version だけで起動し、要求で値を上書きしない
 # - ephemeral-runner タグを確かめてから JIT config を発行する。反映待ち（NotFound / None）は回数を限って再試行し、
 #   タグを確認できなければ発行しない
 # - JIT config は一時ファイル経由で Advanced tier の parameter に置き、コマンドライン・出力に載せない。
 #   一時ファイルを削除できなければ runner を待たずに失敗させ、parameter の失敗時も一時ファイルを消す
-# - instance_id / runner_label / runner_name は分かった時点で GITHUB_OUTPUT に書き、後続の失敗でも cleanup できる
+# - automation_execution_id / instance_id / runner_label / runner_name は分かった時点で GITHUB_OUTPUT に書く
 # - run 固有ラベルの無い runner、待機中の instance の破棄は失敗させる
 # aws / gh CLI は、呼び出しを記録して状態に応じた応答を返す関数で置き換える。
 
@@ -17,7 +17,7 @@ BeforeAll {
     $script:Secret = 'ENCODED-JIT-CONFIG-SECRET'
 
     # global の fake 関数から参照する値。fake の中では $script: のスコープが Pester の実行スコープと一致しない。
-    $global:FakeConst = @{ InstanceId = $script:InstanceId; RunnerName = $script:RunnerName; Label = $script:Label; Secret = $script:Secret }
+    $global:FakeConst = @{ InstanceId = $script:InstanceId; RunnerName = $script:RunnerName; Label = $script:Label; Secret = $script:Secret; AutomationId = '11111111-2222-3333-4444-555555555555' }
 
     # 再試行・待機の間隔を待たずに進める。
     function global:Start-Sleep { }
@@ -31,7 +31,11 @@ BeforeAll {
 
         switch ($operation)
         {
-            'ec2 run-instances' { return $global:FakeConst.InstanceId }
+            'ssm start-automation-execution' { return $global:FakeConst.AutomationId }
+            'ssm get-automation-execution'
+            {
+                return (@{ AutomationExecution = @{ AutomationExecutionStatus = 'Success'; Outputs = @{ 'launchInstance.InstanceId' = @($global:FakeConst.InstanceId) } } } | ConvertTo-Json -Depth 5)
+            }
             'ec2 describe-instances'
             {
                 $query = $args[[array]::IndexOf($args, '--query') + 1]
@@ -100,7 +104,7 @@ BeforeAll {
 
     function Invoke-Start
     {
-        & $script:ScriptPath -Repository 'scottlz0310/squirrel-notifier' -LaunchTemplateId 'lt-09e208553b742f6c1' -RunId '123' `
+        & $script:ScriptPath -Repository 'scottlz0310/squirrel-notifier' -AutomationDocumentVersion '1' -RunId '123' `
             -GitHubOutputPath $script:OutputPath -TempDirectory $TestDrive -RunnerWaitSeconds 60 -PollSeconds 1
     }
 
@@ -155,12 +159,12 @@ Describe 'Start-DesktopEphemeralRunner.ps1' {
             $script:Result.parameterName | Should -Be "/squirrel-notifier/desktop-e2e/jit/$script:InstanceId"
         }
 
-        It 'Launch Template の default version だけで起動し、値を上書きしない' {
-            $launch = @($global:FakeCalls | Where-Object { $_ -like 'ec2 run-instances*' })
+        It '固定 SSM Automation version だけで起動し、要求で値を上書きしない' {
+            $launch = @($global:FakeCalls | Where-Object { $_ -like 'ssm start-automation-execution*' })
 
             $launch.Count | Should -Be 1
-            $launch[0] | Should -Match 'LaunchTemplateId=lt-09e208553b742f6c1,Version=\$Default'
-            $launch[0] | Should -Not -Match '--(instance-type|network-interfaces|subnet-id|security-group-ids|block-device-mappings|image-id|user-data|tag-specifications)'
+            $launch[0] | Should -Match '--document-name SquirrelNotifierDesktopE2ELaunch --document-version 1'
+            $launch[0] | Should -Not -Match '--(parameters|targets|target-maps|target-locations)'
         }
 
         It 'JIT config は run 固有ラベルだけで発行する' {
@@ -181,9 +185,10 @@ Describe 'Start-DesktopEphemeralRunner.ps1' {
             ($script:Stdout -join "`n") | Should -Not -Match $script:Secret
         }
 
-        It 'instance_id / runner_label / runner_name を GITHUB_OUTPUT に書く' {
+        It 'automation_execution_id / instance_id / runner_label / runner_name を GITHUB_OUTPUT に書く' {
             $outputs = Get-Outputs
 
+            $outputs['automation_execution_id'] | Should -Be $global:FakeConst.AutomationId
             $outputs['instance_id'] | Should -Be $script:InstanceId
             $outputs['runner_label'] | Should -Be $script:Label
             $outputs['runner_name'] | Should -Be $script:RunnerName

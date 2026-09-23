@@ -1,4 +1,4 @@
-﻿# desktop E2E workflow が GitHub OIDC で引き受けるロールのポリシー文書を組み立てる（#380）。
+# desktop E2E の OIDC 信頼・Automation 権限と、SSM 実行ロールへ移す EC2 起動権限を組み立てる（#380）。
 # AWS への書き込みは Initialize-DesktopE2EOidcRole.ps1 が行い、ここでは入力値の検証と
 # ポリシーの形だけを扱う。権限の境界は DesktopE2EOidcRole.Tests.ps1 で固定する。
 
@@ -86,7 +86,8 @@ function New-DesktopE2EOidcPermissionPolicy
 {
     <#
     .SYNOPSIS
-      OIDC ロールの inline policy を返す。
+      SSM 実行ロールへ移す EC2 起動権限を含む、従来の inline policy を返す。
+      実際の OIDC ロールには New-DesktopE2EOidcAutomationPermissionPolicy の戻り値を適用する。
     .DESCRIPTION
       既存 instance（-LegacyInstanceId）の Start / Stop は、release が使い捨て方式へ移るまでの
       フォールバックとして残す。使い捨て instance については次に限定する。
@@ -324,7 +325,79 @@ function New-DesktopE2EOidcPermissionPolicy
     }
 }
 
+function New-DesktopE2EOidcAutomationPermissionPolicy
+{
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$RunnerPolicyArguments,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Za-z0-9_.-]{3,128}$')]
+        [string]$DocumentName,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[1-9][0-9]*$')]
+        [string]$DocumentVersion,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Za-z0-9+=,.@_-]{1,64}$')]
+        [string]$AutomationRoleName
+    )
+
+    $source = New-DesktopE2EOidcPermissionPolicy @RunnerPolicyArguments
+    $launchSids = @(
+        'RunEphemeralRunnerInstance',
+        'RunEphemeralRunnerResources',
+        'RunEphemeralRunnerRootVolume',
+        'RunFromRunnerImage',
+        'RunFromRunnerImageSnapshot',
+        'TagEphemeralRunnerOnLaunch',
+        'PassRunnerInstanceRole'
+    )
+    $accountId = $RunnerPolicyArguments.AccountId
+    $region = $RunnerPolicyArguments.Region
+    $executionArn = "arn:aws:ssm:${region}:${accountId}:automation-execution/*"
+
+    return [ordered]@{
+        Version   = '2012-10-17'
+        Statement = @(
+            @($source.Statement | Where-Object { $_.Sid -notin $launchSids })
+            [ordered]@{
+                Sid       = 'StartFixedLaunchAutomationDocument'
+                Effect    = 'Allow'
+                Action    = 'ssm:StartAutomationExecution'
+                Resource  = "arn:aws:ssm:${region}:${accountId}:document/$DocumentName"
+                Condition = [ordered]@{
+                    'ForAnyValue:StringEquals' = [ordered]@{ 'ssm:DocumentVersion' = @($DocumentVersion) }
+                }
+            }
+            [ordered]@{
+                Sid      = 'StartFixedLaunchAutomationExecution'
+                Effect   = 'Allow'
+                Action   = 'ssm:StartAutomationExecution'
+                Resource = $executionArn
+            }
+            [ordered]@{
+                Sid      = 'ReadLaunchAutomationResult'
+                Effect   = 'Allow'
+                Action   = 'ssm:GetAutomationExecution'
+                Resource = $executionArn
+            }
+            [ordered]@{
+                Sid       = 'PassLaunchAutomationRole'
+                Effect    = 'Allow'
+                Action    = 'iam:PassRole'
+                Resource  = "arn:aws:iam::${accountId}:role/$AutomationRoleName"
+                Condition = [ordered]@{
+                    StringEquals = [ordered]@{ 'iam:PassedToService' = 'ssm.amazonaws.com' }
+                }
+            }
+        )
+    }
+}
+
 Export-ModuleMember -Function @(
     'New-DesktopE2EOidcTrustPolicy',
-    'New-DesktopE2EOidcPermissionPolicy'
+    'New-DesktopE2EOidcPermissionPolicy',
+    'New-DesktopE2EOidcAutomationPermissionPolicy'
 )

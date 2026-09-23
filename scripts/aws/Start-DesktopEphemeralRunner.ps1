@@ -1,10 +1,10 @@
-﻿<#
+<#
 .SYNOPSIS
-  Launch Template から使い捨て desktop E2E instance を起動し、JIT runner が online になるまで待つ（#380）。
+  固定 SSM Automation から使い捨て desktop E2E instance を起動し、JIT runner が online になるまで待つ（#380）。
 .DESCRIPTION
   desktop-e2e.yml の prepare-runner（runner_mode: ephemeral）から呼ぶ。
 
-  1. Launch Template の default version で instance を 1 台起動する（値は上書きしない）
+  1. 固定 SSM Automation の指定 version で instance を 1 台起動する
   2. instance に ephemeral-runner タグが付いたことを確かめる（付いていなければ cleanup で terminate できない）
   3. instance ID から runner 名を決めて JIT config を発行する。ラベルは run 固有のもので、永続 runner の
      ラベルは付けない
@@ -12,7 +12,7 @@
      instance 上の Start-DesktopRunner.ps1 がこれを待って ephemeral runner として起動する
   5. runner が online になるまで待つ
 
-  -GitHubOutputPath を指定すると、instance_id / runner_name / runner_label を分かった時点で書き出す。
+  -GitHubOutputPath を指定すると、automation_execution_id / instance_id / runner_name / runner_label を分かった時点で書き出す。
   後続の手順で失敗しても、cleanup が terminate する instance を特定できるようにするため。
 
   JIT config の値はログへ出力しない。parameter へはコマンドラインに載らないよう一時ファイル経由で渡し、
@@ -20,7 +20,7 @@
 
   aws CLI（OIDC ロールの資格情報）と gh CLI（GH_TOKEN に Administration: write の App token）を使う。
 .EXAMPLE
-  .\Start-DesktopEphemeralRunner.ps1 -Repository scottlz0310/squirrel-notifier -LaunchTemplateId lt-09e208553b742f6c1 -RunId 123
+  .\Start-DesktopEphemeralRunner.ps1 -Repository scottlz0310/squirrel-notifier -AutomationDocumentVersion 1 -RunId 123
 #>
 [CmdletBinding()]
 param(
@@ -28,9 +28,12 @@ param(
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
     [string]$Repository,
 
+    [ValidatePattern('^[A-Za-z0-9_.-]{3,128}$')]
+    [string]$AutomationDocumentName = 'SquirrelNotifierDesktopE2ELaunch',
+
     [Parameter(Mandatory)]
-    [ValidatePattern('^lt-[0-9a-f]{8,17}$')]
-    [string]$LaunchTemplateId,
+    [ValidatePattern('^[1-9][0-9]*$')]
+    [string]$AutomationDocumentVersion,
 
     [Parameter(Mandatory)]
     [string]$RunId,
@@ -119,20 +122,57 @@ $tag = Get-DesktopRunnerResourceTag
 $label = Get-DesktopEphemeralRunnerLabel -RunId $RunId
 Write-StepOutput -Name 'runner_label' -Value $label
 
-$instanceId = Invoke-AwsCli -Arguments @(
-    'ec2', 'run-instances',
+$automationId = Invoke-AwsCli -Arguments @(
+    'ssm', 'start-automation-execution',
     '--region', $Region,
-    '--count', '1',
-    '--launch-template', "LaunchTemplateId=$LaunchTemplateId,Version=`$Default",
-    '--query', 'Instances[0].InstanceId',
+    '--document-name', $AutomationDocumentName,
+    '--document-version', $AutomationDocumentVersion,
+    '--query', 'AutomationExecutionId',
     '--output', 'text'
 )
+if ($automationId -cnotmatch '^[0-9a-f-]{36}$')
+{
+    throw "start-automation-execution の応答から execution ID を読めません: $automationId"
+}
+Write-StepOutput -Name 'automation_execution_id' -Value $automationId
+
+$instanceId = $null
+for ($attempt = 1; $attempt -le 36; $attempt++)
+{
+    $execution = Invoke-AwsCli -Arguments @(
+        'ssm', 'get-automation-execution', '--region', $Region,
+        '--automation-execution-id', $automationId, '--output', 'json'
+    ) | ConvertFrom-Json
+    $outputs = $execution.AutomationExecution.Outputs
+    $instanceIds = @()
+    if ($null -ne $outputs -and $null -ne $outputs.PSObject.Properties['launchInstance.InstanceId'])
+    {
+        $instanceIds = @($outputs.'launchInstance.InstanceId')
+    }
+    if ($null -eq $instanceId -and $instanceIds.Count -eq 1 -and $instanceIds[0] -cmatch '^i-[0-9a-f]{8,17}$')
+    {
+        $instanceId = $instanceIds[0]
+        Write-StepOutput -Name 'instance_id' -Value $instanceId
+    }
+    if ($execution.AutomationExecution.AutomationExecutionStatus -eq 'Success')
+    {
+        break
+    }
+    if ($execution.AutomationExecution.AutomationExecutionStatus -notin @('Pending', 'InProgress', 'Waiting'))
+    {
+        throw "Automation $automationId が $($execution.AutomationExecution.AutomationExecutionStatus) で終了しました。"
+    }
+    Start-Sleep -Seconds 5
+}
+if ($execution.AutomationExecution.AutomationExecutionStatus -ne 'Success')
+{
+    throw "Automation $automationId が制限時間内に完了しませんでした（状態: $($execution.AutomationExecution.AutomationExecutionStatus)）。"
+}
 if ($instanceId -cnotmatch '^i-[0-9a-f]{8,17}$')
 {
-    throw "run-instances の応答から instance ID を読めません: $instanceId"
+    throw "Automation $automationId の出力から instance ID を読めません。"
 }
-Write-StepOutput -Name 'instance_id' -Value $instanceId
-Write-Verbose "使い捨て instance を起動しました: $instanceId"
+Write-Verbose "Automation $automationId が使い捨て instance $instanceId を起動しました。"
 
 $tagValue = Get-InstanceTagValue -InstanceId $instanceId -Key $tag.Key
 if ($tagValue -cne $tag.EphemeralInstanceValue)

@@ -1,4 +1,4 @@
-﻿# 使い捨て desktop E2E runner の名前付け、起動・後片付けの要求の組み立て、TTL 回収の対象選定、
+# 使い捨て desktop E2E runner の名前付け、起動・後片付けの要求の組み立て、TTL 回収の対象選定、
 # OIDC ロールの権限境界の確認を行う（#380）。
 # AWS / GitHub への書き込みは scripts/aws の Start / Stop / Test / Invoke スクリプトが行い、ここでは
 # 入力と出力だけで判定する。Pester で契約を固定する。
@@ -340,14 +340,7 @@ function Get-DesktopE2EOidcBoundaryCase
 {
     <#
     .SYNOPSIS
-      OIDC ロールの権限境界を DryRun で確かめる操作の一覧を返す（#380）。
-    .DESCRIPTION
-      RunInstances は Launch Template の default version のままなら許可され、network interface
-      （subnet / Security Group）・block device・instance type を要求で上書きすると拒否されること、
-      ephemeral-runner タグの無い instance（永続 instance）は terminate できないことを確かめる。
-
-      上書きの値には永続 instance の subnet と Security Group を使う。subnet は Launch Template と
-      同じ値でも、要求で指定した時点で Launch Template 由来のリソースではなくなるため拒否される想定。
+      OIDC ロールに直接 RunInstances が無く、永続 instance を terminate できないことを確かめる（#380）。
     #>
     param(
         [Parameter(Mandatory)]
@@ -356,51 +349,13 @@ function Get-DesktopE2EOidcBoundaryCase
 
         [Parameter(Mandatory)]
         [ValidatePattern('^i-[0-9a-f]{8,17}$')]
-        [string]$ReferenceInstanceId,
-
-        [Parameter(Mandatory)]
-        [ValidatePattern('^subnet-[0-9a-f]{8,17}$')]
-        [string]$ReferenceSubnetId,
-
-        [Parameter(Mandatory)]
-        [ValidatePattern('^sg-[0-9a-f]{8,17}$')]
-        [string]$ReferenceSecurityGroupId
+        [string]$ReferenceInstanceId
     )
 
     $launch = @('ec2', 'run-instances', '--dry-run', '--count', '1', '--launch-template', "LaunchTemplateId=$LaunchTemplateId,Version=`$Default")
 
     return @(
-        [pscustomobject]@{ Name = 'launch-template-default'; Expected = 'allowed'; Arguments = $launch }
-        [pscustomobject]@{
-            Name      = 'override-network-interface'
-            Expected  = 'denied'
-            Arguments = $launch + @('--network-interfaces', "DeviceIndex=0,SubnetId=$ReferenceSubnetId,Groups=$ReferenceSecurityGroupId")
-        }
-        # root volume（/dev/sda1）の変更は ec2:IsLaunchTemplateResource では拒否されない（2026-09-23 の実測）。
-        # OIDC ロールの volume の条件（AMI の root volume の容量・種類が上限）で拒否されることを確かめる。
-        [pscustomobject]@{
-            Name      = 'override-block-device'
-            Expected  = 'denied'
-            Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sda1,Ebs={VolumeSize=128}')
-        }
-        [pscustomobject]@{
-            Name      = 'override-volume-type'
-            Expected  = 'denied'
-            Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sda1,Ebs={VolumeType=io2,Iops=3000}')
-        }
-        [pscustomobject]@{
-            Name      = 'add-extra-volume'
-            Expected  = 'denied'
-            Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sdf,Ebs={VolumeSize=8,VolumeType=gp3}')
-        }
-        # DeleteOnTermination を制限する IAM 条件キーは RunInstances に無く、拒否は期待できない。
-        # 結果を記録するだけにし（observe）、残った volume は cleanup と reaper が削除する。
-        [pscustomobject]@{
-            Name      = 'retain-root-volume'
-            Expected  = 'observe'
-            Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sda1,Ebs={DeleteOnTermination=false}')
-        }
-        [pscustomobject]@{ Name = 'override-instance-type'; Expected = 'denied'; Arguments = $launch + @('--instance-type', 't3.micro') }
+        [pscustomobject]@{ Name = 'direct-run-instances'; Expected = 'denied'; Arguments = $launch }
         [pscustomobject]@{
             Name      = 'terminate-persistent-instance'
             Expected  = 'denied'

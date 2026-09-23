@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   desktop E2E workflow が GitHub OIDC で引き受けるロールの信頼ポリシーと inline policy を適用する（#380）。
 .DESCRIPTION
@@ -6,11 +6,11 @@
   （-PolicyName）を上書きする。中身は DesktopE2EOidcRole.psm1 で組み立てる。
 
   - 信頼ポリシー: sub を repo:<Repository>:environment:<Environment> に固定する
-  - inline policy: 既存 instance の Start / Stop に加え、Launch Template からの使い捨て instance の
-    起動・terminate、runner role の PassRole、JIT config の parameter への書き込み
+  - inline policy: 既存 instance の Start / Stop に加え、固定した SSM Automation version の起動、
+    使い捨て instance の terminate、JIT config の parameter への書き込み
 
-  RunInstances の許可に使う instance type・subnet・Security Group は、Launch Template の default version
-  から読む。Launch Template を更新したら、本スクリプトも再実行する。
+  Automation 文書が参照する Launch Template の version と現在の default version を照合する。
+  Launch Template を更新したら Automation 文書を作り直し、その version で本スクリプトを再実行する。
 
   読み取りはすべて書き込みより前に済ませる。書き込みは信頼ポリシーを先に行う。inline policy の更新が
   失敗しても、広い信頼のまま新しい権限が付いた状態を残さないため。-PolicyName 以外の inline policy や
@@ -19,13 +19,17 @@
   Admin ロールで実行する（IAM の変更が必要）。
 .EXAMPLE
   $env:AWS_PROFILE = 'admin'
-  .\Initialize-DesktopE2EOidcRole.ps1 -LegacyInstanceId i-0123456789abcdef0
+  .\Initialize-DesktopE2EOidcRole.ps1 -LegacyInstanceId i-0123456789abcdef0 -AutomationDocumentVersion 1
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
     [string]$LegacyInstanceId,
+
+    [Parameter(Mandatory)]
+    [ValidatePattern('^[1-9][0-9]*$')]
+    [string]$AutomationDocumentVersion,
 
     [ValidateNotNullOrEmpty()]
     [string]$Region = 'us-east-1',
@@ -48,6 +52,10 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$RunnerRoleName = 'SquirrelNotifierDesktopE2ERunner',
 
+    [string]$AutomationDocumentName = 'SquirrelNotifierDesktopE2ELaunch',
+
+    [string]$AutomationRoleName = 'SquirrelNotifierDesktopE2EAutomation',
+
     [ValidateNotNullOrEmpty()]
     [string]$JitParameterPrefix = '/squirrel-notifier/desktop-e2e/jit'
 )
@@ -55,6 +63,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'DesktopE2ELaunchAutomation.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DesktopE2EOidcRole.psm1') -Force
 
 function Invoke-AwsCli
@@ -148,6 +157,7 @@ $image = Invoke-AwsCli -Arguments @(
     '--query', 'Images[0].{RootDeviceName: RootDeviceName, BlockDeviceMappings: BlockDeviceMappings}',
     '--output', 'json'
 ) | ConvertFrom-Json
+Assert-DesktopE2ELaunchStorage -LaunchTemplateData $version.LaunchTemplateData -Image $image
 $rootVolume = @($image.BlockDeviceMappings | Where-Object { $_.DeviceName -ceq $image.RootDeviceName -and $null -ne $_.PSObject.Properties['Ebs'] }) |
     Select-Object -First 1 | ForEach-Object { $_.Ebs }
 if ($null -eq $rootVolume)
@@ -159,20 +169,41 @@ $rootIops = if ($null -ne $rootVolume.PSObject.Properties['Iops']) { [int]$rootV
 $rootThroughput = if ($null -ne $rootVolume.PSObject.Properties['Throughput']) { [int]$rootVolume.Throughput } else { 0 }
 
 $trustPolicy = New-DesktopE2EOidcTrustPolicy -AccountId $accountId -Repository $Repository -Environment $Environment
-$permissionPolicy = New-DesktopE2EOidcPermissionPolicy `
-    -AccountId $accountId `
-    -Region $Region `
-    -LegacyInstanceId $LegacyInstanceId `
+$automationDocument = Invoke-AwsCli -Arguments @(
+    'ssm', 'get-document', '--region', $Region, '--name', $AutomationDocumentName,
+    '--document-version', $AutomationDocumentVersion, '--document-format', 'JSON', '--output', 'json'
+)
+$expectedDocument = New-DesktopE2ELaunchAutomationDocument `
+    -RoleArn "arn:aws:iam::${accountId}:role/$AutomationRoleName" `
     -LaunchTemplateId $version.LaunchTemplateId `
-    -InstanceType $version.LaunchTemplateData.InstanceType `
-    -SubnetId $networkInterface.SubnetId `
-    -SecurityGroupId @($networkInterface.Groups)[0] `
-    -RootVolumeSize ([int]$rootVolume.VolumeSize) `
-    -RootVolumeType $rootVolume.VolumeType `
-    -RootVolumeIops $rootIops `
-    -RootVolumeThroughput $rootThroughput `
-    -RunnerRoleName $RunnerRoleName `
-    -JitParameterPrefix $JitParameterPrefix
+    -LaunchTemplateVersion $version.VersionNumber
+$actualContent = ConvertTo-Json -InputObject ((($automationDocument | ConvertFrom-Json).Content) | ConvertFrom-Json -AsHashtable) -Depth 20 -Compress
+$expectedContent = ConvertTo-Json -InputObject $expectedDocument -Depth 20 -Compress
+if ($actualContent -cne $expectedContent)
+{
+    throw "Automation 文書 $AutomationDocumentName version $AutomationDocumentVersion が現在の固定起動仕様と一致しません。"
+}
+
+$runnerPolicyArguments = @{
+    AccountId            = $accountId
+    Region               = $Region
+    LegacyInstanceId     = $LegacyInstanceId
+    LaunchTemplateId     = $version.LaunchTemplateId
+    InstanceType         = $version.LaunchTemplateData.InstanceType
+    SubnetId             = $networkInterface.SubnetId
+    SecurityGroupId      = @($networkInterface.Groups)[0]
+    RootVolumeSize       = [int]$rootVolume.VolumeSize
+    RootVolumeType       = $rootVolume.VolumeType
+    RootVolumeIops       = $rootIops
+    RootVolumeThroughput = $rootThroughput
+    RunnerRoleName       = $RunnerRoleName
+    JitParameterPrefix   = $JitParameterPrefix
+}
+$permissionPolicy = New-DesktopE2EOidcAutomationPermissionPolicy `
+    -RunnerPolicyArguments $runnerPolicyArguments `
+    -DocumentName $AutomationDocumentName `
+    -DocumentVersion $AutomationDocumentVersion `
+    -AutomationRoleName $AutomationRoleName
 
 $existingRole = Invoke-AwsCli -Arguments @('iam', 'get-role', '--role-name', $RoleName, '--query', 'Role.RoleName', '--output', 'text') -AbsentErrorCode 'NoSuchEntity'
 
@@ -224,6 +255,8 @@ if ($PSCmdlet.ShouldProcess($RoleName, "inline policy $PolicyName を適用"))
     roleArn                 = "arn:aws:iam::${accountId}:role/$RoleName"
     trustedSubject          = "repo:${Repository}:environment:$Environment"
     policyName              = $PolicyName
+    automationDocumentName  = $AutomationDocumentName
+    automationDocumentVersion = $AutomationDocumentVersion
     launchTemplateId        = $version.LaunchTemplateId
     launchTemplateVersion   = $version.VersionNumber
     instanceType            = $version.LaunchTemplateData.InstanceType

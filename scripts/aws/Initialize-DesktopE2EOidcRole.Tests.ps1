@@ -1,9 +1,9 @@
-﻿# Pester v5 tests for Initialize-DesktopE2EOidcRole.ps1
+# Pester v5 tests for Initialize-DesktopE2EOidcRole.ps1
 # 書き込みの条件と順序を固定する（#380）。
 # - 入力値が不正、OIDC provider が無い、Launch Template が無い、存在確認が NotFound 以外で失敗した場合は
 #   何も書き込まずに止まる
 # - 既存ロールでは信頼ポリシーを inline policy より先に更新する
-# - RunInstances の条件は Launch Template の default version から読む
+# - 固定 SSM 文書と version を確認し、OIDC からの直接起動は許可しない
 # aws CLI は、呼び出しを記録して状態に応じた応答を返す関数で置き換える。
 
 BeforeAll {
@@ -60,14 +60,25 @@ BeforeAll {
             }
             'ec2 describe-images'
             {
-                # root 以外の EBS と instance store のマッピングも混ぜ、root device のものだけを使うことを確かめる。
+                # instance store のマッピングはあり得るが、EBS は root だけにする。
                 return (ConvertTo-Json -Depth 10 -InputObject ([ordered]@{
                             RootDeviceName      = $fake.RootDeviceName
                             BlockDeviceMappings = @(
-                                [ordered]@{ DeviceName = '/dev/sdf'; Ebs = [ordered]@{ VolumeSize = 500; VolumeType = 'io2'; Iops = 64000 } }
                                 [ordered]@{ DeviceName = '/dev/sda1'; Ebs = [ordered]@{ VolumeSize = 40; VolumeType = 'gp3'; Iops = 3000; Throughput = 125 } }
                                 [ordered]@{ DeviceName = 'xvdca'; VirtualName = 'ephemeral0' }
                             )
+                        }))
+            }
+            'ssm get-document'
+            {
+                $document = New-DesktopE2ELaunchAutomationDocument `
+                    -RoleArn 'arn:aws:iam::123456789012:role/SquirrelNotifierDesktopE2EAutomation' `
+                    -LaunchTemplateId 'lt-0123456789abcdef0' -LaunchTemplateVersion 2
+                if ($fake.DocumentMismatch) { $document.mainSteps[0].inputs.MaxCount = 2 }
+                return (ConvertTo-Json -Depth 20 -InputObject ([ordered]@{
+                            DocumentType = 'Automation'
+                            DocumentVersion = '1'
+                            Content = ConvertTo-Json -InputObject $document -Depth 20 -Compress
                         }))
             }
             'iam get-role'
@@ -86,7 +97,7 @@ BeforeAll {
     {
         param([hashtable]$Overrides = @{})
 
-        $arguments = @{ LegacyInstanceId = 'i-0123456789abcdef0' }
+        $arguments = @{ LegacyInstanceId = 'i-0123456789abcdef0'; AutomationDocumentVersion = '1' }
         foreach ($key in $Overrides.Keys)
         {
             $arguments[$key] = $Overrides[$key]
@@ -117,6 +128,7 @@ Describe 'Initialize-DesktopE2EOidcRole.ps1' {
             RoleExists           = $true
             InlinePolicies       = @('SquirrelNotifierDesktopE2EInstanceControl')
             RootDeviceName       = '/dev/sda1'
+            DocumentMismatch     = $false
             FailOn               = $null
             FailWith             = $null
         }
@@ -130,6 +142,7 @@ Describe 'Initialize-DesktopE2EOidcRole.ps1' {
         @{ Case = 'ロールの存在確認が権限不足で失敗した状態'; Setup = { param($s) $s.FailOn = 'iam get-role'; $s.FailWith = 'AccessDenied' }; Overrides = @{}; Message = '*AccessDenied*' }
         @{ Case = 'AMI に root device の EBS マッピングが無い状態'; Setup = { param($s) $s.RootDeviceName = '/dev/xvda' }; Overrides = @{}; Message = '*root device*' }
         @{ Case = 'AMI の読み取りが権限不足で失敗した状態'; Setup = { param($s) $s.FailOn = 'ec2 describe-images'; $s.FailWith = 'UnauthorizedOperation' }; Overrides = @{}; Message = '*UnauthorizedOperation*' }
+        @{ Case = 'Automation 文書の内容が異なる状態'; Setup = { param($s) $s.DocumentMismatch = $true }; Overrides = @{}; Message = '*固定起動仕様と一致しません*' }
     ) {
         & $Setup $global:FakeAwsState
 
@@ -167,28 +180,21 @@ Describe 'Initialize-DesktopE2EOidcRole.ps1' {
         $calls | Should -Not -Contain 'iam list-role-policies'
     }
 
-    It 'RunInstances の条件は Launch Template の default version から読む' {
+    It '直接起動を外し、SSM 文書の確定 version に限定する' {
         $result = Invoke-InitializeScript
 
         $policy = $global:FakeAwsDocuments['iam put-role-policy']
-        $instance = @($policy.Statement | Where-Object { $_.Sid -eq 'RunEphemeralRunnerInstance' })[0]
-        $instance.Condition.StringEquals.'ec2:InstanceType' | Should -Be 'm7i.2xlarge'
-        $instance.Condition.ArnEquals.'ec2:LaunchTemplate' | Should -Be 'arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0'
-        $network = @($policy.Statement | Where-Object { $_.Sid -eq 'RunEphemeralRunnerResources' })[0]
-        @($network.Resource) | Should -Contain 'arn:aws:ec2:us-east-1:123456789012:subnet/subnet-0fedcba9876543210'
-        @($network.Resource) | Should -Contain 'arn:aws:ec2:us-east-1:123456789012:security-group/sg-0fedcba9876543210'
+        @($policy.Statement | Where-Object { $_.Action -eq 'ec2:RunInstances' -or $_.Action -eq 'ec2:CreateTags' }) | Should -BeNullOrEmpty
+        $start = @($policy.Statement | Where-Object { $_.Sid -eq 'StartFixedLaunchAutomationDocument' })[0]
+        $start.Resource | Should -Be 'arn:aws:ssm:us-east-1:123456789012:document/SquirrelNotifierDesktopE2ELaunch'
+        $start.Condition.'ForAnyValue:StringEquals'.'ssm:DocumentVersion' | Should -Be @('1')
+        $result.automationDocumentVersion | Should -Be '1'
         $result.launchTemplateVersion | Should -Be 2
     }
 
-    It 'volume の上限は Launch Template の AMI の root device のマッピングから読む' {
+    It 'root volume の前提は Launch Template の AMI から読む' {
         $result = Invoke-InitializeScript
 
-        $policy = $global:FakeAwsDocuments['iam put-role-policy']
-        $volume = @($policy.Statement | Where-Object { $_.Sid -eq 'RunEphemeralRunnerRootVolume' })[0]
-        $volume.Condition.NumericLessThanEquals.'ec2:VolumeSize' | Should -Be 40
-        $volume.Condition.StringEquals.'ec2:VolumeType' | Should -Be 'gp3'
-        $volume.Condition.NumericLessThanEqualsIfExists.'ec2:VolumeIops' | Should -Be 3000
-        $volume.Condition.NumericLessThanEqualsIfExists.'ec2:VolumeThroughput' | Should -Be 125
         @($global:FakeAwsCalls) | Should -Contain 'ec2 describe-images'
         $result.rootVolume.imageId | Should -Be 'ami-0123456789abcdef0'
         $result.rootVolume.deviceName | Should -Be '/dev/sda1'

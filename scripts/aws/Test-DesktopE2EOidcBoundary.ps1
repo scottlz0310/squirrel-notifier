@@ -1,23 +1,17 @@
-﻿<#
+<#
 .SYNOPSIS
   desktop E2E workflow の OIDC ロールの権限境界を DryRun で確かめる（#380）。
 .DESCRIPTION
   使い捨て runner を起動する前に、workflow の資格情報（OIDC ロール）で次を確かめる。
 
-  - Launch Template の default version のままの RunInstances は許可される
-  - network interface（subnet / Security Group）・block device・instance type を要求で上書きする
-    RunInstances は拒否される
+  - Launch Template の default version のままでも直接 RunInstances は拒否される
   - ephemeral-runner タグの無い instance（永続 instance）の TerminateInstances は拒否される
 
   ポリシー文書の形は DesktopE2EOidcRole.psm1 の Pester で固定しているが、AWS 上の実際の評価は
   ここでしか確かめられない。すべて --dry-run のため instance は作られず、terminate もされない。
 
   期待と違う結果、または認可の判定にならなかった結果（入力の誤り・通信の失敗など）が 1 件でもあれば
-  失敗させる。ただし期待が observe の操作（root の DeleteOnTermination=false。IAM の条件キーが無く
-  拒否できない）は結果を記録するだけにする。ポリシーが後から変わった場合にも、使い捨て instance を作る前に気付けるようにする。
-
-  上書きの値は永続 instance の subnet と Security Group から取る（OIDC ロールは Describe 系を
-  instance にしか持たないため）。
+  失敗させる。
 .EXAMPLE
   .\Test-DesktopE2EOidcBoundary.ps1 -LaunchTemplateId lt-09e208553b742f6c1 -ReferenceInstanceId i-00b4e23b910eade6c
 #>
@@ -41,19 +35,9 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DesktopEphemeralRunner.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DesktopE2ECli.psm1') -Force
 
-$reference = Invoke-AwsCli -Arguments @(
-    'ec2', 'describe-instances',
-    '--region', $Region,
-    '--instance-ids', $ReferenceInstanceId,
-    '--query', 'Reservations[0].Instances[0].{SubnetId: SubnetId, SecurityGroupId: SecurityGroups[0].GroupId}',
-    '--output', 'json'
-) | ConvertFrom-Json
-
 $cases = Get-DesktopE2EOidcBoundaryCase `
     -LaunchTemplateId $LaunchTemplateId `
-    -ReferenceInstanceId $ReferenceInstanceId `
-    -ReferenceSubnetId $reference.SubnetId `
-    -ReferenceSecurityGroupId $reference.SecurityGroupId
+    -ReferenceInstanceId $ReferenceInstanceId
 
 $results = @(
     foreach ($case in $cases)
@@ -78,8 +62,7 @@ $report = [pscustomobject]@{
 } | ConvertTo-Json -Depth 4
 $report
 
-# observe は IAM で拒否できない操作の記録（残った volume は cleanup と reaper で補う）で、判定には使わない。
-$mismatches = @($results | Where-Object { $_.expected -ne 'observe' -and $_.actual -ne $_.expected })
+$mismatches = @($results | Where-Object { $_.actual -ne $_.expected })
 if ($mismatches.Count -gt 0)
 {
     $summary = ($mismatches | ForEach-Object { "$($_.name)（期待 $($_.expected) / 実際 $($_.actual)）" }) -join ', '
