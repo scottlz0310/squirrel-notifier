@@ -212,7 +212,7 @@ workflow を release gate として呼び出す。定期実行は行わず、run
   スリープ・モニタ電源断・画面ロックの無効化によって対話セッションを維持する。適用手順は
   後述の「runner ホストの bootstrap」に従い、`scripts/aws/` のスクリプトで再現する。
   `runner_mode: persistent` は既存 instance を使用し、workflow が停止状態から起動した場合だけ停止する。
-  `runner_mode: ephemeral` は Launch Template から instance を作成し、run 固有ラベルの JIT runner を
+  `runner_mode: ephemeral` は固定 SSM Automation から instance を作成し、run 固有ラベルの JIT runner を
   online にしてから E2E を開始し、終了時に instance を terminate する。どちらも GitHub OIDC の短期
   credential を使い、runner online 待機に失敗した場合は desktop E2E を開始しない。
   `prepare-runner`、`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言し、
@@ -238,7 +238,10 @@ gh workflow run desktop-e2e-dispatch.yml --ref main -f target_ref=main -f scenar
 ```
 
 使い捨て経路では environment variable `DESKTOP_E2E_AWS_LAUNCH_TEMPLATE_ID` に Launch Template の
-ID を設定する。prepare は OIDC ロールの境界確認を先に行い、不一致なら instance を作らずに失敗する。
+ID、`DESKTOP_E2E_AWS_AUTOMATION_DOCUMENT_VERSION` に Admin が作成した Automation 文書の数値 version を
+設定する。prepare は OIDC ロールの直接起動が拒否されることを先に確かめ、不一致なら失敗する。
+Automation execution ID は開始直後に記録し、instance ID を受け取る前に prepare が失敗した場合は
+cleanup が execution の結果から復元する。
 成功・失敗・キャンセル時の cleanup は、instance の terminate、残ったタグ付き volume、JIT parameter、
 未使用の runner 登録を対象とする。
 
@@ -260,10 +263,12 @@ session で `run.cmd` を実行する必要がある。この設定を再現可�
 | `New-DesktopRunnerImage.ps1` | 開発機（Admin） | 停止中の instance から使い捨て instance 用の AMI を作る（#380） |
 | `Initialize-DesktopRunnerLaunchTemplate.ps1` | 開発機（Admin） | inbound の無い Security Group と Launch Template を作成・更新する（#380） |
 | `DesktopRunnerImage.psm1` | 開発機 | AMI のタグと Launch Template の中身を組み立てる（Pester で契約を固定する） |
+| `Initialize-DesktopE2ELaunchAutomation.ps1` | 開発機（Admin） | 固定 SSM Automation 文書と専用実行ロールを作成・更新する（#380） |
 | `Initialize-DesktopE2EOidcRole.ps1` | 開発機（Admin） | workflow が GitHub OIDC で引き受けるロールの信頼ポリシーと権限を適用する（#380） |
 | `DesktopE2EOidcRole.psm1` | 開発機 | OIDC ロールのポリシーを組み立てる（Pester で権限境界を固定する） |
 | `Test-DesktopE2EOidcBoundary.ps1` | GitHub Actions | instance 作成前に OIDC ロールの DryRun を行い、期待と異なれば停止する（#380） |
 | `Start-DesktopEphemeralRunner.ps1` | GitHub Actions | instance を作成し、JIT runner の online を待つ（#380） |
+| `Resolve-DesktopE2EAutomationInstance.ps1` | GitHub Actions | 準備失敗後に Automation execution ID から instance ID を復元する（#380） |
 | `Stop-DesktopEphemeralRunner.ps1` | GitHub Actions | instance・残った volume・JIT parameter・runner 登録を回収する（#380） |
 | `Invoke-DesktopE2EReaper.ps1` | GitHub Actions（`desktop-e2e-reaper.yml`） | cleanup から漏れた使い捨て instance・JIT parameter・runner 登録を回収する（#380） |
 | `DesktopEphemeralRunner.psm1` | 開発機 / GitHub Actions | 使い捨て runner の名前付けと回収対象の選定（Pester で固定する） |
@@ -366,11 +371,14 @@ Remove-Item Env:AWS_PROFILE
 #### 6. workflow の OIDC ロール（#380）
 
 workflow が GitHub OIDC で引き受けるロール（`DESKTOP_E2E_AWS_ROLE_ARN`）の信頼ポリシーと inline policy を
-適用する。IAM の変更のため Admin ロールで実行する。Launch Template を更新した後も再実行する。
+適用する。IAM の変更のため Admin ロールで実行する。先に SSM Automation 文書と実行ロールを作り、
+出力された数値 version を OIDC ロールと environment variable に同じ値で設定する。
+Launch Template を更新した場合は、この順で文書とポリシーを更新する。
 
 ```powershell
 $env:AWS_PROFILE = 'admin'
-pwsh -File scripts\aws\Initialize-DesktopE2EOidcRole.ps1 -LegacyInstanceId <instance-id>
+$automation = pwsh -File scripts\aws\Initialize-DesktopE2ELaunchAutomation.ps1 | ConvertFrom-Json
+pwsh -File scripts\aws\Initialize-DesktopE2EOidcRole.ps1 -LegacyInstanceId <instance-id> -AutomationDocumentVersion $automation.documentVersion
 Remove-Item Env:AWS_PROFILE
 ```
 
@@ -378,20 +386,17 @@ Remove-Item Env:AWS_PROFILE
   完全一致）。environment の branch / tag policy（`main` / `v*`）を AWS 側でも効かせるため、
   `repo:<owner>/<repo>:*` のような前方一致は使わない
 - 既存 instance（`-LegacyInstanceId`）は Start / Stop だけを許可し、terminate は許可しない
-- 使い捨て instance は、Launch Template の default version と同じ instance type・subnet・Security Group で、
-  `runner-image` タグの付いた自アカウントの AMI（と snapshot）からだけ起動できる。root volume の
-  容量・種類・IOPS・スループットは AMI の root マッピングを上限にする。Launch Template 由来の
-  リソースかどうかも条件にするが、2026-09-23 の DryRun では追加の 8 GiB gp3 volume が許可された。
-  境界確認はこの不一致で fail-closed となり、使い捨て instance は作成されない（#380 で調査中）。
-  UserData の中身を制限する条件キーは
-  IAM に無いため、UserData は上記の信頼条件と runner role の権限で守る。タグ付けは起動と同時に限り、
+- OIDC ロールには直接 `RunInstances`、`CreateTags`、runner role の `PassRole` を付けない。
+  固定 SSM 文書の確定 version の開始、execution の結果参照、専用 SSM 実行ロールの `PassRole` を許可する。
+  文書は Launch Template の数値 version、`MinCount=MaxCount=1`、追加 block device 指定なしを固定する。
+  実行ロールの起動権限は AMI・root volume・network・タグを制限し、OIDC ロールの直接起動とは分離する。
   terminate と残った volume の削除は `ephemeral-runner` タグの付いたリソースだけに限る
 - JIT config を置く `/squirrel-notifier/desktop-e2e/jit/*` への Put / Delete を許可する。JIT config は
   約 4 KB で Standard tier の上限（4,096 バイト）を超えることがあるため、Advanced tier で置く
 - 管理外の inline policy や managed policy が付いていれば警告して出力に列挙する（自動では削除しない）
 
-`-WhatIf` を付けると、読み取りと組み立てだけを行う。default プロファイルの権限で、適用前に
-Launch Template から読んだ値と管理外のポリシーの有無を確認できる。
+`-WhatIf` を付けると、読み取りと組み立てだけを行う。適用前に Launch Template、Automation 文書、
+管理外のポリシーを確認できる。
 
 #### 7. 使い捨て runner の回収（#380）
 

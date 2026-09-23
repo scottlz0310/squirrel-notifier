@@ -1,4 +1,4 @@
-﻿# Pester v5 tests for DesktopE2EOidcRole.psm1
+# Pester v5 tests for DesktopE2EOidcRole.psm1
 # desktop E2E workflow の OIDC ロールの権限境界を固定する（#380）。
 # - 信頼は指定 repository の指定 environment の job だけ。前方一致（StringLike / wildcard）を使わない
 # - 既存 instance は Start / Stop だけで、terminate できない
@@ -49,6 +49,34 @@ BeforeAll {
     $script:Policy = ConvertTo-PolicyDocument (New-DesktopE2EOidcPermissionPolicy @script:PolicyArgs)
     $script:AllActions = @($script:Policy.Statement | ForEach-Object { @($_.Action) })
     $script:Trust = ConvertTo-PolicyDocument (New-DesktopE2EOidcTrustPolicy -AccountId '123456789012' -Repository 'scottlz0310/squirrel-notifier' -Environment 'desktop-e2e')
+}
+
+Describe 'New-DesktopE2EOidcAutomationPermissionPolicy' {
+    BeforeAll {
+        $script:AutomationPolicy = ConvertTo-PolicyDocument (New-DesktopE2EOidcAutomationPermissionPolicy `
+                -RunnerPolicyArguments $script:PolicyArgs `
+                -DocumentName 'SquirrelNotifierDesktopE2ELaunch' `
+                -DocumentVersion '3' `
+                -AutomationRoleName 'SquirrelNotifierDesktopE2EAutomation')
+    }
+
+    It 'OIDC ロールへ直接起動と起動時タグ付けを許可しない' {
+        $actions = @($script:AutomationPolicy.Statement | ForEach-Object { @($_.Action) })
+        $actions | Should -Not -Contain 'ec2:RunInstances'
+        $actions | Should -Not -Contain 'ec2:CreateTags'
+    }
+
+    It '起動できる文書と version を固定する' {
+        $statement = @($script:AutomationPolicy.Statement | Where-Object Sid -EQ 'StartFixedLaunchAutomationDocument')[0]
+        $statement.Resource | Should -Be 'arn:aws:ssm:us-east-1:123456789012:document/SquirrelNotifierDesktopE2ELaunch'
+        $statement.Condition.'ForAnyValue:StringEquals'.'ssm:DocumentVersion' | Should -Be @('3')
+    }
+
+    It 'SSM 実行ロールだけを SSM に渡す' {
+        $statement = @($script:AutomationPolicy.Statement | Where-Object Sid -EQ 'PassLaunchAutomationRole')[0]
+        $statement.Resource | Should -Be 'arn:aws:iam::123456789012:role/SquirrelNotifierDesktopE2EAutomation'
+        $statement.Condition.StringEquals.'iam:PassedToService' | Should -Be 'ssm.amazonaws.com'
+    }
 }
 
 Describe 'New-DesktopE2EOidcTrustPolicy' {

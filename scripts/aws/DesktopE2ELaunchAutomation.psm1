@@ -4,6 +4,36 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'DesktopE2EOidcRole.psm1') -Force
 
+function Assert-DesktopE2ELaunchStorage
+{
+    param(
+        [Parameter(Mandatory)]$LaunchTemplateData,
+        [Parameter(Mandatory)]$Image
+    )
+
+    $mappingProperty = $LaunchTemplateData.PSObject.Properties['BlockDeviceMappings']
+    $mappings = @()
+    if ($null -ne $mappingProperty)
+    {
+        $mappings = @($mappingProperty.Value | Where-Object { $null -ne $_ })
+    }
+    if ($mappings.Count -gt 0)
+    {
+        throw 'Launch Template に追加 block device mapping があります。固定起動文書には使えません。'
+    }
+    $userDataProperty = $LaunchTemplateData.PSObject.Properties['UserData']
+    if ($null -ne $userDataProperty -and -not [string]::IsNullOrEmpty($userDataProperty.Value))
+    {
+        throw 'Launch Template に UserData があります。固定起動文書には使えません。'
+    }
+
+    $ebsMappings = @($Image.BlockDeviceMappings | Where-Object { $null -ne $_.PSObject.Properties['Ebs'] -and $null -ne $_.Ebs })
+    if ($ebsMappings.Count -ne 1 -or $ebsMappings[0].DeviceName -cne $Image.RootDeviceName)
+    {
+        throw 'AMI の EBS mapping は root device 1 本だけである必要があります。'
+    }
+}
+
 function New-DesktopE2ELaunchAutomationTrustPolicy
 {
     param(
@@ -105,6 +135,7 @@ function New-DesktopE2ELaunchAutomationPermissionPolicy
 }
 
 Export-ModuleMember -Function @(
+    'Assert-DesktopE2ELaunchStorage',
     'New-DesktopE2ELaunchAutomationTrustPolicy',
     'New-DesktopE2ELaunchAutomationDocument',
     'New-DesktopE2ELaunchAutomationPermissionPolicy'

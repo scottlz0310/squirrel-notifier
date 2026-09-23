@@ -1,4 +1,4 @@
-﻿# Pester v5 tests for DesktopEphemeralRunner.psm1
+# Pester v5 tests for DesktopEphemeralRunner.psm1
 # 使い捨て runner の名前付けと TTL 回収の対象選定を固定する（#380）。
 # - runner 名と instance ID は相互に変換でき、永続 runner の名前とは重ならない
 # - 起動から MaxAge を超え、まだ破棄されていない instance だけを回収の対象にする
@@ -236,12 +236,12 @@ Describe 'Get-DesktopEphemeralRunnerState' {
 
 Describe 'Get-DesktopE2EOidcBoundaryCase' {
     BeforeAll {
-        $script:Cases = Get-DesktopE2EOidcBoundaryCase -LaunchTemplateId 'lt-09e208553b742f6c1' -ReferenceInstanceId 'i-00b4e23b910eade6c' `
-            -ReferenceSubnetId 'subnet-05a6dbdf30e0b6664' -ReferenceSecurityGroupId 'sg-0f5751845b3fa696b'
+        $script:Cases = Get-DesktopE2EOidcBoundaryCase -LaunchTemplateId 'lt-09e208553b742f6c1' -ReferenceInstanceId 'i-00b4e23b910eade6c'
     }
 
-    It 'Launch Template の default version だけが許可される想定になっている' {
-        @($script:Cases | Where-Object Expected -EQ 'allowed').Name | Should -Be @('launch-template-default')
+    It '直接起動と永続 instance の terminate を拒否する想定になっている' {
+        @($script:Cases).Count | Should -Be 2
+        @($script:Cases | Where-Object Expected -EQ 'denied').Count | Should -Be 2
     }
 
     It 'すべての操作が --dry-run 付きである' {
@@ -251,17 +251,9 @@ Describe 'Get-DesktopE2EOidcBoundaryCase' {
         }
     }
 
-    It '<Name> は拒否される想定で、<Option> を上書きする' -ForEach @(
-        @{ Name = 'override-network-interface'; Option = '--network-interfaces' }
-        @{ Name = 'override-block-device'; Option = '--block-device-mappings' }
-        @{ Name = 'override-volume-type'; Option = '--block-device-mappings' }
-        @{ Name = 'add-extra-volume'; Option = '--block-device-mappings' }
-        @{ Name = 'override-instance-type'; Option = '--instance-type' }
-    ) {
-        $case = $script:Cases | Where-Object Name -EQ $Name
+    It '直接起動は Launch Template の default version でも拒否される' {
+        $case = $script:Cases | Where-Object Name -EQ 'direct-run-instances'
 
-        $case.Expected | Should -Be 'denied'
-        $case.Arguments | Should -Contain $Option
         $case.Arguments | Should -Contain 'LaunchTemplateId=lt-09e208553b742f6c1,Version=$Default'
     }
 
@@ -270,11 +262,6 @@ Describe 'Get-DesktopE2EOidcBoundaryCase' {
 
         $case.Expected | Should -Be 'denied'
         $case.Arguments | Should -Be @('ec2', 'terminate-instances', '--dry-run', '--instance-ids', 'i-00b4e23b910eade6c')
-    }
-
-    It 'network interface の上書きには永続 instance の subnet と Security Group を使う' {
-        ($script:Cases | Where-Object Name -EQ 'override-network-interface').Arguments |
-            Should -Contain 'DeviceIndex=0,SubnetId=subnet-05a6dbdf30e0b6664,Groups=sg-0f5751845b3fa696b'
     }
 }
 

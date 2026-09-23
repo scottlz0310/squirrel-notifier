@@ -49,7 +49,7 @@ function Invoke-AwsCliWithDocument
     param([string[]]$Arguments, [string]$OptionName, $Document)
 
     $path = Join-Path ([System.IO.Path]::GetTempPath()) ("desktop-e2e-automation-" + [guid]::NewGuid().ToString('N') + '.json')
-    Set-Content -LiteralPath $path -Value (ConvertTo-Json -InputObject $Document -Depth 20 -Compress) -Encoding utf8
+    Set-Content -LiteralPath $path -Value (ConvertTo-Json -InputObject $Document -Depth 20 -Compress -EscapeHandling EscapeNonAscii) -Encoding ascii
     try
     {
         return Invoke-AwsCli -Arguments ($Arguments + @($OptionName, "file://$path"))
@@ -78,6 +78,7 @@ $image = Invoke-AwsCli -Arguments @(
     'ec2', 'describe-images', '--region', $Region, '--image-ids', $template.LaunchTemplateData.ImageId,
     '--query', 'Images[0].{RootDeviceName: RootDeviceName, BlockDeviceMappings: BlockDeviceMappings}', '--output', 'json'
 ) | ConvertFrom-Json
+Assert-DesktopE2ELaunchStorage -LaunchTemplateData $template.LaunchTemplateData -Image $image
 $rootVolume = @($image.BlockDeviceMappings | Where-Object { $_.DeviceName -ceq $image.RootDeviceName -and $null -ne $_.PSObject.Properties['Ebs'] }) |
     Select-Object -First 1 | ForEach-Object { $_.Ebs }
 if ($null -eq $rootVolume)

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   使い捨て desktop E2E instance を terminate し、JIT config parameter と runner 登録を削除する（#380）。
 .DESCRIPTION
@@ -6,7 +6,7 @@
 
   1. instance に ephemeral-runner タグがあることを確かめてから terminate する。タグが無い instance は
      永続 instance の可能性があるため、何もせずに失敗させる（OIDC ロールの条件でも拒否される）
-  2. DeleteOnTermination=false の EBS（RunInstances の要求で指定でき、IAM では拒否できない）があれば、
+  2. 予期せず DeleteOnTermination=false で残った EBS があれば、
      terminate 後に切り離されるのを待って削除する
   3. JIT config parameter を削除する（有効期限ポリシーもあるため二重の保険）
   4. runner 登録が残っていれば削除する。ephemeral runner は job を 1 つ実行すると自分で登録を消すが、
@@ -45,8 +45,7 @@ Import-Module (Join-Path $PSScriptRoot 'DesktopE2ECli.psm1') -Force
 
 $tag = Get-DesktopRunnerResourceTag
 
-# RetainedVolumes は DeleteOnTermination=false の EBS。RunInstances の要求で指定でき、IAM でも拒否できない
-# ため、terminate の前に記録して、terminate 後に削除する。
+# RetainedVolumes は DeleteOnTermination=false の EBS。terminate の前に記録して、terminate 後に削除する。
 $described = Invoke-AwsCli -Arguments @(
     'ec2', 'describe-instances',
     '--region', $Region,
@@ -119,7 +118,7 @@ else
     schemaVersion = 1
     instanceId    = $InstanceId
     instance      = $instanceResult
-    # 要求で DeleteOnTermination=false にされ、terminate 後に削除した volume（通常は空）。
+    # DeleteOnTermination=false で残り、terminate 後に削除した volume（通常は空）。
     deletedVolumes = $deletedVolumes
     parameter     = $parameterResult
     runnerName    = $runnerName
