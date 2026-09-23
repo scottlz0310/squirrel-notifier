@@ -26,6 +26,14 @@ on:
         required: true
         type: string
         default: '14'
+      runner_mode:
+        description: 'persistent: 既存 instance を起動・停止する / ephemeral: Launch Template から使い捨て instance を作って terminate する（#380）'
+        required: true
+        type: choice
+        options:
+          - persistent
+          - ephemeral
+        default: persistent
 
 permissions:
   contents: read
@@ -142,6 +150,7 @@ jobs:
       # 呼び出し先の入力は type: number。workflow_dispatch の入力は文字列として渡るため、
       # そのまま渡すとジョブ生成時に型が一致せず、ログも check-run も残さずに run が失敗する。
       artifact_retention_days: ${{ fromJSON(inputs.artifact_retention_days) }}
+      runner_mode: ${{ inputs.runner_mode }}
     secrets: inherit
     permissions:
       contents: read
