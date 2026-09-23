@@ -196,11 +196,14 @@ ubuntu の none は job を約 61% 短くするが、**引き続き不採用**�
 ### CodeQL の `tools: toolcache`
 
 `Initialize CodeQL`（63〜91 秒）を縮める候補として、runner の toolcache にある CodeQL を
-使う指定を試したが（2026-09-23、同じ run）、**効果が無いため不採用**とした。
+使う指定を試したが（2026-09-23、同じ run）、**短縮の見込みが無いため不採用**とした。
+判断の根拠は次の 1 点目（構成上の理由）で、実測は補助にとどまる。
 
 - runner の toolcache の CodeQL は、CodeQL action の既定と同じ 2.27.0 だった。action は
   版が一致すれば元から toolcache を使うため、指定しても処理は変わらない
-- 実測も init 79 秒（既定は 70 秒）で、差は runner のばらつきの範囲だった
+- 実測は 1 組だけ（init 79 秒、既定は 70 秒。再実行はしていない）で、この 1 組では短縮を
+  確認できなかった。ばらつきの幅は測っていない。runner の toolcache の版が action の既定と
+  ずれた場合は、前提が変わるので測り直す
 
 ### PR CI から CodeQL を外す
 
