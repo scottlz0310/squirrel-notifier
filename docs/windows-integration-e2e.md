@@ -247,6 +247,8 @@ session で `run.cmd` を実行する必要がある。この設定を再現可�
 | `DesktopRunnerImage.psm1` | 開発機 | AMI のタグと Launch Template の中身を組み立てる（Pester で契約を固定する） |
 | `Initialize-DesktopE2EOidcRole.ps1` | 開発機（Admin） | workflow が GitHub OIDC で引き受けるロールの信頼ポリシーと権限を適用する（#380） |
 | `DesktopE2EOidcRole.psm1` | 開発機 | OIDC ロールのポリシーを組み立てる（Pester で権限境界を固定する） |
+| `Invoke-DesktopE2EReaper.ps1` | GitHub Actions（`desktop-e2e-reaper.yml`） | cleanup から漏れた使い捨て instance・JIT parameter・runner 登録を回収する（#380） |
+| `DesktopEphemeralRunner.psm1` | 開発機 / GitHub Actions | 使い捨て runner の名前付けと回収対象の選定（Pester で固定する） |
 
 #### 1. IAM リソースの作成
 
@@ -369,6 +371,27 @@ Remove-Item Env:AWS_PROFILE
 
 `-WhatIf` を付けると、読み取りと組み立てだけを行う。default プロファイルの権限で、適用前に
 Launch Template から読んだ値と管理外のポリシーの有無を確認できる。
+
+#### 7. 使い捨て runner の回収（#380）
+
+使い捨て instance の後始末は、desktop E2E workflow の cleanup（`if: always()`）が行う。runner の障害や
+cleanup 自体の失敗に備え、`desktop-e2e-reaper.yml` が 1 時間ごとに次を回収する。
+
+- `ephemeral-runner` タグの instance のうち、起動から 120 分を超えたものを terminate する
+  （desktop E2E の最長経路と job の待ち時間より長くしてある）
+- terminate した instance と破棄済みの instance の JIT config parameter を削除する。parameter には
+  有効期限ポリシーも付けるため、これは二重の保険になる
+- instance が無くなった使い捨て runner（`squirrel-notifier-ephemeral-<instance-id>`）の登録を削除する。
+  job 実行中の runner と、名前の形式が違う永続 runner は削除しない。使われなかった ephemeral runner は
+  GitHub も 1 日で自動削除する
+
+instance を回収した run は、回収を済ませたうえで失敗として終わる。cleanup が漏れたことを意味するため、
+対応する desktop E2E run の `cleanup-runner` を調べる。手動実行では `dry_run` を指定すると、書き込まずに
+対象だけを表示する。
+
+public リポジトリの schedule は、リポジトリに 60 日間活動が無いと GitHub が自動で無効化する。
+無効化されていないかを Actions 画面で確認する。instance 内の自動シャットダウン（GitHub に依存しない
+最後の保険）は、次に AMI を作り直すときに追加する。
 
 ## テスト資産の配置契約
 

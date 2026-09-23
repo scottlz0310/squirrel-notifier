@@ -1,0 +1,95 @@
+name: Desktop E2E Reaper
+
+# workflow の cleanup から漏れた使い捨て desktop E2E runner を回収する保険（#380）。
+# 期限切れの使い捨て instance の terminate、JIT config parameter の削除、
+# instance が無くなった使い捨て runner 登録の削除を行う。判定は scripts/aws/Invoke-DesktopE2EReaper.ps1。
+#
+# public リポジトリの schedule は、リポジトリに 60 日間活動が無いと GitHub が自動で無効化する。
+# 無効化されていないかは Actions 画面で確認する。
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '書き込まずに回収の対象だけを表示する'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# desktop-e2e-ec2 とは別のグループにする。同じにすると、待機中の desktop E2E が
+# 後から来た reaper に置き換えられて取り消される。
+concurrency:
+  group: desktop-e2e-reaper
+  cancel-in-progress: false
+
+jobs:
+  reap:
+    name: Reap leaked ephemeral desktop runners
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # OIDC ロールの信頼条件と App の秘密鍵は desktop-e2e environment に限られる。
+    # schedule は default branch（main）で動くため、environment の branch policy を満たす。
+    environment: desktop-e2e
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.DESKTOP_E2E_AWS_REGION }}
+          role-to-assume: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
+          role-session-name: desktop-e2e-reaper-${{ github.run_id }}
+
+      - name: Create GitHub App token
+        id: github-app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
+          private-key: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
+          # runner 登録の削除に必要。この token はこの job の中だけで使う。
+          permission-administration: write
+
+      - name: Reap leaked ephemeral runners
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
+          AWS_REGION: ${{ vars.DESKTOP_E2E_AWS_REGION }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          $arguments = @{
+            Repository = $env:GITHUB_REPOSITORY
+            Region = $env:AWS_REGION
+            WhatIf = ($env:DRY_RUN -eq 'true')
+          }
+          $json = & ./scripts/aws/Invoke-DesktopE2EReaper.ps1 @arguments
+          $json
+          $result = $json | ConvertFrom-Json
+
+          $summary = @(
+            '### Desktop E2E reaper'
+            "- dry run: ``$($arguments.WhatIf)``"
+            "- live instances: $(@($result.liveInstances).Count)"
+            "- terminated instances: $((@($result.terminatedInstances) | ForEach-Object { "``$_``" }) -join ', ')"
+            "- deleted parameters: $(@($result.deletedParameters).Count)"
+            "- deleted runners: $((@($result.deletedRunners) | ForEach-Object { "``$_``" }) -join ', ')"
+          )
+          $summary | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+          # instance の回収は desktop E2E の cleanup が漏れたことを意味する。回収は済ませたうえで
+          # job を失敗させ、schedule の失敗通知で原因の調査につなげる。
+          if (@($result.terminatedInstances).Count -gt 0) {
+            Write-Output "::error::cleanup から漏れた使い捨て instance を terminate しました: $($result.terminatedInstances -join ', ')。対応する desktop E2E run の cleanup-runner を確認してください。"
+            exit 1
+          }
