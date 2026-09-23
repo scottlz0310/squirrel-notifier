@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- desktop E2E の ephemeral 経路で、OIDC ロールの境界確認が期待どおりでも `Verify OIDC role boundary` step が失敗していたのを修正した。拒否された DryRun の終了コード（254）が `$LASTEXITCODE` に残り、GitHub Actions の `shell: pwsh` がそれを step の終了コードにしていた。`Invoke-AwsDryRun` は終了コードを戻り値で返した後に `$LASTEXITCODE` を 0 へ戻す（#380）
 - desktop E2E が使い回しの self-hosted runner に残った前回の MSI（例: 0.13.1）を選んでインストールし、`CONTRACT_VERSION_MISMATCH` で失敗していたのを修正した。download / build の前に `release-output` と `artifacts/e2e/desktop` を空にし、MSI はちょうど 1 個を要求する。前回 run の証跡が artifact へ混ざる問題も解消する（#399）
 - desktop E2E の version 不一致失敗で原因を追えなかったのを修正した。失敗メッセージに実際の ProductVersion / FileVersion と参照した実行ファイルを含め、失敗時（cleanup 失敗を含む）は msiexec の install / uninstall ログを runRoot 削除前にサニタイズして artifact（`msi-logs/`）へ退避する。判定と退避は `tests/e2e/scripts/DesktopE2EEvidence.psm1` へ切り出し、Pester で固定した（#397）
 

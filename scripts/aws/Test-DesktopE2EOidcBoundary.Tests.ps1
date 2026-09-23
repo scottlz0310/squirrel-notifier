@@ -48,6 +48,13 @@ Describe 'Test-DesktopE2EOidcBoundary.ps1' {
         @($report.results | Where-Object { $_.actual -ne $_.expected }) | Should -BeNullOrEmpty
     }
 
+    It '期待どおりなら $LASTEXITCODE を 0 で終える' {
+        # Actions の shell: pwsh はスクリプト末尾の $LASTEXITCODE を step の終了コードにする（run 35916746752）
+        Invoke-Boundary | Out-Null
+
+        $global:LASTEXITCODE | Should -Be 0
+    }
+
     It 'すべて --dry-run と region 付きで呼ぶ' {
         Invoke-Boundary | Out-Null
 
