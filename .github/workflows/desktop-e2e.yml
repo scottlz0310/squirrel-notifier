@@ -23,6 +23,11 @@ on:
         required: false
         type: number
         default: 14
+      runner_mode:
+        description: 'persistent は既存 instance を起動・停止する。ephemeral は Launch Template から使い捨て instance を作り、終了後に terminate する（#380）。'
+        required: false
+        type: string
+        default: persistent
     secrets:
       DESKTOP_E2E_GATEWAY_URL:
         required: false
@@ -44,7 +49,8 @@ jobs:
   prepare-runner:
     name: Prepare EC2 desktop runner
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # ephemeral は境界確認と、起動から runner の online まで（手動検証で約 7 分、待機上限 15 分）を含む。
+    timeout-minutes: ${{ inputs.runner_mode == 'ephemeral' && 25 || 15 }}
     # environment の trusted branch/tag policy (main / v*) と trusted dispatcher により、
     # 未保護 ref の workflow 定義が秘密鍵へ到達しないようにする。
     environment: desktop-e2e
@@ -52,29 +58,45 @@ jobs:
       contents: read
       actions: read
       id-token: write
+    # ephemeral の instance_id は起動直後に書き出されるため、後続の手順で失敗しても cleanup が terminate できる。
     outputs:
-      instance_id: ${{ steps.lifecycle.outputs.instance_id }}
+      instance_id: ${{ inputs.runner_mode == 'ephemeral' && steps.ephemeral.outputs.instance_id || steps.lifecycle.outputs.instance_id }}
       started_by_workflow: ${{ steps.lifecycle.outputs.started_by_workflow }}
+      runs_on: ${{ inputs.runner_mode == 'ephemeral' && format('["self-hosted","windows","{0}"]', steps.ephemeral.outputs.runner_label) || '["self-hosted","windows","squirrel-notifier-desktop"]' }}
 
     steps:
       - name: Validate EC2 runner configuration
         shell: bash
         env:
+          RUNNER_MODE: ${{ inputs.runner_mode }}
           AWS_REGION: ${{ vars.DESKTOP_E2E_AWS_REGION }}
           AWS_ROLE_TO_ASSUME: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
           INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
+          LAUNCH_TEMPLATE_ID: ${{ vars.DESKTOP_E2E_AWS_LAUNCH_TEMPLATE_ID }}
           TARGET_RUNNER_NAME: ${{ vars.DESKTOP_E2E_RUNNER_NAME }}
           GITHUB_APP_ID: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail
+          case "$RUNNER_MODE" in
+            persistent|ephemeral) ;;
+            *)
+              echo "runner_mode は persistent か ephemeral で指定してください: $RUNNER_MODE" >&2
+              exit 1
+              ;;
+          esac
+
           missing=()
           [[ -n "$AWS_REGION" ]] || missing+=(DESKTOP_E2E_AWS_REGION)
           [[ -n "$AWS_ROLE_TO_ASSUME" ]] || missing+=(DESKTOP_E2E_AWS_ROLE_ARN)
+          # ephemeral でも、OIDC ロールの境界確認で永続 instance を terminate できないことの確認に使う。
           [[ -n "$INSTANCE_ID" ]] || missing+=(DESKTOP_E2E_AWS_INSTANCE_ID)
           [[ -n "$TARGET_RUNNER_NAME" ]] || missing+=(DESKTOP_E2E_RUNNER_NAME)
           [[ -n "$GITHUB_APP_ID" ]] || missing+=(DESKTOP_E2E_GITHUB_APP_ID)
           [[ -n "$GITHUB_APP_PRIVATE_KEY" ]] || missing+=(DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY)
+          if [[ "$RUNNER_MODE" == 'ephemeral' ]]; then
+            [[ -n "$LAUNCH_TEMPLATE_ID" ]] || missing+=(DESKTOP_E2E_AWS_LAUNCH_TEMPLATE_ID)
+          fi
 
           if (( ${#missing[@]} > 0 )); then
             printf '必要な repository variable/secret がありません: %s\n' "${missing[*]}" >&2
@@ -99,10 +121,47 @@ jobs:
         with:
           app-id: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
           private-key: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
-          permission-administration: read
+          # ephemeral は JIT runner の発行に Administration: write が要る。永続 runner は状態の参照だけ。
+          permission-administration: ${{ inputs.runner_mode == 'ephemeral' && 'write' || 'read' }}
+
+      - name: Checkout runner lifecycle scripts
+        if: inputs.runner_mode == 'ephemeral'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: scripts/aws
+
+      # 使い捨て instance を作る前に、OIDC ロールで Launch Template の値を上書きした起動と
+      # 永続 instance の terminate が拒否されることを DryRun で確かめる（fail-closed）。
+      - name: Verify OIDC role boundary
+        if: inputs.runner_mode == 'ephemeral'
+        shell: pwsh
+        env:
+          AWS_REGION: ${{ vars.DESKTOP_E2E_AWS_REGION }}
+          LAUNCH_TEMPLATE_ID: ${{ vars.DESKTOP_E2E_AWS_LAUNCH_TEMPLATE_ID }}
+          INSTANCE_ID: ${{ vars.DESKTOP_E2E_AWS_INSTANCE_ID }}
+        run: ./scripts/aws/Test-DesktopE2EOidcBoundary.ps1 -LaunchTemplateId $env:LAUNCH_TEMPLATE_ID -ReferenceInstanceId $env:INSTANCE_ID -Region $env:AWS_REGION
+
+      - name: Launch ephemeral instance and wait for runner
+        id: ephemeral
+        if: inputs.runner_mode == 'ephemeral'
+        shell: pwsh
+        env:
+          AWS_REGION: ${{ vars.DESKTOP_E2E_AWS_REGION }}
+          LAUNCH_TEMPLATE_ID: ${{ vars.DESKTOP_E2E_AWS_LAUNCH_TEMPLATE_ID }}
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
+        run: |
+          ./scripts/aws/Start-DesktopEphemeralRunner.ps1 `
+            -Repository $env:GITHUB_REPOSITORY `
+            -LaunchTemplateId $env:LAUNCH_TEMPLATE_ID `
+            -RunId $env:GITHUB_RUN_ID `
+            -Region $env:AWS_REGION `
+            -GitHubOutputPath $env:GITHUB_OUTPUT `
+            -TempDirectory $env:RUNNER_TEMP
 
       - name: Start instance and wait for runner
         id: lifecycle
+        if: inputs.runner_mode == 'persistent'
         shell: bash
         env:
           AWS_REGION: ${{ vars.DESKTOP_E2E_AWS_REGION }}
@@ -199,7 +258,8 @@ jobs:
   desktop-e2e:
     name: Windows desktop E2E (${{ inputs.scenario }})
     needs: prepare-runner
-    runs-on: [self-hosted, windows, squirrel-notifier-desktop]
+    # persistent は既存 runner のラベル、ephemeral はこの run だけの JIT runner のラベル（別の run の job を拾わない）。
+    runs-on: ${{ fromJSON(needs.prepare-runner.outputs.runs_on) }}
     environment: desktop-e2e
     timeout-minutes: 45
     permissions:
@@ -330,19 +390,59 @@ jobs:
 
     steps:
       - name: Keep instance state owned by another process
-        if: needs.prepare-runner.outputs.started_by_workflow != 'true'
+        if: inputs.runner_mode == 'persistent' && needs.prepare-runner.outputs.started_by_workflow != 'true'
         run: echo 'この workflow は EC2 instance を起動していないため、停止しません。'
 
+      - name: Report no ephemeral instance
+        if: inputs.runner_mode == 'ephemeral' && needs.prepare-runner.outputs.instance_id == ''
+        run: echo '使い捨て instance は起動されていないため、後片付けはありません。'
+
       - name: Configure AWS credentials with OIDC
-        if: needs.prepare-runner.outputs.started_by_workflow == 'true'
+        if: (inputs.runner_mode == 'persistent' && needs.prepare-runner.outputs.started_by_workflow == 'true') || (inputs.runner_mode == 'ephemeral' && needs.prepare-runner.outputs.instance_id != '')
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ vars.DESKTOP_E2E_AWS_REGION }}
           role-to-assume: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
           role-session-name: desktop-e2e-cleanup-${{ github.run_id }}
 
+      - name: Create GitHub App token
+        id: github-app-token
+        if: inputs.runner_mode == 'ephemeral' && needs.prepare-runner.outputs.instance_id != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.DESKTOP_E2E_GITHUB_APP_ID }}
+          private-key: ${{ secrets.DESKTOP_E2E_GITHUB_APP_PRIVATE_KEY }}
+          # job を始めなかった JIT runner の登録を削除するため。
+          permission-administration: write
+
+      - name: Checkout runner lifecycle scripts
+        if: inputs.runner_mode == 'ephemeral' && needs.prepare-runner.outputs.instance_id != ''
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: scripts/aws
+
+      # 漏れた場合は desktop-e2e-reaper.yml が起動から 120 分で回収し、JIT parameter も有効期限で消える。
+      - name: Terminate ephemeral instance
+        if: inputs.runner_mode == 'ephemeral' && needs.prepare-runner.outputs.instance_id != ''
+        shell: pwsh
+        env:
+          AWS_REGION: ${{ vars.DESKTOP_E2E_AWS_REGION }}
+          INSTANCE_ID: ${{ needs.prepare-runner.outputs.instance_id }}
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
+        run: |
+          $json = ./scripts/aws/Stop-DesktopEphemeralRunner.ps1 -Repository $env:GITHUB_REPOSITORY -InstanceId $env:INSTANCE_ID -Region $env:AWS_REGION
+          $json
+          $result = $json | ConvertFrom-Json
+          @(
+            '### EC2 cleanup (ephemeral)'
+            "- instance: ``$($result.instanceId)`` ($($result.instance))"
+            "- JIT parameter: $($result.parameter)"
+            "- runner: ``$($result.runnerName)`` ($($result.runner))"
+          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
       - name: Stop instance
-        if: needs.prepare-runner.outputs.started_by_workflow == 'true'
+        if: inputs.runner_mode == 'persistent' && needs.prepare-runner.outputs.started_by_workflow == 'true'
         shell: bash
         env:
           INSTANCE_ID: ${{ needs.prepare-runner.outputs.instance_id }}
