@@ -77,13 +77,17 @@ jobs:
           $json
           $result = $json | ConvertFrom-Json
 
+          # 展開される文字列の $() に backtick 付きの二重引用符文字列を入れ子にすると
+          # ParserError になるため、一覧は文字列の外で組み立てる。
+          $terminatedInstances = (@($result.terminatedInstances) | ForEach-Object { '`' + $_ + '`' }) -join ', '
+          $deletedRunners = (@($result.deletedRunners) | ForEach-Object { '`' + $_ + '`' }) -join ', '
           $summary = @(
             '### Desktop E2E reaper'
             "- dry run: ``$($arguments.WhatIf)``"
             "- live instances: $(@($result.liveInstances).Count)"
-            "- terminated instances: $((@($result.terminatedInstances) | ForEach-Object { "``$_``" }) -join ', ')"
+            "- terminated instances: $terminatedInstances"
             "- deleted parameters: $(@($result.deletedParameters).Count)"
-            "- deleted runners: $((@($result.deletedRunners) | ForEach-Object { "``$_``" }) -join ', ')"
+            "- deleted runners: $deletedRunners"
           )
           $summary | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
 
