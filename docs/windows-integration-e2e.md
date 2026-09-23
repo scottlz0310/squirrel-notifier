@@ -211,8 +211,10 @@ workflow を release gate として呼び出す。定期実行は行わず、run
   （`tests/e2e/scripts/Invoke-DesktopE2E.ps1`）。自動ログオン、ログオン時の runner 起動、
   スリープ・モニタ電源断・画面ロックの無効化によって対話セッションを維持する。適用手順は
   後述の「runner ホストの bootstrap」に従い、`scripts/aws/` のスクリプトで再現する。
-  本リポジトリの workflow は VM の作成・削除は行わず、GitHub OIDC の短期 credential で既存 instance
-  の Describe / Start / Stop だけを行う。runner online 待機に失敗した場合は desktop E2E を開始しない。
+  `runner_mode: persistent` は既存 instance を使用し、workflow が停止状態から起動した場合だけ停止する。
+  `runner_mode: ephemeral` は Launch Template から instance を作成し、run 固有ラベルの JIT runner を
+  online にしてから E2E を開始し、終了時に instance を terminate する。どちらも GitHub OIDC の短期
+  credential を使い、runner online 待機に失敗した場合は desktop E2E を開始しない。
   `prepare-runner`、`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言し、
   environment の trusted branch/tag policy を `main` と `v*` に限定する。手動実行は main ref
   の trusted dispatcher から reusable workflow を呼び出し、feature branch の workflow 定義
@@ -224,8 +226,21 @@ workflow を release gate として呼び出す。定期実行は行わず、run
   DesktopSmoke のみ）。release tag は引き続き gate 対象になる。AWS 設定値は environment variables、App の秘密鍵は
   `desktop-e2e` environment secret として管理する。online 状態の確認には、対象リポジトリだけへ
   インストールした GitHub App を使用する。Appには
-  self-hosted runner 一覧を読むための `Administration: Read` だけを持たせ、workflow実行ごとに
-  短期の installation token を生成する。AWS credential と秘密鍵はログへ出力しない。
+  self-hosted runner 一覧の参照と JIT runner の登録・削除に必要な `Administration: Read and write` を
+  持たせる。workflow 実行ごとに短期の installation token を生成し、永続 runner の経路では
+  `Administration: Read` だけを要求する。AWS credential と秘密鍵はログへ出力しない。
+
+手動検証は `main` の dispatcher から行う。`runner_mode` の既定は `persistent` で、release gate も
+引き続きこの経路を使う。使い捨て経路の確認では明示的に `ephemeral` を選ぶ。
+
+```powershell
+gh workflow run desktop-e2e-dispatch.yml --ref main -f target_ref=main -f scenario=DesktopSmoke -f artifact_retention_days=14 -f runner_mode=ephemeral
+```
+
+使い捨て経路では environment variable `DESKTOP_E2E_AWS_LAUNCH_TEMPLATE_ID` に Launch Template の
+ID を設定する。prepare は OIDC ロールの境界確認を先に行い、不一致なら instance を作らずに失敗する。
+成功・失敗・キャンセル時の cleanup は、instance の terminate、残ったタグ付き volume、JIT parameter、
+未使用の runner 登録を対象とする。
 
 ### runner ホストの bootstrap
 
@@ -247,6 +262,9 @@ session で `run.cmd` を実行する必要がある。この設定を再現可�
 | `DesktopRunnerImage.psm1` | 開発機 | AMI のタグと Launch Template の中身を組み立てる（Pester で契約を固定する） |
 | `Initialize-DesktopE2EOidcRole.ps1` | 開発機（Admin） | workflow が GitHub OIDC で引き受けるロールの信頼ポリシーと権限を適用する（#380） |
 | `DesktopE2EOidcRole.psm1` | 開発機 | OIDC ロールのポリシーを組み立てる（Pester で権限境界を固定する） |
+| `Test-DesktopE2EOidcBoundary.ps1` | GitHub Actions | instance 作成前に OIDC ロールの DryRun を行い、期待と異なれば停止する（#380） |
+| `Start-DesktopEphemeralRunner.ps1` | GitHub Actions | instance を作成し、JIT runner の online を待つ（#380） |
+| `Stop-DesktopEphemeralRunner.ps1` | GitHub Actions | instance・残った volume・JIT parameter・runner 登録を回収する（#380） |
 | `Invoke-DesktopE2EReaper.ps1` | GitHub Actions（`desktop-e2e-reaper.yml`） | cleanup から漏れた使い捨て instance・JIT parameter・runner 登録を回収する（#380） |
 | `DesktopEphemeralRunner.psm1` | 開発機 / GitHub Actions | 使い捨て runner の名前付けと回収対象の選定（Pester で固定する） |
 
@@ -361,10 +379,13 @@ Remove-Item Env:AWS_PROFILE
   `repo:<owner>/<repo>:*` のような前方一致は使わない
 - 既存 instance（`-LegacyInstanceId`）は Start / Stop だけを許可し、terminate は許可しない
 - 使い捨て instance は、Launch Template の default version と同じ instance type・subnet・Security Group で、
-  `runner-image` タグの付いた自アカウントの AMI（と snapshot）からだけ起動できる。Launch Template が
-  指定する値の上書きは `ec2:IsLaunchTemplateResource` で拒否する。UserData の中身を制限する条件キーは
+  `runner-image` タグの付いた自アカウントの AMI（と snapshot）からだけ起動できる。root volume の
+  容量・種類・IOPS・スループットは AMI の root マッピングを上限にする。Launch Template 由来の
+  リソースかどうかも条件にするが、2026-09-23 の DryRun では追加の 8 GiB gp3 volume が許可された。
+  境界確認はこの不一致で fail-closed となり、使い捨て instance は作成されない（#380 で調査中）。
+  UserData の中身を制限する条件キーは
   IAM に無いため、UserData は上記の信頼条件と runner role の権限で守る。タグ付けは起動と同時に限り、
-  terminate は `ephemeral-runner` タグの付いた instance だけに限る
+  terminate と残った volume の削除は `ephemeral-runner` タグの付いたリソースだけに限る
 - JIT config を置く `/squirrel-notifier/desktop-e2e/jit/*` への Put / Delete を許可する。JIT config は
   約 4 KB で Standard tier の上限（4,096 バイト）を超えることがあるため、Advanced tier で置く
 - 管理外の inline policy や managed policy が付いていれば警告して出力に列挙する（自動では削除しない）
@@ -375,12 +396,15 @@ Launch Template から読んだ値と管理外のポリシーの有無を確認�
 #### 7. 使い捨て runner の回収（#380）
 
 使い捨て instance の後始末は、desktop E2E workflow の cleanup（`if: always()`）が行う。runner の障害や
-cleanup 自体の失敗に備え、`desktop-e2e-reaper.yml` が 1 時間ごとに次を回収する。
+cleanup 自体の失敗に備え、`desktop-e2e-reaper.yml` は 1 時間ごとの schedule と手動実行を定義する。
+schedule の起動は実環境で調査中のため、定義があることだけで回収済みとは扱わない。
 
 - `ephemeral-runner` タグの instance のうち、起動から 120 分を超えたものを terminate する
   （desktop E2E の最長経路と job の待ち時間より長くしてある）
 - terminate した instance と破棄済みの instance の JIT config parameter を削除する。parameter には
   有効期限ポリシーも付けるため、これは二重の保険になる
+- `ephemeral-runner` タグ付きで未接続の volume を削除する。root の `DeleteOnTermination=false` は
+  IAM の条件で拒否できないため、cleanup と reaper の両方で残存を確認する
 - instance が無くなった使い捨て runner（`squirrel-notifier-ephemeral-<instance-id>`）の登録を削除する。
   候補は offline で job を実行していないものだけで、削除の直前に instance ID ごとに状態を取り直し、
   破棄中・破棄済みを確認できたときだけ削除する（一覧の取得後に起動・登録された runner を消さないため）。
@@ -393,6 +417,10 @@ cleanup 自体の失敗に備え、`desktop-e2e-reaper.yml` が 1 時間ごと�
 instance を回収した run は、回収を済ませたうえで失敗として終わる。cleanup が漏れたことを意味するため、
 対応する desktop E2E run の `cleanup-runner` を調べる。手動実行では `dry_run` を指定すると、書き込まずに
 対象だけを表示する。
+
+```powershell
+gh workflow run desktop-e2e-reaper.yml --ref main -f dry_run=true
+```
 
 public リポジトリの schedule は、リポジトリに 60 日間活動が無いと GitHub が自動で無効化する。
 無効化されていないかを Actions 画面で確認する。instance 内の自動シャットダウン（GitHub に依存しない
