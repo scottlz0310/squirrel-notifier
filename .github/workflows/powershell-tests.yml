@@ -5,6 +5,7 @@ name: PowerShell Tests
 # - scripts/aws/DesktopRunnerHost.psm1: desktop E2E runner の自動ログオンと起動タスクの契約を固定する（#392）。
 # - tests/e2e/scripts/DesktopE2EEvidence.psm1: desktop E2E の version 照合と失敗時証跡を固定する（#397）。
 # - scripts/aws/DeveloperAccess.psm1: 開発者用 IAM ポリシーの権限境界を固定する（#405）。
+# - scripts/aws/DesktopRunnerImage.psm1: 使い捨て runner の AMI タグと Launch Template の契約を固定する（#380）。
 
 on:
   pull_request:

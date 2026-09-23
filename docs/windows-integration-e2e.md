@@ -242,6 +242,9 @@ session で `run.cmd` を実行する必要がある。この設定を再現可�
 | `Setup-DesktopRunnerHost.ps1` | instance 内 | 自動ログオン、ログオン時の runner 起動、セッション維持設定を適用する |
 | `Start-DesktopRunner.ps1` | instance 内 | ログオンタスクから起動され、永続 runner と JIT runner のどちらで起動するかを判定する |
 | `DesktopRunnerHost.psm1` | instance 内 | 適用内容を組み立てる（Pester で契約を固定する） |
+| `New-DesktopRunnerImage.ps1` | 開発機（Admin） | 停止中の instance から使い捨て instance 用の AMI を作る（#380） |
+| `Initialize-DesktopRunnerLaunchTemplate.ps1` | 開発機（Admin） | inbound の無い Security Group と Launch Template を作成・更新する（#380） |
+| `DesktopRunnerImage.psm1` | 開発機 | AMI のタグと Launch Template の中身を組み立てる（Pester で契約を固定する） |
 
 #### 1. IAM リソースの作成
 
@@ -314,6 +317,29 @@ gh api repos/scottlz0310/squirrel-notifier/actions/runners --jq '.runners[] | "\
 
 **RDP で接続したまま検証しない。** 切断済み session では描画が止まり screenshot と UI Automation が
 破綻し得るため、自動ログオンの console session だけで DesktopSmoke が完走することを確認する。
+
+#### 5. 使い捨て instance 用の AMI と Launch Template（#380）
+
+bootstrap を main で適用し、runner が永続モードで online になることを確認した instance を停止してから
+AMI を作る。AMI と Launch Template の作成は Operator の権限外のため、Admin ロールで実行する。
+
+```powershell
+$env:AWS_PROFILE = 'admin'
+pwsh -File scripts\aws\New-DesktopRunnerImage.ps1 -SourceInstanceId <instance-id>
+pwsh -File scripts\aws\Initialize-DesktopRunnerLaunchTemplate.ps1 -ImageId <出力の imageId> -SubnetId <subnet-id>
+Remove-Item Env:AWS_PROFILE
+```
+
+- AMI と snapshot には `squirrel-notifier:desktop-e2e=runner-image` を付ける。Launch Template は
+  このタグの無い AMI を拒否する
+- Launch Template から起動した instance・volume・ENI には `squirrel-notifier:desktop-e2e=ephemeral-runner`
+  が付く。instance 内から shutdown した場合も terminate され、IMDSv2 を必須にする
+- Security Group は inbound を持たない。runner と SSM Agent は outbound だけで動く
+- **AMI には自動ログオンの資格情報（LSA secret）と永続 runner の資格情報が含まれる。AMI と snapshot を
+  共有・公開しない。** 永続 runner の資格情報は、使い捨て instance の起動時に `Start-DesktopRunner.ps1`
+  が削除する
+- AMI を作り直したら `Initialize-DesktopRunnerLaunchTemplate.ps1` を再実行する。default version の
+  中身が変わる場合だけ新しい version を作り、default にする
 
 ## テスト資産の配置契約
 
