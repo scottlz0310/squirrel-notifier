@@ -245,6 +245,8 @@ session で `run.cmd` を実行する必要がある。この設定を再現可�
 | `New-DesktopRunnerImage.ps1` | 開発機（Admin） | 停止中の instance から使い捨て instance 用の AMI を作る（#380） |
 | `Initialize-DesktopRunnerLaunchTemplate.ps1` | 開発機（Admin） | inbound の無い Security Group と Launch Template を作成・更新する（#380） |
 | `DesktopRunnerImage.psm1` | 開発機 | AMI のタグと Launch Template の中身を組み立てる（Pester で契約を固定する） |
+| `Initialize-DesktopE2EOidcRole.ps1` | 開発機（Admin） | workflow が GitHub OIDC で引き受けるロールの信頼ポリシーと権限を適用する（#380） |
+| `DesktopE2EOidcRole.psm1` | 開発機 | OIDC ロールのポリシーを組み立てる（Pester で権限境界を固定する） |
 
 #### 1. IAM リソースの作成
 
@@ -340,6 +342,33 @@ Remove-Item Env:AWS_PROFILE
   が削除する
 - AMI を作り直したら `Initialize-DesktopRunnerLaunchTemplate.ps1` を再実行する。default version の
   中身が変わる場合だけ新しい version を作り、default にする
+
+#### 6. workflow の OIDC ロール（#380）
+
+workflow が GitHub OIDC で引き受けるロール（`DESKTOP_E2E_AWS_ROLE_ARN`）の信頼ポリシーと inline policy を
+適用する。IAM の変更のため Admin ロールで実行する。Launch Template を更新した後も再実行する。
+
+```powershell
+$env:AWS_PROFILE = 'admin'
+pwsh -File scripts\aws\Initialize-DesktopE2EOidcRole.ps1 -LegacyInstanceId <instance-id>
+Remove-Item Env:AWS_PROFILE
+```
+
+- 信頼は `desktop-e2e` environment の job だけに限る（sub = `repo:<owner>/<repo>:environment:desktop-e2e`、
+  完全一致）。environment の branch / tag policy（`main` / `v*`）を AWS 側でも効かせるため、
+  `repo:<owner>/<repo>:*` のような前方一致は使わない
+- 既存 instance（`-LegacyInstanceId`）は Start / Stop だけを許可し、terminate は許可しない
+- 使い捨て instance は、Launch Template の default version と同じ instance type・subnet・Security Group で、
+  `runner-image` タグの付いた自アカウントの AMI（と snapshot）からだけ起動できる。Launch Template が
+  指定する値の上書きは `ec2:IsLaunchTemplateResource` で拒否する。UserData の中身を制限する条件キーは
+  IAM に無いため、UserData は上記の信頼条件と runner role の権限で守る。タグ付けは起動と同時に限り、
+  terminate は `ephemeral-runner` タグの付いた instance だけに限る
+- JIT config を置く `/squirrel-notifier/desktop-e2e/jit/*` への Put / Delete を許可する。JIT config は
+  約 4 KB で Standard tier の上限（4,096 バイト）を超えることがあるため、Advanced tier で置く
+- 管理外の inline policy や managed policy が付いていれば警告して出力に列挙する（自動では削除しない）
+
+`-WhatIf` を付けると、読み取りと組み立てだけを行う。default プロファイルの権限で、適用前に
+Launch Template から読んだ値と管理外のポリシーの有無を確認できる。
 
 ## テスト資産の配置契約
 

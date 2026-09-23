@@ -14,11 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - リポジトリスコープの MCP サーバー設定 `.mcp.json` を追加した。desktop E2E runner の EC2 / SSM を扱うために AWS MCP Server（`mcp-proxy-for-aws-cli` 経由）を `aws` として定義する。認証はローカルの AWS プロファイルへ委ね、リポジトリにシークレットは置かない。end of development の `awslabs.aws-api-mcp-server` ではなく後継を採用した
 - root 資格情報の常用をやめるため、開発者用の IAM ユーザーと Admin ロールを冪等に作成する `scripts/aws/Initialize-DeveloperAccess.ps1` を追加した。`default` プロファイル（AWS MCP Server・エージェント・`scripts/aws`）の権限を desktop E2E runner の操作に限定し、範囲外の作業は MFA 必須の Admin ロールへ切り替える。ポリシーの境界（変更系の操作を runner instance / Run Command ドキュメント / parameter prefix に限定し、IAM の操作を持たせず、ARN へ埋め込む値に wildcard や広すぎる値を受け付けない）と、Admin ロールの作成に失敗したときにユーザーへ権限を残さない書き込み順序を Pester で固定した（#405）
 - desktop E2E の EC2 instance を on-demand 作成・破棄する準備として、既存 instance から AMI を作る `scripts/aws/New-DesktopRunnerImage.ps1` と、inbound の無い Security Group と Launch Template を冪等に作成・更新する `scripts/aws/Initialize-DesktopRunnerLaunchTemplate.ps1` を追加した。AMI・snapshot と、Launch Template から起動した instance・volume・ENI に、OIDC ロールの条件にするタグを付ける。Launch Template は instance 内からの shutdown で terminate し、IMDSv2 を必須にし、UserData を持たない。タグの無い AMI、inbound のある Security Group、NotFound 以外で失敗した Launch Template の存在確認では、何も書き込まずに止まる。中身の組み立てと比較は `DesktopRunnerImage.psm1` に置き、Pester で固定した（#380）
+- desktop E2E workflow が GitHub OIDC で引き受けるロールの信頼ポリシーと inline policy を冪等に適用する `scripts/aws/Initialize-DesktopE2EOidcRole.ps1` を追加した。既存 instance の Start / Stop に加え、使い捨て instance を Launch Template 経由で起動する権限（instance type・subnet・Security Group は Launch Template の default version と同じもの、起動元は `runner-image` タグの付いた自アカウントの AMI と snapshot だけ、Launch Template の値の上書きは `ec2:IsLaunchTemplateResource` で拒否）、起動と同時のタグ付け、`ephemeral-runner` タグの付いた instance だけの terminate、runner role の PassRole、JIT config の parameter への書き込みを許可する。信頼ポリシーを inline policy より先に更新し、読み取りの失敗や前提の欠落では何も書き込まない。ポリシーの組み立ては `DesktopE2EOidcRole.psm1` に置き、権限境界を Pester で固定した（#380）
 
 ### Changed
 
 - 開発者用 IAM ユーザーの権限に、Admin が作った AMI・Launch Template・Security Group・IAM ロールを検証するための読み取りを加えた。EC2 は `ec2:Describe*`、IAM は本プロジェクトのロール・instance profile・GitHub OIDC provider に限った参照と `SimulatePrincipalPolicy` で、IAM の変更系は引き続き持たせない。EC2 instance の on-demand 作成・破棄へ移行する準備（#380）
-
 - desktop E2E runner のログオンタスクが `run.cmd` を直接起動せず、`scripts/aws/Start-DesktopRunner.ps1` を経由するようにした。bootstrap を適用した instance では従来どおり永続 runner を起動し、その instance から作った AMI で起動した使い捨て instance では、AMI に残る永続 runner の資格情報を削除したうえで SSM Parameter Store の JIT config を待って ephemeral runner として起動する。EC2 instance の on-demand 作成・破棄へ移行する準備（#380）
 - release workflow の publish を desktop E2E（DesktopSmoke）に依存させ、desktop E2E が成功した配布物だけを公開するようにした。release 経路での DesktopSmoke の通過は workflow_dispatch（publish なし）で確認した。DesktopFull への引き上げは引き続き #381 で追跡する
 
@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - desktop E2E が使い回しの self-hosted runner に残った前回の MSI（例: 0.13.1）を選んでインストールし、`CONTRACT_VERSION_MISMATCH` で失敗していたのを修正した。download / build の前に `release-output` と `artifacts/e2e/desktop` を空にし、MSI はちょうど 1 個を要求する。前回 run の証跡が artifact へ混ざる問題も解消する（#399）
 - desktop E2E の version 不一致失敗で原因を追えなかったのを修正した。失敗メッセージに実際の ProductVersion / FileVersion と参照した実行ファイルを含め、失敗時（cleanup 失敗を含む）は msiexec の install / uninstall ログを runRoot 削除前にサニタイズして artifact（`msi-logs/`）へ退避する。判定と退避は `tests/e2e/scripts/DesktopE2EEvidence.psm1` へ切り出し、Pester で固定した（#397）
+
+### Security
+
+- desktop E2E workflow の OIDC ロールの信頼条件を、sub の前方一致（`repo:scottlz0310/squirrel-notifier:*`）から `desktop-e2e` environment の完全一致（`repo:scottlz0310/squirrel-notifier:environment:desktop-e2e`）へ絞った。environment を宣言しない任意の branch の job からロールを引き受けられ、environment の branch / tag policy（`main` / `v*`）を AWS 側で素通りできた。適用は `Initialize-DesktopE2EOidcRole.ps1` による（#380）
 
 ## [0.14.0] - 2026-09-22
 
