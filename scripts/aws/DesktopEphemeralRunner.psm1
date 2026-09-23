@@ -393,6 +393,13 @@ function Get-DesktopE2EOidcBoundaryCase
             Expected  = 'denied'
             Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sdf,Ebs={VolumeSize=8,VolumeType=gp3}')
         }
+        # DeleteOnTermination を制限する IAM 条件キーは RunInstances に無く、拒否は期待できない。
+        # 結果を記録するだけにし（observe）、残った volume は cleanup と reaper が削除する。
+        [pscustomobject]@{
+            Name      = 'retain-root-volume'
+            Expected  = 'observe'
+            Arguments = $launch + @('--block-device-mappings', 'DeviceName=/dev/sda1,Ebs={DeleteOnTermination=false}')
+        }
         [pscustomobject]@{ Name = 'override-instance-type'; Expected = 'denied'; Arguments = $launch + @('--instance-type', 't3.micro') }
         [pscustomobject]@{
             Name      = 'terminate-persistent-instance'

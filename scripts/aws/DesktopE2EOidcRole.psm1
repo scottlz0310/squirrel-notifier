@@ -105,6 +105,8 @@ function New-DesktopE2EOidcPermissionPolicy
         条件を満たすことはできない
       - TerminateInstances: ephemeral-runner タグの付いた instance だけ。既存 instance には
         このタグが無いため terminate できない
+      - DeleteVolume: ephemeral-runner タグの付いた volume だけ。root の DeleteOnTermination は IAM で
+        制限できない（RunInstances に対応する条件キーが無い）ため、残った volume を削除して補う
       - PassRole: runner の instance role を EC2 へ渡す場合だけ
       - JIT config の parameter prefix への Put / Delete
 
@@ -194,7 +196,7 @@ function New-DesktopE2EOidcPermissionPolicy
             [ordered]@{
                 Sid      = 'DescribeDesktopE2ERunner'
                 Effect   = 'Allow'
-                Action   = @('ec2:DescribeInstances', 'ec2:DescribeInstanceStatus')
+                Action   = @('ec2:DescribeInstances', 'ec2:DescribeInstanceStatus', 'ec2:DescribeVolumes')
                 Resource = '*'
             }
             [ordered]@{
@@ -278,6 +280,18 @@ function New-DesktopE2EOidcPermissionPolicy
                 Effect    = 'Allow'
                 Action    = 'ec2:TerminateInstances'
                 Resource  = "${ec2}:instance/*"
+                Condition = [ordered]@{
+                    StringEquals = [ordered]@{ "aws:ResourceTag/$($tag.Key)" = $tag.EphemeralInstanceValue }
+                }
+            }
+            [ordered]@{
+                # RunInstances の要求で root の DeleteOnTermination=false を指定されると、terminate 後も
+                # volume が残る。この属性を制限する IAM 条件キーは無いため、残った volume を cleanup と
+                # reaper が削除できるようにする。Launch Template は volume にも ephemeral-runner タグを付ける。
+                Sid       = 'DeleteRetainedEphemeralRunnerVolume'
+                Effect    = 'Allow'
+                Action    = 'ec2:DeleteVolume'
+                Resource  = "${ec2}:volume/*"
                 Condition = [ordered]@{
                     StringEquals = [ordered]@{ "aws:ResourceTag/$($tag.Key)" = $tag.EphemeralInstanceValue }
                 }

@@ -80,20 +80,26 @@ jobs:
           # 展開される文字列の $() に backtick 付きの二重引用符文字列を入れ子にすると
           # ParserError になるため、一覧は文字列の外で組み立てる。
           $terminatedInstances = (@($result.terminatedInstances) | ForEach-Object { '`' + $_ + '`' }) -join ', '
+          $deletedVolumes = (@($result.deletedVolumes) | ForEach-Object { '`' + $_ + '`' }) -join ', '
           $deletedRunners = (@($result.deletedRunners) | ForEach-Object { '`' + $_ + '`' }) -join ', '
           $summary = @(
             '### Desktop E2E reaper'
             "- dry run: ``$($arguments.WhatIf)``"
             "- live instances: $(@($result.liveInstances).Count)"
             "- terminated instances: $terminatedInstances"
+            "- deleted volumes: $deletedVolumes"
             "- deleted parameters: $(@($result.deletedParameters).Count)"
             "- deleted runners: $deletedRunners"
           )
           $summary | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
 
-          # instance の回収は desktop E2E の cleanup が漏れたことを意味する。回収は済ませたうえで
+          # instance と volume の回収は desktop E2E の cleanup が漏れたことを意味する。回収は済ませたうえで
           # job を失敗させ、schedule の失敗通知で原因の調査につなげる。
           if (@($result.terminatedInstances).Count -gt 0) {
             Write-Output "::error::cleanup から漏れた使い捨て instance を terminate しました: $($result.terminatedInstances -join ', ')。対応する desktop E2E run の cleanup-runner を確認してください。"
+            exit 1
+          }
+          if (@($result.deletedVolumes).Count -gt 0) {
+            Write-Output "::error::terminate 後に残った使い捨て volume を削除しました: $($result.deletedVolumes -join ', ')。RunInstances の要求で DeleteOnTermination=false が指定された可能性があります。"
             exit 1
           }

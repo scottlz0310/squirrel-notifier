@@ -1,6 +1,7 @@
 ﻿# Pester v5 tests for Stop-DesktopEphemeralRunner.ps1
 # 使い捨て runner の後片付けを固定する（#380）。
 # - ephemeral-runner タグのある instance だけを terminate し、タグが無ければ何も変更せずに失敗する
+# - DeleteOnTermination=false の volume（要求で指定でき IAM で拒否できない）は terminate 後に切り離しを待って削除する
 # - 破棄中・破棄済み・存在しない instance は terminate しない
 # - JIT parameter と runner 登録が無いことは成功とし、それ以外の失敗は握り潰さない
 # - job を実行中の runner 登録は削除しない
@@ -29,6 +30,8 @@ BeforeAll {
                 return ($fake.Instance | ConvertTo-Json -Compress)
             }
             'ec2 terminate-instances' { return '{}' }
+            'ec2 wait' { return '' }
+            'ec2 delete-volume' { return '' }
             'ssm delete-parameter'
             {
                 if ($fake.ParameterError)
@@ -61,7 +64,7 @@ BeforeAll {
 
     function Get-WriteCalls
     {
-        return @($global:FakeCalls | Where-Object { $_ -match '^(ec2 terminate-instances|ssm delete-parameter|gh api -X DELETE)' })
+        return @($global:FakeCalls | Where-Object { $_ -match '^(ec2 terminate-instances|ec2 delete-volume|ssm delete-parameter|gh api -X DELETE)' })
     }
 }
 
@@ -74,7 +77,7 @@ Describe 'Stop-DesktopEphemeralRunner.ps1' {
     BeforeEach {
         $global:FakeCalls = [System.Collections.Generic.List[string]]::new()
         $global:FakeState = @{
-            Instance       = [ordered]@{ State = 'running'; Tag = 'ephemeral-runner' }
+            Instance       = [ordered]@{ State = 'running'; Tag = 'ephemeral-runner'; RetainedVolumes = @() }
             ParameterError = $null
             Runners        = @(
                 [ordered]@{ id = 1; name = 'squirrel-notifier-desktop'; status = 'online'; busy = $false }
@@ -96,8 +99,28 @@ Describe 'Stop-DesktopEphemeralRunner.ps1' {
         )
     }
 
+    It 'DeleteOnTermination=false の volume は terminate 後に切り離しを待って削除する' {
+        $global:FakeState.Instance.RetainedVolumes = @('vol-0aaaaaaaaaaaaaaaa')
+
+        $result = Invoke-Stop
+
+        @($result.deletedVolumes) | Should -Be @('vol-0aaaaaaaaaaaaaaaa')
+        $calls = @($global:FakeCalls)
+        $terminate = [array]::FindIndex($calls, [Predicate[string]] { param($c) $c -like 'ec2 terminate-instances*' })
+        $wait = [array]::FindIndex($calls, [Predicate[string]] { param($c) $c -like 'ec2 wait volume-available*vol-0aaaaaaaaaaaaaaaa*' })
+        $delete = [array]::FindIndex($calls, [Predicate[string]] { param($c) $c -eq 'ec2 delete-volume --region us-east-1 --volume-id vol-0aaaaaaaaaaaaaaaa' })
+        $terminate | Should -BeGreaterThan -1
+        $wait | Should -BeGreaterThan $terminate
+        $delete | Should -BeGreaterThan $wait
+    }
+
+    It '残す volume が無ければ volume を待たず、削除もしない' {
+        (Invoke-Stop).deletedVolumes | Should -BeNullOrEmpty
+        @($global:FakeCalls | Where-Object { $_ -like 'ec2 wait*' -or $_ -like 'ec2 delete-volume*' }) | Should -BeNullOrEmpty
+    }
+
     It 'ephemeral-runner タグが無い instance は何も変更せずに失敗する' {
-        $global:FakeState.Instance = [ordered]@{ State = 'stopped'; Tag = $null }
+        $global:FakeState.Instance = [ordered]@{ State = 'stopped'; Tag = $null; RetainedVolumes = @('vol-0bbbbbbbbbbbbbbbb') }
 
         { Invoke-Stop } | Should -Throw '*terminate しません*'
         Get-WriteCalls | Should -BeNullOrEmpty
@@ -107,7 +130,7 @@ Describe 'Stop-DesktopEphemeralRunner.ps1' {
         @{ State = 'shutting-down' }
         @{ State = 'terminated' }
     ) {
-        $global:FakeState.Instance = [ordered]@{ State = $State; Tag = 'ephemeral-runner' }
+        $global:FakeState.Instance = [ordered]@{ State = $State; Tag = 'ephemeral-runner'; RetainedVolumes = @() }
 
         (Invoke-Stop).instance | Should -Be $State
         @($global:FakeCalls | Where-Object { $_ -like 'ec2 terminate-instances*' }) | Should -BeNullOrEmpty

@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- desktop E2E workflow の OIDC ロールで、使い捨て instance の root volume を要求で変更できたのを修正した。Launch Template が定義しない root volume（AMI の `/dev/sda1`）の容量を変えても `ec2:IsLaunchTemplateResource` は true と評価され、DryRun で 64 GiB → 128 GiB の起動が許可された（実環境の境界確認で検出。使い捨て instance は作られていない）。volume の RunInstances を専用の statement に分け、Launch Template の AMI の root volume の容量・種類を上限とする条件と、IOPS・スループットの上限（キーがある場合）を加えた。上限は `Initialize-DesktopE2EOidcRole.ps1` が AMI の root マッピングから読む。境界確認に volume の種類の変更と volume の追加を加えた（#380）
+- desktop E2E workflow の OIDC ロールで、使い捨て instance の root volume を要求で変更できたのを修正した。Launch Template が定義しない root volume（AMI の `/dev/sda1`）の容量を変えても `ec2:IsLaunchTemplateResource` は true と評価され、DryRun で 64 GiB → 128 GiB の起動が許可された（実環境の境界確認で検出。使い捨て instance は作られていない）。volume の RunInstances を専用の statement に分け、Launch Template の AMI の root volume の容量・種類を上限とする条件と、IOPS・スループットの上限（キーがある場合）を加えた。上限は `Initialize-DesktopE2EOidcRole.ps1` が AMI の root マッピングから読む。境界確認に volume の種類の変更と volume の追加を加えた。root の `DeleteOnTermination=false` は RunInstances に対応する IAM 条件キーが無く拒否できないため、`ephemeral-runner` タグの volume に限った `ec2:DeleteVolume` を OIDC ロールに加え、cleanup（`Stop-DesktopEphemeralRunner.ps1`）が terminate 後に残る volume を削除し、reaper がどこにも接続されていない使い捨て volume を回収する（回収した run は失敗させる）。境界確認ではこの操作を結果の記録だけにする（#380）
 - desktop E2E workflow の OIDC ロールの信頼条件を、sub の前方一致（`repo:scottlz0310/squirrel-notifier:*`）から `desktop-e2e` environment の完全一致（`repo:scottlz0310/squirrel-notifier:environment:desktop-e2e`）へ絞った。environment を宣言しない任意の branch の job からロールを引き受けられ、environment の branch / tag policy（`main` / `v*`）を AWS 側で素通りできた。適用は `Initialize-DesktopE2EOidcRole.ps1` による（#380）
 
 ## [0.14.0] - 2026-09-22

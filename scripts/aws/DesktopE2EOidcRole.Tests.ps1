@@ -101,6 +101,14 @@ Describe 'New-DesktopE2EOidcPermissionPolicy' {
         $statements[0].Condition.StringEquals."aws:ResourceTag/$($script:Tag.Key)" | Should -Be $script:Tag.EphemeralInstanceValue
     }
 
+    It 'DeleteVolume は ephemeral-runner タグの付いた volume だけに限定される（残った root volume の削除用）' {
+        $statements = Get-StatementForAction -Document $script:Policy -Action 'ec2:DeleteVolume'
+
+        $statements.Count | Should -Be 1
+        $statements[0].Resource | Should -Be 'arn:aws:ec2:us-east-1:123456789012:volume/*'
+        $statements[0].Condition.StringEquals."aws:ResourceTag/$($script:Tag.Key)" | Should -Be $script:Tag.EphemeralInstanceValue
+    }
+
     It 'CreateTags は RunInstances と同時のタグ付けだけに限定される（既存 instance に terminate 用のタグを付けられない）' {
         $statements = Get-StatementForAction -Document $script:Policy -Action 'ec2:CreateTags'
 
@@ -193,7 +201,7 @@ Describe 'New-DesktopE2EOidcPermissionPolicy' {
     It 'Resource "*" は Describe 系と SSM 経由の kms:Encrypt だけ' {
         $unscoped = @($script:Policy.Statement | Where-Object { @($_.Resource) -contains '*' })
 
-        @($unscoped | ForEach-Object { @($_.Action) }) | Should -Be @('ec2:DescribeInstances', 'ec2:DescribeInstanceStatus', 'kms:Encrypt')
+        @($unscoped | ForEach-Object { @($_.Action) }) | Should -Be @('ec2:DescribeInstances', 'ec2:DescribeInstanceStatus', 'ec2:DescribeVolumes', 'kms:Encrypt')
         $kms = @($unscoped | Where-Object { @($_.Action) -contains 'kms:Encrypt' })[0]
         $kms.Condition.StringEquals.'kms:ViaService' | Should -Be 'ssm.us-east-1.amazonaws.com'
     }

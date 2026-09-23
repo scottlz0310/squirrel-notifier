@@ -6,8 +6,10 @@
 
   1. instance に ephemeral-runner タグがあることを確かめてから terminate する。タグが無い instance は
      永続 instance の可能性があるため、何もせずに失敗させる（OIDC ロールの条件でも拒否される）
-  2. JIT config parameter を削除する（有効期限ポリシーもあるため二重の保険）
-  3. runner 登録が残っていれば削除する。ephemeral runner は job を 1 つ実行すると自分で登録を消すが、
+  2. DeleteOnTermination=false の EBS（RunInstances の要求で指定でき、IAM では拒否できない）があれば、
+     terminate 後に切り離されるのを待って削除する
+  3. JIT config parameter を削除する（有効期限ポリシーもあるため二重の保険）
+  4. runner 登録が残っていれば削除する。ephemeral runner は job を 1 つ実行すると自分で登録を消すが、
      job が始まらなかった場合（準備の失敗・cancel）は残る。job を実行中の登録は削除しない
 
   instance・parameter・runner がすでに無いことは成功として扱う。それ以外の失敗は握り潰さない。
@@ -43,11 +45,13 @@ Import-Module (Join-Path $PSScriptRoot 'DesktopE2ECli.psm1') -Force
 
 $tag = Get-DesktopRunnerResourceTag
 
+# RetainedVolumes は DeleteOnTermination=false の EBS。RunInstances の要求で指定でき、IAM でも拒否できない
+# ため、terminate の前に記録して、terminate 後に削除する。
 $described = Invoke-AwsCli -Arguments @(
     'ec2', 'describe-instances',
     '--region', $Region,
     '--instance-ids', $InstanceId,
-    '--query', "Reservations[0].Instances[0].{State: State.Name, Tag: Tags[?Key=='$($tag.Key)'].Value | [0]}",
+    '--query', ("Reservations[0].Instances[0].{State: State.Name, Tag: Tags[?Key=='$($tag.Key)'].Value | [0], " + 'RetainedVolumes: BlockDeviceMappings[?Ebs.DeleteOnTermination==`false`].Ebs.VolumeId}'),
     '--output', 'json'
 ) -AbsentErrorCode 'InvalidInstanceID.NotFound'
 
@@ -68,6 +72,19 @@ else
 {
     Invoke-AwsCli -Arguments @('ec2', 'terminate-instances', '--region', $Region, '--instance-ids', $InstanceId) | Out-Null
     'terminated'
+}
+
+$retainedVolumes = @(if ($null -ne $instance -and $null -ne $instance.RetainedVolumes) { $instance.RetainedVolumes })
+$deletedVolumes = @()
+if ($retainedVolumes.Count -gt 0)
+{
+    # terminate で切り離されるまで削除できない。削除には ephemeral-runner タグが要る（OIDC ロールの条件）。
+    Invoke-AwsCli -Arguments (@('ec2', 'wait', 'volume-available', '--region', $Region, '--volume-ids') + $retainedVolumes) | Out-Null
+    foreach ($volumeId in $retainedVolumes)
+    {
+        Invoke-AwsCli -Arguments @('ec2', 'delete-volume', '--region', $Region, '--volume-id', $volumeId) | Out-Null
+        $deletedVolumes += $volumeId
+    }
 }
 
 $parameterName = "$JitParameterPrefix/$InstanceId"
@@ -102,6 +119,8 @@ else
     schemaVersion = 1
     instanceId    = $InstanceId
     instance      = $instanceResult
+    # 要求で DeleteOnTermination=false にされ、terminate 後に削除した volume（通常は空）。
+    deletedVolumes = $deletedVolumes
     parameter     = $parameterResult
     runnerName    = $runnerName
     runner        = $runnerResult
