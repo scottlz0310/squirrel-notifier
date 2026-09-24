@@ -35,6 +35,47 @@ function Get-FileBytes {
     return [int64]$measure.Sum
 }
 
+function Invoke-MeasuredCommand {
+    <#
+    .SYNOPSIS
+        測定用の外部コマンドを呼び、失敗しても例外にせず終了コードと stderr を返す。
+    .DESCRIPTION
+        測定は記録が目的なので、docker daemon の未起動などで job を失敗させない。
+        代わりに終了コードと stderr を storage.json に残し、run 後に原因を追えるようにする。
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.CommandInfo]$Command,
+
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
+    )
+
+    $stdout = [System.Collections.Generic.List[string]]::new()
+    $stderr = [System.Collections.Generic.List[string]]::new()
+    $exitCode = $null
+    try {
+        foreach ($line in @(& $Command @Arguments 2>&1)) {
+            if ($line -is [System.Management.Automation.ErrorRecord]) {
+                $stderr.Add($line.ToString())
+            }
+            else {
+                $stdout.Add([string]$line)
+            }
+        }
+        $exitCode = $LASTEXITCODE
+    }
+    catch {
+        $stderr.Add($_.Exception.Message)
+    }
+
+    return [ordered]@{
+        exitCode = $exitCode
+        stdout = @($stdout | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        stderr = @($stderr | Select-Object -First 20)
+    }
+}
+
 function Get-CommandVersion {
     param(
         [Parameter(Mandatory)]
@@ -43,21 +84,18 @@ function Get-CommandVersion {
 
     $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $command) {
-        return [ordered]@{ available = $false; path = $null; version = $null }
+        return [ordered]@{ available = $false; path = $null; version = $null; exitCode = $null; stderr = @() }
     }
 
-    $version = $null
-    try {
-        $version = (& $command.Source --version 2>$null | Select-Object -First 1 | Out-String).Trim()
-    }
-    catch {
-        $version = $null
-    }
+    $invocation = Invoke-MeasuredCommand -Command $command -Arguments @('--version')
+    $version = $invocation.stdout | Select-Object -First 1
 
     return [ordered]@{
         available = $true
         path = $command.Source
-        version = if ([string]::IsNullOrWhiteSpace($version)) { $null } else { $version }
+        version = if ([string]::IsNullOrWhiteSpace($version)) { $null } else { $version.Trim() }
+        exitCode = $invocation.exitCode
+        stderr = $invocation.stderr
     }
 }
 
@@ -91,11 +129,15 @@ $docker = Get-CommandVersion -Name 'docker'
 $dotnet = Get-CommandVersion -Name 'dotnet'
 $wix = Get-CommandVersion -Name 'wix'
 
+$dockerDiskUsage = @()
+$dockerDiskUsageCommand = $null
 if ($docker.available) {
-    $dockerDiskUsage = (& docker system df --format '{{json .}}' 2>$null | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-}
-else {
-    $dockerDiskUsage = @()
+    $invocation = Invoke-MeasuredCommand -Command (Get-Command 'docker' | Select-Object -First 1) -Arguments @('system', 'df', '--format', '{{json .}}')
+    $dockerDiskUsage = $invocation.stdout
+    $dockerDiskUsageCommand = [ordered]@{
+        exitCode = $invocation.exitCode
+        stderr = $invocation.stderr
+    }
 }
 
 $result = [ordered]@{
@@ -124,6 +166,7 @@ $result = [ordered]@{
         wix = $wix
     }
     dockerDiskUsage = @($dockerDiskUsage)
+    dockerDiskUsageCommand = $dockerDiskUsageCommand
 }
 
 New-Item -ItemType Directory -Path (Split-Path -Parent $outputFullPath) -Force | Out-Null
@@ -133,3 +176,18 @@ Write-Host "measuredRequiredBytes=$requiredBytes"
 if ($null -ne $result.budget.recommendedMinimumGiB) {
     Write-Host "recommendedMinimumGiB=$($result.budget.recommendedMinimumGiB)"
 }
+$commandExitCodes = [ordered]@{
+    'docker --version' = $docker.exitCode
+    'dotnet --version' = $dotnet.exitCode
+    'wix --version' = $wix.exitCode
+    'docker system df' = if ($null -eq $dockerDiskUsageCommand) { $null } else { $dockerDiskUsageCommand.exitCode }
+}
+foreach ($entry in $commandExitCodes.GetEnumerator()) {
+    if ($null -ne $entry.Value -and $entry.Value -ne 0) {
+        Write-Warning "$($entry.Key) の終了コードは $($entry.Value) です（stderr は storage.json に記録）。"
+    }
+}
+
+# 非 0 の終了コードは storage.json へ記録済み。残すと GitHub Actions の shell: pwsh が
+# スクリプト末尾で exit $LASTEXITCODE を行い、測定だけで job が失敗する（run 35932153754）。
+$global:LASTEXITCODE = 0
