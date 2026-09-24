@@ -17,6 +17,10 @@ BeforeAll {
         {
             return "$Name output"
         }
+
+        # native コマンドの stderr は 2>&1 で ErrorRecord として届く。呼び出し元の Stop を継承して
+        # 例外にならないよう、非終了エラーとして出す。
+        Write-Error "$key failed" -ErrorAction Continue
     }
 
     function global:docker { Invoke-FakeTool -Name 'docker' -ToolArgs $args }
@@ -50,7 +54,7 @@ Describe 'Measure-DesktopE2EStorage.ps1' {
         }
     }
 
-    It '<Command> が <ExitCode> で失敗しても $LASTEXITCODE を 0 で終え、終了コードを記録する' -ForEach @(
+    It '<Command> が <ExitCode> で失敗しても $LASTEXITCODE を 0 で終え、終了コードと stderr を記録する' -ForEach @(
         @{ Command = 'docker system'; ExitCode = 1; Path = 'dockerDiskUsageCommand' }
         @{ Command = 'docker --version'; ExitCode = 1; Path = 'tools.docker' }
         @{ Command = 'dotnet --version'; ExitCode = 2; Path = 'tools.dotnet' }
@@ -64,6 +68,7 @@ Describe 'Measure-DesktopE2EStorage.ps1' {
         $entry = $report
         foreach ($name in $Path.Split('.')) { $entry = $entry.$name }
         $entry.exitCode | Should -Be $ExitCode
+        @($entry.stderr) | Should -Be @("$Command failed")
     }
 
     It 'すべて成功すれば出力と終了コード 0 を記録する' {
@@ -74,5 +79,6 @@ Describe 'Measure-DesktopE2EStorage.ps1' {
         $report.tools.wix.exitCode | Should -Be 0
         @($report.dockerDiskUsage) | Should -Be @('docker output')
         $report.dockerDiskUsageCommand.exitCode | Should -Be 0
+        @($report.dockerDiskUsageCommand.stderr) | Should -BeNullOrEmpty
     }
 }
