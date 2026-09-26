@@ -55,6 +55,34 @@ public sealed class SessionResumeStoreTests : IDisposable
     }
 
     [Theory]
+    [InlineData("owner/repo")]
+    [InlineData("OWNER/Repo")]
+    [InlineData(" Owner/REPO ")]
+    public async Task TryGetAsync_ShouldFindEntry_WhenRepositoryCaseDiffers(string lookupRepository)
+    {
+        // reviewer の作業ディレクトリは owner / repo を小文字へ正規化するため、session のキーも
+        // 大文字小文字を区別しないことで、表記揺れした re-review でも再開できる（#403）
+        var store = new SessionResumeStore(_sessionsDirectory, new MutableTimeProvider(_initialTime));
+        string workingDirectory = CreateWorkingDirectory("checkout");
+        Guid sessionId = Guid.NewGuid();
+        await store.SaveAsync(
+            new ReviewEvent { Repository = "Owner/Repo", PrNumber = 42 },
+            LauncherRole.Reviewer,
+            "claude",
+            workingDirectory,
+            sessionId);
+
+        SessionResumeLookupResult result = await store.TryGetAsync(
+            new ReviewEvent { Repository = lookupRepository, PrNumber = 42 },
+            LauncherRole.Reviewer,
+            "claude",
+            workingDirectory);
+
+        result.Status.Should().Be(SessionResumeLookupStatus.Found);
+        result.Entry!.SessionId.Should().Be(sessionId);
+    }
+
+    [Theory]
     [InlineData("other/repo", 42, "Reviewer", "claude")]
     [InlineData("owner/repo", 43, "Reviewer", "claude")]
     [InlineData("owner/repo", 42, "Reviewed", "claude")]
@@ -255,10 +283,10 @@ public sealed class SessionResumeStoreTests : IDisposable
 
         JsonObject root = JsonNode.Parse(await File.ReadAllTextAsync(GetSessionsPath()))!.AsObject();
         JsonObject entries = root["entries"]!.AsObject();
-        JsonObject extraEntry = entries["owner/repo#42|Reviewer|agent-099"]!.DeepClone().AsObject();
+        JsonObject extraEntry = entries["OWNER/REPO#42|Reviewer|agent-099"]!.DeepClone().AsObject();
         extraEntry["agentId"] = "agent-100";
         extraEntry["lastUsedAt"] = timeProvider.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-        entries["owner/repo#42|Reviewer|agent-100"] = extraEntry;
+        entries["OWNER/REPO#42|Reviewer|agent-100"] = extraEntry;
         await File.WriteAllTextAsync(GetSessionsPath(), root.ToJsonString());
 
         SessionResumeLookupResult newest = await store.TryGetAsync(
