@@ -56,6 +56,8 @@ public partial class App : Application
         _reviewEventCleanupCoordinator = new ReviewEventCleanupCoordinator(
             _pullRequestStatusClient,
             _loggingService);
+        _reviewEventCleanupCoordinator.PullRequestClosed += new ReviewerWorkspaceCleanupService(
+            ReviewerWorkspaceLayout.GetReviewerRoot(_settingsService.SettingsDirectory), _launcherService.IsReviewerRunningFor, _loggingService).OnPullRequestClosed;
         _reviewCycleCoordinator = new ReviewCycleCoordinator(
             new ReviewCycleStore(_settingsService.SettingsDirectory),
             _loggingService);

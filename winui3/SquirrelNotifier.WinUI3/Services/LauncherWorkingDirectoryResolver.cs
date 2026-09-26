@@ -27,7 +27,7 @@ internal sealed class LauncherWorkingDirectoryResolver
         if (role == LauncherRole.Reviewer)
         {
             string reviewerDirectory = ReviewerWorkspaceLayout.GetWorkspaceDirectory(
-                Path.Combine(_settingsService.SettingsDirectory, "launcher-workspace", "reviewer"),
+                ReviewerWorkspaceLayout.GetReviewerRoot(_settingsService.SettingsDirectory),
                 reviewEvent.Repository,
                 reviewEvent.PrNumber);
             Directory.CreateDirectory(ReviewerWorkspaceLayout.GetScratchDirectory(reviewerDirectory));

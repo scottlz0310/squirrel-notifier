@@ -45,6 +45,50 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
         statusClient.Calls.Should().ContainSingle().Which.Should().Be(("owner/repo", 42));
     }
 
+    // reviewer の作業領域の片付け（#403）は、巡回でマージ済み・クローズ済みと判明した PR ごとに 1 回通知を受ける
+    [Theory]
+    [InlineData("Merged", true)]
+    [InlineData("Closed", true)]
+    [InlineData("Open", false)]
+    public async Task RefreshAsync_ShouldRaisePullRequestClosed_OnlyForCompletedPullRequest(
+        string stateName,
+        bool expectedRaised)
+    {
+        PullRequestLifecycleState state = Enum.Parse<PullRequestLifecycleState>(stateName);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(new StubStatusClient(state));
+        List<(string Repository, int PrNumber)> closed = new();
+        coordinator.PullRequestClosed += (_, args) => closed.Add((args.Repository, args.PrNumber));
+        coordinator.Track(CreateReviewEvent("first"));
+        coordinator.Track(CreateReviewEvent("second"));
+
+        await coordinator.RefreshAsync();
+        await coordinator.RefreshAsync();
+
+        if (expectedRaised)
+        {
+            closed.Should().ContainSingle().Which.Should().Be(("owner/repo", 42));
+        }
+        else
+        {
+            closed.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ShouldContinue_WhenPullRequestClosedHandlerThrows()
+    {
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(new StubStatusClient(PullRequestLifecycleState.Merged));
+        coordinator.PullRequestClosed += (_, _) => throw new InvalidOperationException("handler failed");
+        coordinator.Track(CreateReviewEvent());
+
+        Func<Task> act = () => coordinator.RefreshAsync();
+
+        await act.Should().NotThrowAsync();
+        coordinator.TrackedEventCount.Should().Be(0);
+        string log = await File.ReadAllTextAsync(Path.Combine(_logDirectory, "winui3.log"));
+        log.Should().Contain("PR 完了の通知処理に失敗しました (owner/repo#42): handler failed");
+    }
+
     [Fact]
     public async Task IsActionAllowedAsync_ShouldKeepOpenEvent()
     {

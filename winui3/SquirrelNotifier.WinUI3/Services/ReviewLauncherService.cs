@@ -29,6 +29,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private bool _cancelRequested;
     private IProcessInstance? _activeProcess;
     private CancellationTokenSource? _activeCts;
+    private ReviewEvent? _activeReviewerEvent;
 
     public event EventHandler? RunCompleted;
 
@@ -40,6 +41,17 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             {
                 return _isRunning;
             }
+        }
+    }
+
+    // reviewer の作業領域の片付け（#403）が、実行中の reviewer の領域を消さないために参照する.
+    public bool IsReviewerRunningFor(string repository, int prNumber)
+    {
+        lock (_lock)
+        {
+            return _activeReviewerEvent is ReviewEvent active
+                && active.PrNumber == prNumber
+                && string.Equals(active.Repository.Trim(), repository?.Trim(), StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -90,6 +102,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
             _isRunning = true;
             _cancelRequested = false;
+            _activeReviewerEvent = role == LauncherRole.Reviewer ? reviewEvent : null;
 
             // StartSession 直後（fire-and-forget の RunSessionAsync がプロセスを起動する前）の
             // Cancel() が無視されないよう、CTS はここで生成して _activeCts に公開しておく。
@@ -351,6 +364,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 _activeProcess = null;
                 _activeCts?.Dispose();
                 _activeCts = null;
+                _activeReviewerEvent = null;
                 _isRunning = false;
             }
 
