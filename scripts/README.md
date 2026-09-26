@@ -22,6 +22,7 @@
 
 ## その他
 - `scripts/setup-dev.ps1`: 初回セットアップ（pre-commit インストール、NuGet 復元など）。
+- `Assert-CiChecksPassed.ps1`: 指定コミットで CI の必須ジョブ（GitHub Actions の check run）が成功していることを確認します。tag push では `ci.yml` が起動しないため、`release.yml` の `verify-ci` が publish 前に使います。
 
 ### 補足: インストーラ用バンドル
 リリースワークフローで `publish/<platform>` の実行ファイルと `install.ps1` / `uninstall.ps1` を同梱した Zip (`SquirrelNotifier-Setup-<version>-x64.zip`) を生成し、リリースアセットに含めます。README にダウンロード方法を追記してください。
