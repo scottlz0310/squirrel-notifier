@@ -69,6 +69,19 @@ public class ReviewerWorkspaceLayoutTests
         ReviewerWorkspaceLayout.GetReviewerRoot(settings).Should().Be(Path.Combine(settings, "launcher-workspace", "reviewer"));
     }
 
+    [Theory]
+    [InlineData(7 * 24 * 60, true)]
+    [InlineData((7 * 24 * 60) - 1, false)]
+    [InlineData(30 * 24 * 60, true)]
+    [InlineData(0, false)]
+    public void IsExpired_ShouldCompareElapsedSinceLastUseWithTimeToLive(int elapsedMinutes, bool expected)
+    {
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        DateTime lastUsed = (now - TimeSpan.FromMinutes(elapsedMinutes)).UtcDateTime;
+
+        ReviewerWorkspaceLayout.IsExpired(lastUsed, now, TimeSpan.FromDays(7)).Should().Be(expected);
+    }
+
     [Fact]
     public void GetScratchDirectory_ShouldBeUnderWorkspace()
     {

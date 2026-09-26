@@ -31,6 +31,9 @@ internal sealed class LauncherWorkingDirectoryResolver
                 reviewEvent.Repository,
                 reviewEvent.PrNumber);
             Directory.CreateDirectory(ReviewerWorkspaceLayout.GetScratchDirectory(reviewerDirectory));
+
+            // TTL による回収（#403）が最終起動からの経過で判定できるよう、起動のたびに更新時刻を記録する.
+            Directory.SetLastWriteTimeUtc(reviewerDirectory, DateTime.UtcNow);
             return Path.GetFullPath(reviewerDirectory);
         }
 

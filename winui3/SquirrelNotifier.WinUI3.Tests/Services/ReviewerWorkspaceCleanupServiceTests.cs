@@ -245,6 +245,153 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SweepExpiredAsync_ShouldDeleteOnlyWorkspacesUnusedForTimeToLive()
+    {
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        string expired = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(7));
+        string recent = CreateWorkspace("owner", "repo", 2, now - TimeSpan.FromDays(7) + TimeSpan.FromMinutes(1));
+        string otherRepoExpired = CreateWorkspace("other", "repo", 3, now - TimeSpan.FromDays(30));
+        string notPrNumber = Path.Combine(_reviewerRoot, "owner", "repo", "tmp");
+        Directory.CreateDirectory(notPrNumber);
+        Directory.SetLastWriteTimeUtc(notPrNumber, (now - TimeSpan.FromDays(30)).UtcDateTime);
+        ReviewerWorkspaceCleanupService service = CreateService(now);
+
+        await service.SweepExpiredAsync();
+
+        Directory.Exists(expired).Should().BeFalse();
+        Directory.Exists(otherRepoExpired).Should().BeFalse();
+        Directory.Exists(recent).Should().BeTrue();
+        Directory.Exists(notPrNumber).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldNotQueueRetry_WhenReviewerIsRunning()
+    {
+        // 実行中なら起動時に更新時刻が新しくなるため、終了後に消すと直前に使った領域を消してしまう
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        string workspace = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
+        bool running = true;
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService, new FixedTimeProvider(now));
+
+        await service.SweepExpiredAsync();
+        running = false;
+        await service.RetryPendingAsync();
+
+        Directory.Exists(workspace).Should().BeTrue();
+        service.PendingCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldKeepPendingFromClosedPullRequest_WhenReviewerIsRunning()
+    {
+        // PR 完了時に見送った保留は、回収で見送っても外さない
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => true, _loggingService, new FixedTimeProvider(now));
+        await service.CleanupAndLogAsync("owner/repo", 1);
+
+        await service.SweepExpiredAsync();
+
+        service.PendingCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldLogFailureWithoutQueueingRetry_WhenFileIsLocked()
+    {
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        string workspace = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
+        string lockedFile = Path.Combine(workspace, "tmp", "locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        Directory.SetLastWriteTimeUtc(workspace, (now - TimeSpan.FromDays(8)).UtcDateTime);
+        ReviewerWorkspaceCleanupService service = CreateService(now);
+        using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await service.SweepExpiredAsync();
+        }
+
+        service.PendingCount.Should().Be(0);
+        (await ReadLogAsync()).Should().Contain("reviewer 作業領域の削除に失敗しました。次回の回収で再試行します (owner/repo#1)");
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldRetryPendingWorkspace()
+    {
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        string workspace = CreateWorkspace("owner", "repo", 1, now);
+        bool running = true;
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService, new FixedTimeProvider(now));
+        await service.CleanupAndLogAsync("owner/repo", 1);
+
+        running = false;
+        await service.SweepExpiredAsync();
+
+        Directory.Exists(workspace).Should().BeFalse();
+        service.PendingCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldDoNothing_WhenRootDoesNotExist()
+    {
+        var service = new ReviewerWorkspaceCleanupService(
+            Path.Combine(_tempDirectory, "missing"),
+            (_, _) => false,
+            _loggingService);
+
+        Func<Task> act = () => service.SweepExpiredAsync();
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task Start_ShouldSweepImmediatelyAndStopOnDispose()
+    {
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        string workspace = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => false, _loggingService, new FixedTimeProvider(now));
+
+        service.Start();
+        service.Start();
+        DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+        while (Directory.Exists(workspace) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        Directory.Exists(workspace).Should().BeFalse();
+        Func<Task> dispose = async () => await service.DisposeAsync();
+        await dispose.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task Attach_ShouldCleanupOnPullRequestClosedAndDetachOnDispose()
+    {
+        var settingsService = new SettingsService(_tempDirectory, pnpmBinDir: string.Empty);
+        var launcherService = new ReviewLauncherService(settingsService, _loggingService);
+        await using var coordinator = new ReviewEventCleanupCoordinator(new MergedStatusClient(), _loggingService);
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        ReviewerWorkspaceCleanupService service = ReviewerWorkspaceCleanupService.Attach(
+            _tempDirectory, launcherService, coordinator, _loggingService);
+        coordinator.Track(new SquirrelNotifier.WinUI3.Models.ReviewEvent { EventId = "e1", Repository = "owner/repo", PrNumber = 1, PrUrl = "https://github.com/owner/repo/pull/1" });
+
+        await coordinator.RefreshAsync();
+        DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+        while (Directory.Exists(workspace) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        Directory.Exists(workspace).Should().BeFalse();
+        (await WaitForLogAsync("完了した PR の reviewer 作業領域を削除しました: owner/repo#1")).Should().BeTrue();
+
+        await service.DisposeAsync();
+        string afterDispose = CreateWorkspace("owner", "repo", 2);
+        coordinator.Track(new SquirrelNotifier.WinUI3.Models.ReviewEvent { EventId = "e2", Repository = "owner/repo", PrNumber = 2, PrUrl = "https://github.com/owner/repo/pull/2" });
+        await coordinator.RefreshAsync();
+
+        Directory.Exists(afterDispose).Should().BeTrue();
+    }
+
+    [Fact]
     public void Cleanup_ShouldSkip_WhenReviewerIsRunningForPullRequest()
     {
         string workspace = CreateWorkspace("owner", "repo", 1);
@@ -358,11 +505,32 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     private ReviewerWorkspaceCleanupService CreateService()
         => new(_reviewerRoot, (_, _) => false, _loggingService);
 
+    private ReviewerWorkspaceCleanupService CreateService(DateTimeOffset now)
+        => new(_reviewerRoot, (_, _) => false, _loggingService, new FixedTimeProvider(now));
+
     private string CreateWorkspace(string owner, string repo, int prNumber)
     {
         string workspace = Path.Combine(_reviewerRoot, owner, repo, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Directory.CreateDirectory(Path.Combine(workspace, "tmp"));
         return workspace;
+    }
+
+    private string CreateWorkspace(string owner, string repo, int prNumber, DateTimeOffset lastUsed)
+    {
+        string workspace = CreateWorkspace(owner, repo, prNumber);
+        Directory.SetLastWriteTimeUtc(workspace, lastUsed.UtcDateTime);
+        return workspace;
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    private sealed class MergedStatusClient : IPullRequestStatusClient
+    {
+        public Task<PullRequestLifecycleState> GetStateAsync(string repository, int prNumber, CancellationToken cancellationToken)
+            => Task.FromResult(PullRequestLifecycleState.Merged);
     }
 
     private string LogPath => Path.Combine(_tempDirectory, "logs", "winui3.log");

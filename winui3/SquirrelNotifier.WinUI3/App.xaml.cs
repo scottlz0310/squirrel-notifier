@@ -22,6 +22,7 @@ public partial class App : Application
     private readonly AutoUpdateService _autoUpdateService;
     private readonly GitHubPullRequestStatusClient _pullRequestStatusClient;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
+    private readonly ReviewerWorkspaceCleanupService _workspaceCleanupService;
     private readonly ReviewCycleCoordinator _reviewCycleCoordinator;
     private readonly ReviewLauncherService _launcherService;
     private readonly TaskSchedulerService _taskSchedulerService = new();
@@ -56,9 +57,7 @@ public partial class App : Application
         _reviewEventCleanupCoordinator = new ReviewEventCleanupCoordinator(
             _pullRequestStatusClient,
             _loggingService);
-        var workspaceCleanup = new ReviewerWorkspaceCleanupService(ReviewerWorkspaceLayout.GetReviewerRoot(_settingsService.SettingsDirectory), _launcherService.IsReviewerRunningFor, _loggingService);
-        _reviewEventCleanupCoordinator.PullRequestClosed += workspaceCleanup.OnPullRequestClosed;
-        _launcherService.RunCompleted += workspaceCleanup.OnReviewerRunCompleted;
+        _workspaceCleanupService = ReviewerWorkspaceCleanupService.Attach(_settingsService.SettingsDirectory, _launcherService, _reviewEventCleanupCoordinator, _loggingService);
         _reviewCycleCoordinator = new ReviewCycleCoordinator(
             new ReviewCycleStore(_settingsService.SettingsDirectory),
             _loggingService);
@@ -101,6 +100,7 @@ public partial class App : Application
         await _statuslineSummaryService.ShutdownAsync().ConfigureAwait(false);
         await _subscriptionService.DisposeAsync().ConfigureAwait(false);
         await _reviewEventCleanupCoordinator.DisposeAsync().ConfigureAwait(false);
+        await _workspaceCleanupService.DisposeAsync().ConfigureAwait(false);
         _pullRequestStatusClient.Dispose();
         _autoUpdateService.Dispose();
         _rateLimitReminderService.Dispose();

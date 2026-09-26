@@ -51,6 +51,10 @@ internal static class ReviewerWorkspaceLayout
             prNumber.ToString(CultureInfo.InvariantCulture));
     }
 
+    // 最終起動（作業領域ディレクトリの更新時刻）から TTL 以上経ったかを判定する.
+    public static bool IsExpired(DateTime lastUsedUtc, DateTimeOffset now, TimeSpan timeToLive)
+        => now - new DateTimeOffset(DateTime.SpecifyKind(lastUsedUtc, DateTimeKind.Utc)) >= timeToLive;
+
     public static string GetScratchDirectory(string workspaceDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceDirectory);

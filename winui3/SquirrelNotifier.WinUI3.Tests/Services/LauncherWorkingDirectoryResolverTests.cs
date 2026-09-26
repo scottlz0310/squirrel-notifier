@@ -44,6 +44,20 @@ public class LauncherWorkingDirectoryResolverTests : IDisposable
     }
 
     [Fact]
+    public void Resolve_ShouldRecordLastUseOnReviewerDirectory()
+    {
+        // TTL による回収（#403）は、作業領域ディレクトリの更新時刻を最終起動として扱う
+        string workspace = Path.Combine(_tempDirectory, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "186");
+        Directory.CreateDirectory(workspace);
+        Directory.SetLastWriteTimeUtc(workspace, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        DateTime before = DateTime.UtcNow.AddSeconds(-1);
+
+        _resolver.Resolve(CreateReviewEvent(), LauncherRole.Reviewer);
+
+        Directory.GetLastWriteTimeUtc(workspace).Should().BeOnOrAfter(before);
+    }
+
+    [Fact]
     public void Resolve_ShouldReturnSameReviewerDirectory_ForSamePrRegardlessOfRepositoryCase()
     {
         // session 再開は作業ディレクトリの一致を条件にするため、同じ PR の re-review では同じ場所を返す（#403）
