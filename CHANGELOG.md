@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- release の publish を desktop E2E（EC2 上の DesktopSmoke）に依存させないようにした。EC2 の desktop E2E は撤去する方針に決めたため（#426）、`desktop-e2e.yml` / `desktop-e2e-dispatch.yml` / `desktop-e2e-reaper.yml` も削除した。配布物の検証は PR CI の `distribution-e2e` と `headless-e2e` が担う。EC2 用のスクリプトと文書の削除、AWS リソースの片付けは後続（#429）
 - テスト: `StatuslineSummaryServiceTests` の待機処理が、summary ファイルの置き換えと読み取りの競合（`IOException`）で失敗しないようにした。待機中の一時状態として扱い、読み直す（#438）
 - reviewer の作業ディレクトリを、全 PR 共有の `launcher-workspace\reviewer` から PR 単位の `launcher-workspace\reviewer\<owner>\<repo>\<PR 番号>` へ変更した。reviewer プロセスには、その配下の `tmp` を `TEMP` / `TMP` と `SQUIRREL_REVIEW_SCRATCH_DIR` で渡す。これにより、レビューごとに `%TEMP%` へ残っていた clone の置き場所が、アプリの管理するディレクトリ配下にそろう。owner / repo は小文字へ正規化するので、同じ PR の re-review では同じディレクトリになる。session の保存キーも repository の大文字小文字を区別しないようにしたので、表記揺れした re-review でも session を再開できる。保存キーと reviewer の作業ディレクトリが変わるため、更新前に保存した session（reviewer / reviewed とも）は更新後の初回だけ再開されない。PR 完了時の片付けは後続（#403）
 - desktop E2E の使い捨て runner 起動を SSM Automation の確定 version 経由へ変更した。OIDC ロールから直接 `RunInstances`・起動時 `CreateTags`・runner role の `PassRole` を外し、固定文書の開始・結果参照と専用実行ロールの `PassRole` に限定する。開始直後に Automation execution ID を残し、instance ID が失われた場合は cleanup で復元する。直接起動と永続 instance の terminate は DryRun で拒否を確認する（#380）
