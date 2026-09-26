@@ -301,7 +301,7 @@ jobs:
 
       - name: Download release package
         if: inputs.release_artifact_name != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.release_artifact_name }}
           path: release-output
