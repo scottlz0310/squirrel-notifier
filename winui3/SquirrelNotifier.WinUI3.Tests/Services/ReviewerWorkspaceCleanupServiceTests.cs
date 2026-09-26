@@ -2,6 +2,8 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System.Security.AccessControl;
+using System.Security.Principal;
 using FluentAssertions;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
@@ -13,6 +15,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     private readonly string _tempDirectory;
     private readonly string _reviewerRoot;
     private readonly LoggingService _loggingService;
+    private readonly List<Action> _restoreAccess = new();
 
     public ReviewerWorkspaceCleanupServiceTests()
     {
@@ -24,6 +27,11 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
 
     public void Dispose()
     {
+        foreach (Action restore in _restoreAccess)
+        {
+            restore();
+        }
+
         if (!Directory.Exists(_tempDirectory))
         {
             return;
@@ -440,6 +448,38 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteAllAsync_ShouldContinueAndCountFailure_WhenDirectoryCannotBeListed()
+    {
+        // 読めないディレクトリがあっても例外で終わらず（呼び出し元は async void）、読めた分は削除する
+        string deletable = CreateWorkspace("owner", "repo", 1);
+        string unreadableOwner = Path.Combine(_reviewerRoot, "locked-owner");
+        Directory.CreateDirectory(Path.Combine(unreadableOwner, "repo", "2"));
+        DenyListDirectory(unreadableOwner);
+        ReviewerWorkspaceCleanupService service = CreateService();
+
+        ReviewerWorkspaceBulkCleanupResult result = await service.DeleteAllAsync();
+
+        result.Should().Be(new ReviewerWorkspaceBulkCleanupResult(Deleted: 1, SkippedRunning: 0, Failed: 1));
+        Directory.Exists(deletable).Should().BeFalse();
+        (await ReadLogAsync()).Should().Contain("reviewer 作業領域の一覧を取得できませんでした:").And.Contain("locked-owner");
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldContinue_WhenDirectoryCannotBeListed()
+    {
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        string expired = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
+        string unreadableOwner = Path.Combine(_reviewerRoot, "locked-owner");
+        Directory.CreateDirectory(unreadableOwner);
+        DenyListDirectory(unreadableOwner);
+
+        await CreateService(now).SweepExpiredAsync();
+
+        Directory.Exists(expired).Should().BeFalse();
+        (await ReadLogAsync()).Should().Contain("reviewer 作業領域の一覧を取得できませんでした:");
+    }
+
+    [Fact]
     public async Task DeleteAllAsync_ShouldReturnZero_WhenRootDoesNotExist()
     {
         var service = new ReviewerWorkspaceCleanupService(Path.Combine(_tempDirectory, "missing"), (_, _) => false, _loggingService);
@@ -572,6 +612,25 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
 
     private ReviewerWorkspaceCleanupService CreateService()
         => new(_reviewerRoot, (_, _) => false, _loggingService);
+
+    // 現在のユーザーに対して一覧の取得を拒否し、テスト終了時に拒否を外す
+    private void DenyListDirectory(string path)
+    {
+        var info = new DirectoryInfo(path);
+        DirectorySecurity security = info.GetAccessControl();
+        var rule = new FileSystemAccessRule(
+            WindowsIdentity.GetCurrent().User!,
+            FileSystemRights.ListDirectory,
+            AccessControlType.Deny);
+        security.AddAccessRule(rule);
+        info.SetAccessControl(security);
+        _restoreAccess.Add(() =>
+        {
+            DirectorySecurity current = info.GetAccessControl();
+            current.RemoveAccessRule(rule);
+            info.SetAccessControl(current);
+        });
+    }
 
     private ReviewerWorkspaceCleanupService CreateService(DateTimeOffset now)
         => new(_reviewerRoot, (_, _) => false, _loggingService, new FixedTimeProvider(now));

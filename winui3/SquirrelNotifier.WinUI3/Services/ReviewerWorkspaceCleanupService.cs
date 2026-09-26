@@ -212,7 +212,9 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
     internal async Task SweepExpiredAsync()
     {
         DateTimeOffset now = _timeProvider.GetUtcNow();
-        List<(string Repository, int PrNumber)> expired = EnumerateWorkspaces()
+        (List<(string Repository, int PrNumber, DateTime LastUsedUtc)> workspaces, List<string> listingErrors) = CollectWorkspaces();
+        await LogListingErrorsAsync(listingErrors).ConfigureAwait(false);
+        List<(string Repository, int PrNumber)> expired = workspaces
             .Where(workspace => ReviewerWorkspaceLayout.IsExpired(workspace.LastUsedUtc, now, _timeToLive))
             .Select(workspace => (workspace.Repository, workspace.PrNumber))
             .ToList();
@@ -235,8 +237,12 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
     {
         int deleted = 0;
         int skipped = 0;
-        int failed = 0;
-        foreach ((string repository, int prNumber, _) in EnumerateWorkspaces().ToList())
+
+        // 読めないディレクトリがあっても、読めた分は削除を続け、失敗として件数に含める.
+        (List<(string Repository, int PrNumber, DateTime LastUsedUtc)> workspaces, List<string> listingErrors) = CollectWorkspaces();
+        int failed = listingErrors.Count;
+        await LogListingErrorsAsync(listingErrors).ConfigureAwait(false);
+        foreach ((string repository, int prNumber, _) in workspaces)
         {
             try
             {
@@ -336,27 +342,53 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false));
     }
 
-    // <root>\<owner>\<repo>\<PR 番号> の階層だけを列挙する。PR 番号として読めない名前は対象にしない.
-    private IEnumerable<(string Repository, int PrNumber, DateTime LastUsedUtc)> EnumerateWorkspaces()
+    // <root>\<owner>\<repo>\<PR 番号> の階層だけを列挙する。PR 番号として読めない名前は対象にしない。
+    // 読めないディレクトリは、その配下を飛ばしてエラーとして返す（一括削除を途中で止めないため）.
+    private (List<(string Repository, int PrNumber, DateTime LastUsedUtc)> Workspaces, List<string> Errors) CollectWorkspaces()
     {
+        List<(string Repository, int PrNumber, DateTime LastUsedUtc)> workspaces = new();
+        List<string> errors = new();
         var root = new DirectoryInfo(_reviewerRoot);
         if (!root.Exists)
         {
-            yield break;
+            return (workspaces, errors);
         }
 
-        foreach (DirectoryInfo owner in root.EnumerateDirectories())
+        foreach (DirectoryInfo owner in ListDirectories(root, errors))
         {
-            foreach (DirectoryInfo repo in owner.EnumerateDirectories())
+            foreach (DirectoryInfo repo in ListDirectories(owner, errors))
             {
-                foreach (DirectoryInfo pr in repo.EnumerateDirectories())
+                foreach (DirectoryInfo pr in ListDirectories(repo, errors))
                 {
                     if (int.TryParse(pr.Name, NumberStyles.None, CultureInfo.InvariantCulture, out int prNumber))
                     {
-                        yield return ($"{owner.Name}/{repo.Name}", prNumber, pr.LastWriteTimeUtc);
+                        workspaces.Add(($"{owner.Name}/{repo.Name}", prNumber, pr.LastWriteTimeUtc));
                     }
                 }
             }
+        }
+
+        return (workspaces, errors);
+    }
+
+    private static DirectoryInfo[] ListDirectories(DirectoryInfo directory, List<string> errors)
+    {
+        try
+        {
+            return directory.GetDirectories();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            errors.Add($"{directory.FullName}: {ex.Message}");
+            return [];
+        }
+    }
+
+    private async Task LogListingErrorsAsync(List<string> errors)
+    {
+        foreach (string error in errors)
+        {
+            await _loggingService.WriteAsync($"reviewer 作業領域の一覧を取得できませんでした: {error}").ConfigureAwait(false);
         }
     }
 
