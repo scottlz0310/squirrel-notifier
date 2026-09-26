@@ -35,9 +35,7 @@ jobs:
       - name: Validate inputs
         shell: pwsh
         run: |
-          if ($env:VERSION -notmatch '^\d+\.\d+\.\d+$') {
-            throw "version は x.y.z 形式で指定してください: '$env:VERSION'"
-          }
+          ./scripts/Assert-ReleaseVersion.ps1 -Version $env:VERSION
           Write-Host "version: $env:VERSION / apply: $env:APPLY"
 
       - name: Compose release notes from CHANGELOG
