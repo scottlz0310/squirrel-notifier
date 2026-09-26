@@ -123,7 +123,7 @@
                     <ScrollViewer x:Name="SettingsScrollViewer" Height="160" MinHeight="80"
                                   MaxHeight="80"
                                   HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
-                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                               ColumnDefinitions="Auto,*"
                               RowSpacing="8"
                               ColumnSpacing="8"
@@ -245,6 +245,10 @@
                                 <TextBlock x:Name="AutoStartStatusText" VerticalAlignment="Center" Text="確認中..."/>
                                 <Button x:Name="RepairAutoStartButton" Content="修復" Click="OnRepairAutoStartClick" IsEnabled="False"/>
                             </StackPanel>
+
+                            <TextBlock Grid.Row="21" Grid.Column="0" Text="reviewer 作業領域:" VerticalAlignment="Center"/>
+                            <Button Grid.Row="21" Grid.Column="1" Content="すべて削除" Click="OnDeleteReviewerWorkspacesClick"
+                                    ToolTipService.ToolTip="reviewer が PR ごとに作る clone と一時ファイルを削除します（実行中の PR は残します）"/>
                         </Grid>
                     </ScrollViewer>
                 </Expander>

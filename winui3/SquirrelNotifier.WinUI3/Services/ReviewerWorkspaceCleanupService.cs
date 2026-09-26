@@ -20,6 +20,32 @@ internal enum ReviewerWorkspaceCleanupResult
     SkippedReviewerRunning,
 }
 
+/// <summary>手動の一括削除（#403）の結果.</summary>
+/// <param name="Deleted">削除した作業領域の数.</param>
+/// <param name="SkippedRunning">reviewer の実行中のため残した数.</param>
+/// <param name="Failed">削除に失敗した数.</param>
+internal sealed record ReviewerWorkspaceBulkCleanupResult(int Deleted, int SkippedRunning, int Failed)
+{
+    public string Message
+    {
+        get
+        {
+            string message = $"{Deleted} 件の reviewer 作業領域を削除しました。";
+            if (SkippedRunning > 0)
+            {
+                message += $"\n{SkippedRunning} 件は reviewer の実行中のため残しました。";
+            }
+
+            if (Failed > 0)
+            {
+                message += $"\n{Failed} 件は削除に失敗しました。詳細はログを確認してください。";
+            }
+
+            return message;
+        }
+    }
+}
+
 /// <summary>
 /// 完了した PR の reviewer 作業領域（clone や一時ファイル）を削除する（#403）.
 /// </summary>
@@ -185,28 +211,11 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
     // 保留中の PR もあわせて再試行する.
     internal async Task SweepExpiredAsync()
     {
-        var root = new DirectoryInfo(_reviewerRoot);
-        if (!root.Exists)
-        {
-            return;
-        }
-
         DateTimeOffset now = _timeProvider.GetUtcNow();
-        List<(string Repository, int PrNumber)> expired = new();
-        foreach (DirectoryInfo owner in root.EnumerateDirectories())
-        {
-            foreach (DirectoryInfo repo in owner.EnumerateDirectories())
-            {
-                foreach (DirectoryInfo pr in repo.EnumerateDirectories())
-                {
-                    if (int.TryParse(pr.Name, NumberStyles.None, CultureInfo.InvariantCulture, out int prNumber)
-                        && ReviewerWorkspaceLayout.IsExpired(pr.LastWriteTimeUtc, now, _timeToLive))
-                    {
-                        expired.Add(($"{owner.Name}/{repo.Name}", prNumber));
-                    }
-                }
-            }
-        }
+        List<(string Repository, int PrNumber)> expired = EnumerateWorkspaces()
+            .Where(workspace => ReviewerWorkspaceLayout.IsExpired(workspace.LastUsedUtc, now, _timeToLive))
+            .Select(workspace => (workspace.Repository, workspace.PrNumber))
+            .ToList();
 
         // 回収で見送った PR は保留に入れない。実行中なら起動時に更新時刻が新しくなり、
         // 期限切れではなくなるため、終了後に消すと直前に使った領域を消してしまう.
@@ -216,6 +225,40 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
         }
 
         await RetryPendingAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 実行中の PR を除き、すべての reviewer 作業領域を削除する（設定欄の手動操作）.
+    /// </summary>
+    /// <returns>削除・見送り・失敗の件数.</returns>
+    public async Task<ReviewerWorkspaceBulkCleanupResult> DeleteAllAsync()
+    {
+        int deleted = 0;
+        int skipped = 0;
+        int failed = 0;
+        foreach ((string repository, int prNumber, _) in EnumerateWorkspaces().ToList())
+        {
+            try
+            {
+                if (Cleanup(repository, prNumber) == ReviewerWorkspaceCleanupResult.SkippedReviewerRunning)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                SetPending(repository, prNumber, pending: false);
+                deleted++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                failed++;
+                await _loggingService.WriteAsync($"reviewer 作業領域の削除に失敗しました ({repository}#{prNumber}): {ex.Message}").ConfigureAwait(false);
+            }
+        }
+
+        var result = new ReviewerWorkspaceBulkCleanupResult(deleted, skipped, failed);
+        await _loggingService.WriteAsync($"reviewer 作業領域を手動で削除しました: 削除 {deleted} 件、実行中のため残した {skipped} 件、失敗 {failed} 件").ConfigureAwait(false);
+        return result;
     }
 
     internal async Task RetryPendingAsync()
@@ -291,6 +334,30 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
             }
         }
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    // <root>\<owner>\<repo>\<PR 番号> の階層だけを列挙する。PR 番号として読めない名前は対象にしない.
+    private IEnumerable<(string Repository, int PrNumber, DateTime LastUsedUtc)> EnumerateWorkspaces()
+    {
+        var root = new DirectoryInfo(_reviewerRoot);
+        if (!root.Exists)
+        {
+            yield break;
+        }
+
+        foreach (DirectoryInfo owner in root.EnumerateDirectories())
+        {
+            foreach (DirectoryInfo repo in owner.EnumerateDirectories())
+            {
+                foreach (DirectoryInfo pr in repo.EnumerateDirectories())
+                {
+                    if (int.TryParse(pr.Name, NumberStyles.None, CultureInfo.InvariantCulture, out int prNumber))
+                    {
+                        yield return ($"{owner.Name}/{repo.Name}", prNumber, pr.LastWriteTimeUtc);
+                    }
+                }
+            }
+        }
     }
 
     private static bool IsReparsePoint(string path)

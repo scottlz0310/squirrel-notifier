@@ -41,6 +41,7 @@ internal sealed partial class MainWindow : Window
     private readonly ReviewRegistrationCoordinator _reviewRegistrationCoordinator;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
     private readonly ReviewCycleCoordinator _reviewCycleCoordinator;
+    private readonly ReviewerWorkspaceCleanupService _workspaceCleanupService;
     private readonly IRateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitReminderCoordinator _rateLimitReminderCoordinator;
     private readonly RateLimitAgentMonitoringCoordinator _rateLimitAgentMonitoringCoordinator;
@@ -93,6 +94,7 @@ internal sealed partial class MainWindow : Window
         RateLimitFileService rateLimitFileService,
         ReviewEventCleanupCoordinator reviewEventCleanupCoordinator,
         ReviewCycleCoordinator reviewCycleCoordinator,
+        ReviewerWorkspaceCleanupService workspaceCleanupService,
         bool showWindow = true)
     {
         InitializeComponent();
@@ -130,6 +132,7 @@ internal sealed partial class MainWindow : Window
         _reviewRegistrationCoordinator = new(reviewRegistrationService);
         _reviewEventCleanupCoordinator = reviewEventCleanupCoordinator;
         _reviewCycleCoordinator = reviewCycleCoordinator;
+        _workspaceCleanupService = workspaceCleanupService;
         _rateLimitReminderService = rateLimitReminderService;
         _rateLimitReminderCoordinator = new(_rateLimitReminderService);
         _rateLimitSnapshotService = new RateLimitSnapshotService(rateLimitFileService);
@@ -1385,6 +1388,26 @@ internal sealed partial class MainWindow : Window
         };
         ContentDialogResult result = await dialog.ShowAsync(ContentDialogPlacement.Popup);
         return result == ContentDialogResult.Primary;
+    }
+
+    private async void OnDeleteReviewerWorkspacesClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "reviewer 作業領域の削除",
+            Content = "reviewer が PR ごとに作った clone と一時ファイルをすべて削除します。実行中の PR の領域は残します。次のレビューでは作り直されます。",
+            PrimaryButtonText = "削除",
+            CloseButtonText = "キャンセル",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot,
+        };
+        if (await dialog.ShowAsync(ContentDialogPlacement.Popup) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        ReviewerWorkspaceBulkCleanupResult result = await _workspaceCleanupService.DeleteAllAsync();
+        await ShowAlertDialogAsync("reviewer 作業領域の削除", result.Message);
     }
 
     private async void OnRepairAutoStartClick(object sender, RoutedEventArgs e)
