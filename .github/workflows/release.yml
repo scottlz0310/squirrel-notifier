@@ -67,7 +67,7 @@ jobs:
           -Version $env:RELEASE_VERSION
           -OutputDirectory .\release-output
 
-      - name: Upload release package for desktop gate
+      - name: Upload release package
         uses: actions/upload-artifact@v7
         with:
           name: release-payload-x64
@@ -79,27 +79,31 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # TEMPORARY: DesktopFull の実行前提（DESKTOP_E2E_GATEWAY_URL 等の secret と
-  # mcp-docker / mcp-gateway / thread-owl / mcp-resource-subscriber の外部 component stack）
-  # が未整備のため、release gate は DesktopSmoke で運用する。DesktopFull への引き上げは #381 で追跡する。
-  desktop-e2e:
-    needs: build-package
-    uses: ./.github/workflows/desktop-e2e.yml
+  # tag push では ci.yml が起動しない。公開前に、tag が指すコミットで ci.yml の必須ジョブ
+  # （単体テスト・headless E2E・配布物 E2E・lint）が成功していることを確かめる（#429 / #426）.
+  verify-ci:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
     permissions:
       contents: read
-      actions: read
-      id-token: write
-    with:
-      release_artifact_name: release-payload-x64
-      expected_version: ${{ needs.build-package.outputs.version }}
-      scenario: DesktopSmoke
-      artifact_retention_days: 90
-    secrets: inherit
+      checks: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Verify CI checks of the tagged commit
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: ./scripts/Assert-CiChecksPassed.ps1 -Repository $env:RELEASE_REPOSITORY -Sha $env:RELEASE_SHA
 
   publish:
-    # desktop E2E が成功した配布物だけを公開する。release 経路での DesktopSmoke の通過は
-    # workflow_dispatch（publish なし）で確認済み（#381）。
-    needs: [build-package, desktop-e2e]
+    # EC2 の desktop E2E は撤去した（#429）。配布物の検証は verify-ci で確かめた ci.yml の結果が担う.
+    needs: [build-package, verify-ci]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     permissions:
