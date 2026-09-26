@@ -112,7 +112,7 @@ jobs:
           fi
 
       - name: Configure AWS credentials with OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ vars.DESKTOP_E2E_AWS_REGION }}
           role-to-assume: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
@@ -402,7 +402,7 @@ jobs:
 
       - name: Configure AWS credentials with OIDC
         if: (inputs.runner_mode == 'persistent' && needs.prepare-runner.outputs.started_by_workflow == 'true') || (inputs.runner_mode == 'ephemeral' && (needs.prepare-runner.outputs.instance_id != '' || needs.prepare-runner.outputs.automation_execution_id != ''))
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ vars.DESKTOP_E2E_AWS_REGION }}
           role-to-assume: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
