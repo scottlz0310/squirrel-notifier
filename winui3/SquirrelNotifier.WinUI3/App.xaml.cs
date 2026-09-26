@@ -56,8 +56,9 @@ public partial class App : Application
         _reviewEventCleanupCoordinator = new ReviewEventCleanupCoordinator(
             _pullRequestStatusClient,
             _loggingService);
-        _reviewEventCleanupCoordinator.PullRequestClosed += new ReviewerWorkspaceCleanupService(
-            ReviewerWorkspaceLayout.GetReviewerRoot(_settingsService.SettingsDirectory), _launcherService.IsReviewerRunningFor, _loggingService).OnPullRequestClosed;
+        var workspaceCleanup = new ReviewerWorkspaceCleanupService(ReviewerWorkspaceLayout.GetReviewerRoot(_settingsService.SettingsDirectory), _launcherService.IsReviewerRunningFor, _loggingService);
+        _reviewEventCleanupCoordinator.PullRequestClosed += workspaceCleanup.OnPullRequestClosed;
+        _launcherService.RunCompleted += workspaceCleanup.OnReviewerRunCompleted;
         _reviewCycleCoordinator = new ReviewCycleCoordinator(
             new ReviewCycleStore(_settingsService.SettingsDirectory),
             _loggingService);

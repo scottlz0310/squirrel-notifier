@@ -89,6 +89,118 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     }
 
     [Fact]
+    public void Cleanup_ShouldDeleteOnlyLink_WhenWorkspaceItselfIsLink()
+    {
+        string outside = CreateOutsideDirectoryWithFile(out string outsideFile);
+        string repoDirectory = Path.Combine(_reviewerRoot, "owner", "repo");
+        Directory.CreateDirectory(repoDirectory);
+        string workspace = Path.Combine(repoDirectory, "1");
+        Directory.CreateSymbolicLink(workspace, outside);
+
+        ReviewerWorkspaceCleanupResult result = CreateService().Cleanup("owner/repo", 1);
+
+        result.Should().Be(ReviewerWorkspaceCleanupResult.Deleted);
+        Directory.Exists(workspace).Should().BeFalse();
+        File.Exists(outsideFile).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("owner")]
+    [InlineData("repo")]
+    public void Cleanup_ShouldRefuse_WhenParentDirectoryIsLink(string linkedLevel)
+    {
+        // 親がリンクだと、PR 単位のディレクトリの実体が管理外の場所になる
+        string outside = CreateOutsideDirectoryWithFile(out string outsideFile);
+        Directory.CreateDirectory(Path.Combine(outside, "repo", "1"));
+        Directory.CreateDirectory(Path.Combine(outside, "1"));
+        if (linkedLevel == "owner")
+        {
+            Directory.CreateSymbolicLink(Path.Combine(_reviewerRoot, "owner"), outside);
+        }
+        else
+        {
+            Directory.CreateDirectory(Path.Combine(_reviewerRoot, "owner"));
+            Directory.CreateSymbolicLink(Path.Combine(_reviewerRoot, "owner", "repo"), outside);
+        }
+
+        Action act = () => CreateService().Cleanup("owner/repo", 1);
+
+        act.Should().Throw<IOException>().WithMessage("*リンク*");
+        File.Exists(outsideFile).Should().BeTrue();
+        Directory.Exists(Path.Combine(outside, "repo", "1")).Should().BeTrue();
+        Directory.Exists(Path.Combine(outside, "1")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RetryPendingAsync_ShouldDeleteWorkspaceSkippedWhileReviewerWasRunning()
+    {
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        bool running = true;
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService);
+        await service.CleanupAndLogAsync("owner/repo", 1);
+        service.PendingCount.Should().Be(1);
+        Directory.Exists(workspace).Should().BeTrue();
+
+        running = false;
+        await service.RetryPendingAsync();
+
+        Directory.Exists(workspace).Should().BeFalse();
+        service.PendingCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RetryPendingAsync_ShouldDeleteWorkspaceThatFailedEarlier()
+    {
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        string lockedFile = Path.Combine(workspace, "tmp", "locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        ReviewerWorkspaceCleanupService service = CreateService();
+        using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await service.CleanupAndLogAsync("owner/repo", 1);
+        }
+
+        service.PendingCount.Should().Be(1);
+
+        await service.RetryPendingAsync();
+
+        Directory.Exists(workspace).Should().BeFalse();
+        service.PendingCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OnReviewerRunCompleted_ShouldRetryPendingWorkspace()
+    {
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        bool running = true;
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService);
+        await service.CleanupAndLogAsync("owner/repo", 1);
+
+        running = false;
+        service.OnReviewerRunCompleted(this, EventArgs.Empty);
+
+        DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+        while (Directory.Exists(workspace) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        Directory.Exists(workspace).Should().BeFalse();
+        (await WaitForLogAsync("完了した PR の reviewer 作業領域を削除しました: owner/repo#1")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CleanupAndLogAsync_ShouldLogAndNotRetry_WhenRepositoryIsInvalid()
+    {
+        ReviewerWorkspaceCleanupService service = CreateService();
+
+        await service.CleanupAndLogAsync("owner", 1);
+
+        service.PendingCount.Should().Be(0);
+        (await ReadLogAsync()).Should().Contain("reviewer 作業領域の削除対象を特定できません (owner#1)");
+    }
+
+    [Fact]
     public void Cleanup_ShouldSkip_WhenReviewerIsRunningForPullRequest()
     {
         string workspace = CreateWorkspace("owner", "repo", 1);
@@ -125,42 +237,78 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task OnPullRequestClosed_ShouldDeleteWorkspaceAndLog()
+    public async Task OnPullRequestClosed_ShouldDeleteWorkspace()
     {
         string workspace = CreateWorkspace("owner", "repo", 1);
 
         CreateService().OnPullRequestClosed(this, new PullRequestClosedEventArgs("owner/repo", 1));
 
-        string log = await WaitForLogAsync("完了した PR の reviewer 作業領域を削除しました: owner/repo#1");
-        log.Should().NotBeEmpty();
+        // イベントからは fire-and-forget で実行されるため、削除の完了を待つ
+        DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+        while (Directory.Exists(workspace) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
         Directory.Exists(workspace).Should().BeFalse();
+
+        // 削除後のログ書き込みが Dispose の後片付けと競合しないよう、書き込みの完了も待つ
+        (await WaitForLogAsync("完了した PR の reviewer 作業領域を削除しました: owner/repo#1")).Should().BeTrue();
     }
 
     [Fact]
-    public async Task OnPullRequestClosed_ShouldLogSkip_WhenReviewerIsRunning()
+    public async Task CleanupAndLogAsync_ShouldLogDeletion()
+    {
+        CreateWorkspace("owner", "repo", 1);
+
+        await CreateService().CleanupAndLogAsync("owner/repo", 1);
+
+        (await ReadLogAsync()).Should().Contain("完了した PR の reviewer 作業領域を削除しました: owner/repo#1");
+    }
+
+    [Fact]
+    public async Task CleanupAndLogAsync_ShouldLogSkip_WhenReviewerIsRunning()
     {
         CreateWorkspace("owner", "repo", 1);
         var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => true, _loggingService);
 
-        service.OnPullRequestClosed(this, new PullRequestClosedEventArgs("owner/repo", 1));
+        await service.CleanupAndLogAsync("owner/repo", 1);
 
-        (await WaitForLogAsync("reviewer の実行中のため、作業領域を削除しませんでした: owner/repo#1")).Should().NotBeEmpty();
+        (await ReadLogAsync()).Should().Contain("reviewer の実行中のため、作業領域の削除を終了後へ見送りました: owner/repo#1");
     }
 
     [Fact]
-    public async Task OnPullRequestClosed_ShouldLogFailure_WhenFileIsLocked()
+    public async Task CleanupAndLogAsync_ShouldNotLog_WhenWorkspaceDoesNotExist()
+    {
+        await CreateService().CleanupAndLogAsync("owner/repo", 1);
+
+        File.Exists(LogPath).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CleanupAndLogAsync_ShouldLogFailure_WhenFileIsLocked()
     {
         string workspace = CreateWorkspace("owner", "repo", 1);
         string lockedFile = Path.Combine(workspace, "tmp", "locked.txt");
         File.WriteAllText(lockedFile, "locked");
         using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
         {
-            CreateService().OnPullRequestClosed(this, new PullRequestClosedEventArgs("owner/repo", 1));
+            Func<Task> act = () => CreateService().CleanupAndLogAsync("owner/repo", 1);
 
-            (await WaitForLogAsync("reviewer 作業領域の削除に失敗しました (owner/repo#1)")).Should().NotBeEmpty();
+            await act.Should().NotThrowAsync();
         }
 
         File.Exists(lockedFile).Should().BeTrue();
+        (await ReadLogAsync()).Should().Contain("reviewer 作業領域の削除に失敗しました。reviewer の終了時に再試行します (owner/repo#1)");
+    }
+
+    private string CreateOutsideDirectoryWithFile(out string outsideFile)
+    {
+        string outside = Path.Combine(_tempDirectory, "outside");
+        Directory.CreateDirectory(outside);
+        outsideFile = Path.Combine(outside, "keep.txt");
+        File.WriteAllText(outsideFile, "keep");
+        return outside;
     }
 
     private ReviewerWorkspaceCleanupService CreateService()
@@ -173,25 +321,30 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         return workspace;
     }
 
-    // OnPullRequestClosed は fire-and-forget のため、ログへの書き込みを待って結果を確認する
-    private async Task<string> WaitForLogAsync(string expected)
+    private string LogPath => Path.Combine(_tempDirectory, "logs", "winui3.log");
+
+    private Task<string> ReadLogAsync() => File.ReadAllTextAsync(LogPath);
+
+    // fire-and-forget のログ書き込みと読み取りが重なると IOException になるため、読めるまで再試行する
+    private async Task<bool> WaitForLogAsync(string expected)
     {
-        string logPath = Path.Combine(_tempDirectory, "logs", "winui3.log");
         DateTime deadline = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < deadline)
         {
-            if (File.Exists(logPath))
+            try
             {
-                string log = await File.ReadAllTextAsync(logPath);
-                if (log.Contains(expected, StringComparison.Ordinal))
+                if (File.Exists(LogPath) && (await ReadLogAsync()).Contains(expected, StringComparison.Ordinal))
                 {
-                    return log;
+                    return true;
                 }
+            }
+            catch (IOException)
+            {
             }
 
             await Task.Delay(50);
         }
 
-        throw new TimeoutException($"ログに期待した文言が出力されませんでした: {expected}");
+        return false;
     }
 }
