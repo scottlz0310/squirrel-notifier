@@ -208,9 +208,11 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
             }
         }
 
+        // 回収で見送った PR は保留に入れない。実行中なら起動時に更新時刻が新しくなり、
+        // 期限切れではなくなるため、終了後に消すと直前に使った領域を消してしまう.
         foreach ((string repository, int prNumber) in expired)
         {
-            await CleanupAndLogAsync(repository, prNumber).ConfigureAwait(false);
+            await CleanupAndLogAsync(repository, prNumber, retryWhenSkipped: false).ConfigureAwait(false);
         }
 
         await RetryPendingAsync().ConfigureAwait(false);
@@ -230,14 +232,18 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
         }
     }
 
-    internal async Task CleanupAndLogAsync(string repository, int prNumber)
+    internal async Task CleanupAndLogAsync(string repository, int prNumber, bool retryWhenSkipped = true)
     {
         // イベントから fire-and-forget で呼ばれる終端のため、失敗はここでログへ残し、再試行の対象に残す.
         string target = $"{repository}#{prNumber}";
 
         // 実行中の判定より前に保留へ登録する。判定の直後に reviewer が終了しても、
         // 終了時の再試行（RunCompleted）が必ずこの PR を拾えるようにするため.
-        SetPending(repository, prNumber, pending: true);
+        if (retryWhenSkipped)
+        {
+            SetPending(repository, prNumber, pending: true);
+        }
+
         try
         {
             ReviewerWorkspaceCleanupResult result = Cleanup(repository, prNumber);
@@ -249,7 +255,7 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
             string? message = result switch
             {
                 ReviewerWorkspaceCleanupResult.Deleted => $"完了した PR の reviewer 作業領域を削除しました: {target}",
-                ReviewerWorkspaceCleanupResult.SkippedReviewerRunning => $"reviewer の実行中のため、作業領域の削除を終了後へ見送りました: {target}",
+                ReviewerWorkspaceCleanupResult.SkippedReviewerRunning when retryWhenSkipped => $"reviewer の実行中のため、作業領域の削除を終了後へ見送りました: {target}",
                 _ => null,
             };
             if (message is not null)
@@ -259,7 +265,8 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            await _loggingService.WriteAsync($"reviewer 作業領域の削除に失敗しました。reviewer の終了時に再試行します ({target}): {ex.Message}").ConfigureAwait(false);
+            string retry = retryWhenSkipped ? "reviewer の終了時に再試行します" : "次回の回収で再試行します";
+            await _loggingService.WriteAsync($"reviewer 作業領域の削除に失敗しました。{retry} ({target}): {ex.Message}").ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {

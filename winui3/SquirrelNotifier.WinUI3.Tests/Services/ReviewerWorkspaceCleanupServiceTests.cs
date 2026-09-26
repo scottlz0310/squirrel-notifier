@@ -265,16 +265,52 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SweepExpiredAsync_ShouldKeepExpiredWorkspace_WhenReviewerIsRunning()
+    public async Task SweepExpiredAsync_ShouldNotQueueRetry_WhenReviewerIsRunning()
     {
+        // 実行中なら起動時に更新時刻が新しくなるため、終了後に消すと直前に使った領域を消してしまう
         DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
         string workspace = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
+        bool running = true;
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService, new FixedTimeProvider(now));
+
+        await service.SweepExpiredAsync();
+        running = false;
+        await service.RetryPendingAsync();
+
+        Directory.Exists(workspace).Should().BeTrue();
+        service.PendingCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldKeepPendingFromClosedPullRequest_WhenReviewerIsRunning()
+    {
+        // PR 完了時に見送った保留は、回収で見送っても外さない
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
         var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => true, _loggingService, new FixedTimeProvider(now));
+        await service.CleanupAndLogAsync("owner/repo", 1);
 
         await service.SweepExpiredAsync();
 
-        Directory.Exists(workspace).Should().BeTrue();
         service.PendingCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldLogFailureWithoutQueueingRetry_WhenFileIsLocked()
+    {
+        DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
+        string workspace = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
+        string lockedFile = Path.Combine(workspace, "tmp", "locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        Directory.SetLastWriteTimeUtc(workspace, (now - TimeSpan.FromDays(8)).UtcDateTime);
+        ReviewerWorkspaceCleanupService service = CreateService(now);
+        using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await service.SweepExpiredAsync();
+        }
+
+        service.PendingCount.Should().Be(0);
+        (await ReadLogAsync()).Should().Contain("reviewer 作業領域の削除に失敗しました。次回の回収で再試行します (owner/repo#1)");
     }
 
     [Fact]
