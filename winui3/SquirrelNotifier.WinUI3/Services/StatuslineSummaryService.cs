@@ -34,6 +34,10 @@ internal sealed class StatuslineSummaryService
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly Dictionary<string, ReviewCycleState> _states = new(StringComparer.Ordinal);
+
+    // 終了済み PR のイベントを削除した後にも、実行中だった reviewer の終了通知が同じイベントの状態を
+    // 発行する。削除済みイベントの状態で PR を再登録しないよう、削除した ID を保持する
+    private readonly HashSet<string> _removedEventIds = new(StringComparer.Ordinal);
     private bool _isShutDown;
 
     public StatuslineSummaryService(
@@ -95,6 +99,11 @@ internal sealed class StatuslineSummaryService
         ArgumentNullException.ThrowIfNull(state);
         return UpdateAsync(states =>
         {
+            if (_removedEventIds.Contains(state.LastEventId))
+            {
+                return false;
+            }
+
             string key = $"{state.Repository.Trim().ToUpperInvariant()}#{state.PrNumber}";
 
             // 状態変化の通知はロックの外で発火されるため、到着順が前後した古い状態で上書きしない
@@ -113,6 +122,7 @@ internal sealed class StatuslineSummaryService
         ArgumentNullException.ThrowIfNull(eventIds);
         return UpdateAsync(states =>
         {
+            _removedEventIds.UnionWith(eventIds);
             string[] keysToRemove = states
                 .Where(pair => eventIds.Contains(pair.Value.LastEventId)
                     || (pair.Value.ActiveEventId is not null && eventIds.Contains(pair.Value.ActiveEventId)))

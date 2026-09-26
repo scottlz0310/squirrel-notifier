@@ -141,6 +141,30 @@ public sealed class StatuslineSummaryServiceTests : IDisposable
         summary["activeReviews"]!.AsArray().Should().HaveCount(expectedActive);
     }
 
+    // reviewer 実行中に次のイベントが届き、その PR が終了済みとして削除された後で reviewer が終了すると、
+    // coordinator は削除済みイベントの待機状態を発行する。これで再登録しない。再オープン後の新しいイベントは反映する
+    [Theory]
+    [InlineData("event-re-review", 0)]
+    [InlineData("event-reopened", 1)]
+    public async Task ApplyStateAsync_ShouldNotRestorePullRequestOfRemovedEvent(string lastEventIdAfterRemoval, int expectedWaiting)
+    {
+        StatuslineSummaryService service = CreateService();
+        await service.ApplyStateAsync(CreateState(
+            status: ReviewCycleStatus.ReviewerRunning,
+            lastEventId: "event-re-review",
+            activeEventId: "event-opened"));
+        await service.RemoveEventsAsync(["event-opened", "event-re-review"]);
+
+        await service.ApplyStateAsync(CreateState(
+            status: ReviewCycleStatus.AwaitingReviewer,
+            lastEventId: lastEventIdAfterRemoval,
+            updatedAt: _initialTime.AddMinutes(1)));
+
+        JsonNode summary = await ReadSummaryAsync();
+        summary["queue"]!["totalWaiting"]!.GetValue<int>().Should().Be(expectedWaiting);
+        summary["activeReviews"]!.AsArray().Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ShutdownAsync_ShouldDeleteSummaryAndIgnoreLaterUpdates()
     {
