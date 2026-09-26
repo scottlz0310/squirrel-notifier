@@ -9,6 +9,7 @@ on:
       - 'winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj'
       - 'CHANGELOG.md'
       - '.github/workflows/changelog-guard.yml'
+      - 'scripts/Assert-ChangelogHasVersion.ps1'
 
 jobs:
   verify:
@@ -19,16 +20,4 @@ jobs:
 
       - name: Verify CHANGELOG has a section for the csproj version
         shell: pwsh
-        run: |
-          $csproj = "winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj"
-          $xml = [xml](Get-Content -LiteralPath $csproj -Raw)
-          $node = $xml.SelectSingleNode("//Version")
-          if (-not $node) { throw "csproj から <Version> を取得できません" }
-          $version = $node.InnerText.Trim()
-          Write-Host "csproj version: $version"
-          $escaped = [regex]::Escape($version)
-          $found = Get-Content -LiteralPath "CHANGELOG.md" | Select-String -Pattern "^##\s*\[$escaped\]" -Quiet
-          if (-not $found) {
-            throw "CHANGELOG.md に [$version] の節がありません。リリース準備 PR では CHANGELOG を更新してください。"
-          }
-          Write-Host "OK: CHANGELOG に [$version] の節があります"
+        run: ./scripts/Assert-ChangelogHasVersion.ps1

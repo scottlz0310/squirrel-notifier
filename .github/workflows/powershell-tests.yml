@@ -3,6 +3,7 @@ name: PowerShell Tests
 # scripts/ 配下の Pester テスト。
 # - extract-release-notes.ps1: 公開 release 本文を生成する主要経路のため、版系列境界・前版選択を固定する。
 # - Assert-CiChecksPassed.ps1: release の publish 前ゲート。必須ジョブの成否判定・再実行・他 App の除外を固定する（#429）。
+# - Assert-ReleaseVersion.ps1 / Assert-ChangelogHasVersion.ps1: reapply-release-notes.yml と changelog-guard.yml の判定。workflow の inline では検証されないため切り出した（#384）。
 
 on:
   pull_request:
