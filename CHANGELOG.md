@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - desktop E2E runner のログオンタスクが `run.cmd` を直接起動せず、`scripts/aws/Start-DesktopRunner.ps1` を経由するようにした。bootstrap を適用した instance では従来どおり永続 runner を起動し、その instance から作った AMI で起動した使い捨て instance では、AMI に残る永続 runner の資格情報を削除したうえで SSM Parameter Store の JIT config を待って ephemeral runner として起動する。EC2 instance の on-demand 作成・破棄へ移行する準備（#380）
 - release workflow の publish を desktop E2E（DesktopSmoke）に依存させ、desktop E2E が成功した配布物だけを公開するようにした。release 経路での DesktopSmoke の通過は workflow_dispatch（publish なし）で確認した。DesktopFull への引き上げは引き続き #381 で追跡する
 
+### Removed
+
+- EC2 の desktop E2E 用のスクリプトと文書を削除した（#429）。`scripts/aws/`、desktop 専用 harness（`Invoke-DesktopE2E.ps1` / `DesktopE2EEvidence.psm1` / `Measure-DesktopE2EStorage.ps1` とそのテスト）、scenario `desktop-smoke` / `desktop-full`、`.mcp.json`（AWS MCP サーバー）、`windows_only_plan/desktop-e2e/`、`docs/windows-integration-e2e.md` の Phase 2 節が対象。実デスクトップの確認は AI エージェントのランブックで行う方針（#433）
+
 ### Fixed
 
 - desktop E2E の ephemeral 経路で、`Measure runner storage` step が測定結果を出力した後に exit 1 で失敗し、E2E 本体が実行されなかったのを修正した。測定に使う `docker` / `dotnet` / `wix` の呼び出しが 0 以外で終わると、その値が `$LASTEXITCODE` に残り、GitHub Actions の `shell: pwsh` が step の終了コードにしていた。`Measure-DesktopE2EStorage.ps1` はコマンドごとの終了コードと stderr を storage.json に記録し、失敗を警告として出力したうえで `$LASTEXITCODE` を 0 へ戻す（#380）

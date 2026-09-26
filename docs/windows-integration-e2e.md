@@ -6,37 +6,36 @@ Squirrel Notifier の単体テストでは検出できない、Windows 配布物
 mcp-gateway、thread-owl、認証、通知購読、WinUI の組み合わせによる回帰を継続的に
 検出する。
 
-統合 E2E は、実行環境と決定性が異なる次の 2 段階へ分離する。
+統合 E2E は、GitHub-hosted runner 上の決定的な headless 統合 E2E（Phase 1）で行う。
 
 | Phase | 用途 | Runner | 実行契機 | PR gate |
 |---|---|---|---|---|
 | Phase 1 | 決定的な headless 統合 E2E | GitHub-hosted `windows-2025` | pull request / `workflow_dispatch` | 安定化後に required |
-| Phase 2 | 実デスクトップを含むシステム E2E | snapshot 復元可能な専用 Windows VM | `workflow_dispatch` / release 前 | PR required にしない |
 
-Phase 1 は外部ネットワークや本番レビュー基盤に依存させない。Phase 2 は実際の WinUI、
-既定ブラウザ、固定バージョンの test stack を扱うが、常用開発 PC や本番資格情報は
-使用しない。
+Phase 1 は外部ネットワークや本番レビュー基盤に依存させない。
 
-本書は Issue #184 の全体設計を定義する。個別実装は #220〜#224 で追跡する。
+self-hosted Windows（AWS EC2）で実デスクトップを動かす Phase 2 は撤去した（#426 / #429）。
+実際の WinUI や既定ブラウザを含む確認は、リリース前に AI エージェントがランブックに沿って
+行う方針とする（#433）。
+
+本書は Issue #184 の全体設計を定義する。個別実装は #220〜#223 で追跡する。
 
 ## 設計原則
 
 1. Squirrel Notifier は consumer-side acceptance のみを検証する。
 2. OAuth、MCP transport、review queue をテスト用に再実装しない。
 3. Phase 1 は同じ入力に対して同じ結果を返すローカル fixture を使用する。
-4. Phase 2 は VM snapshot から毎回クリーンな状態を復元する。
-5. 失敗は runner / test harness / dependency contract / product のどこで起きたかを
+4. 失敗は runner / test harness / dependency contract / product のどこで起きたかを
    構造化して記録する。
-6. retry や `continue-on-error` で flaky test を隠さない。
-7. CI の target SDK、runtime、toolchain、主要依存を高速化目的でダウングレードしない。
-8. production の PR、queue、GitHub App、token へ書き込まない。
+5. retry や `continue-on-error` で flaky test を隠さない。
+6. CI の target SDK、runtime、toolchain、主要依存を高速化目的でダウングレードしない。
+7. production の PR、queue、GitHub App、token へ書き込まない。
 
 ## 責務境界
 
 | Component | 統合 E2E での責務 | 本リポジトリに持ち込まないもの |
 |---|---|---|
 | squirrel-notifier | 配布物の build / install / launch、設定、外部 CLI 起動、購読状態、通知モデル、launcher 引数、ログと artifact | OAuth、MCP transport、queue の代替実装 |
-| Mcp-Docker | Phase 2 の固定 test stack、gateway route、container version / digest、health check、初期化と停止手順 | Squirrel Notifier 固有の UI assertion |
 | thread-owl | webhook、review candidate、queue、MCP tool / resource の製品契約 | subscriber client、agent wait loop |
 | mcp-resource-subscriber | `resources/subscribe`、通知待機、`resources/read`、CLI 出力と終了コードの製品契約 | Squirrel Notifier の状態管理 |
 | mcp-gateway | routing、認証境界、代表的な HTTP / MCP error contract | review workflow の中央状態機械 |
@@ -130,307 +129,6 @@ working directory を loopback fake Gateway、dummy subscriber、dummy launcher 
 | #222 | CLI、gateway、認証の Windows headless 契約 |
 | #223 | enqueue から通知モデル、dummy launcher までのプロセス境界（実装済み） |
 
-## Phase 2: self-hosted Windows 実デスクトップ E2E
-
-Phase 2 は #224 で実装する。常用開発 PC ではなく、テスト専用の Windows VM を使用する。
-VM は実行前後に snapshot から復元でき、対話ログオン済み desktop session を持つことを
-前提とする。
-
-### 対象
-
-- 正規 MSI の install / launch / uninstall
-- WinUI メイン画面、ContentDialog、InfoBar、tray menu、notification popup
-- 既定ブラウザ起動と起動不能時のフォールバック
-- Mcp-Docker が起動する version / SHA / digest 固定の test stack
-- gateway URL / Resource URI の取得
-- sandbox の device flow と token cache 作成
-- enqueue → thread-owl queue → subscriber notification → イベント表示
-- 通知またはアプリ内操作からの dummy agent launcher 起動
-- gateway / thread-owl の停止・復旧と再購読
-- スリープ・復帰後の再購読
-- スクリーンショット、動画、Windows Event Log、component log
-
-### 失敗時の証跡
-
-desktop E2E は失敗原因を artifact だけで判別できるよう、cleanup より前に次を収集する（#386）。
-cleanup は製品プロセスの停止、MSI uninstall、user settings の削除、runRoot の削除を行うため、
-この順序を崩すと証跡が残らない。
-
-| artifact | 内容 |
-|---|---|
-| `evidence.json` | 収集できたファイルと、収集時に発生したエラーの一覧 |
-| `ui-tree.json` | 対象 window 配下の AutomationId / ControlType 一覧（**成功時も収集する**） |
-| `process-state.json` | 製品プロセスの生死、exit code、exit 時刻 |
-| `windows.json` | 製品プロセスが持つトップレベル window の列挙 |
-| `product-logs/` | `%LocalAppData%\SquirrelNotifier` 配下の `*.log` |
-| `settings-sanitized.json` | 同ディレクトリの `settings.json` |
-| `event-log.json` | Application / System の該当時刻範囲（Application Error / .NET Runtime 等） |
-
-`ui-tree.json` を成功時も収集するのは、正常時の AutomationId 一覧が失敗時の比較対象になるため。
-ただし **Expander が折りたたまれている状態では配下の要素が UI Automation ツリーへ現れない**。
-`SettingsExpander` の子（`GatewayUrlBox` 等）が一覧に無いことは、要素の欠落を意味しない。
-
-製品由来のテキストは必ずサニタイズしてから artifact へ出す。`Test-E2EArtifacts.ps1` が
-artifact 内の `.json` / `.log` / `.txt` / `.md` に対して GUID（session ID）と secret pattern の
-非露出を検査するため、生のログをそのまま置くと検査に落ちる。
-
-証跡収集は best-effort とし、収集自体の失敗で scenario の結果を変えない。
-
-### Runner 要件
-
-- runner は個人の日常利用環境と分離する。
-- workflow 開始時に既知の snapshot へ復元する。
-- workflow 終了時は成功・失敗にかかわらず VM を破棄または再度 snapshot へ戻す。
-- sandbox repository と最小権限の専用資格情報だけを使用する。
-- Mcp-Docker の image は `latest` ではなく digest まで固定する。
-- runner の OS build、Windows App SDK Runtime、既定ブラウザ、DPI、locale を
-  version manifest に記録する。
-
-Phase 2 は PR required check にしない。実装時の検証は `main` ref の
-`.github/workflows/desktop-e2e-dispatch.yml` を `workflow_dispatch` で行い、
-`target_ref` に検証対象の branch/tag を指定する。release workflow からは同じ reusable
-workflow を release gate として呼び出す。定期実行は行わず、runner と EBS の常時稼働コストを
-発生させない。
-
-### AWS EC2 runner の運用契約
-
-- runner は `self-hosted`, `windows`, `squirrel-notifier-desktop` の label を持つ専用 VM とする。
-- EC2 は常時起動せず、検証前に起動し、終了後に停止または terminate する。現行 workflow は
-  GitHub OIDC で対象 instance の状態を確認し、停止中だった場合だけ起動・停止する。AMI と EBS snapshot
-  は、次回に同じ clean user profile、DPI、locale、Docker、browser、Windows App SDK runtime を
-  復元できる状態で作成する。
-- Mcp-Docker は Linux container stack のため、Windows runner 内で Docker Desktop / WSL2 を使うか、
-  stack を別の専用 Linux host に分離する。採用方式と image digest は version manifest に記録する。
-- EBS volume size は固定値を先に決めない。`Measure-DesktopE2EStorage.ps1` を clean image、
-  dependency 導入後、最小 scenario 実行後に実行し、測定済み使用量 + 4 GiB の候補のうち最小の
-  fit 値を採用する。候補で fit しない場合は runner image を縮小してから再測定する。
-- runner image の初期化、snapshot 復元、runner 登録は AWS 側の runbook に従う。
-  **runner を Windows service として登録してはならない。** desktop E2E の
-  harness は `[Environment]::UserInteractive` と非 SYSTEM ユーザーを要求し、UI Automation と
-  screenshot が対話デスクトップを必要とするため、session 0 で動く service では実行できない
-  （`tests/e2e/scripts/Invoke-DesktopE2E.ps1`）。自動ログオン、ログオン時の runner 起動、
-  スリープ・モニタ電源断・画面ロックの無効化によって対話セッションを維持する。適用手順は
-  後述の「runner ホストの bootstrap」に従い、`scripts/aws/` のスクリプトで再現する。
-  `runner_mode: persistent` は既存 instance を使用し、workflow が停止状態から起動した場合だけ停止する。
-  `runner_mode: ephemeral` は固定 SSM Automation から instance を作成し、run 固有ラベルの JIT runner を
-  online にしてから E2E を開始し、終了時に instance を terminate する。どちらも GitHub OIDC の短期
-  credential を使い、runner online 待機に失敗した場合は desktop E2E を開始しない。
-  `prepare-runner`、`desktop-e2e`、`cleanup-runner` は `desktop-e2e` environment を宣言し、
-  environment の trusted branch/tag policy を `main` と `v*` に限定する。手動実行は main ref
-  の trusted dispatcher から reusable workflow を呼び出し、feature branch の workflow 定義
-  を実行せずに `target_ref` の package だけを build する。package build は E2E secret 無しの
-  GitHub-hosted runner で行い、protected environment の desktop job には artifact だけを渡す。
-  desktop job は trusted ref の harness を使用し、target package の MSI custom action と製品
-  プロセスへ E2E 用の値を継承させない。未保護 ref から直接起動した場合は dispatcher が拒否し、
-  DesktopFull の手動実行も `main` または `v*` tag の `target_ref` に限定する（feature branch は
-  DesktopSmoke のみ）。release tag は引き続き gate 対象になる。AWS 設定値は environment variables、App の秘密鍵は
-  `desktop-e2e` environment secret として管理する。online 状態の確認には、対象リポジトリだけへ
-  インストールした GitHub App を使用する。Appには
-  self-hosted runner 一覧の参照と JIT runner の登録・削除に必要な `Administration: Read and write` を
-  持たせる。workflow 実行ごとに短期の installation token を生成し、永続 runner の経路では
-  `Administration: Read` だけを要求する。AWS credential と秘密鍵はログへ出力しない。
-
-手動検証は `main` の dispatcher から行う。`runner_mode` の既定は `persistent` で、release gate も
-引き続きこの経路を使う。使い捨て経路の確認では明示的に `ephemeral` を選ぶ。
-
-```powershell
-gh workflow run desktop-e2e-dispatch.yml --ref main -f target_ref=main -f scenario=DesktopSmoke -f artifact_retention_days=14 -f runner_mode=ephemeral
-```
-
-使い捨て経路では environment variable `DESKTOP_E2E_AWS_LAUNCH_TEMPLATE_ID` に Launch Template の
-ID、`DESKTOP_E2E_AWS_AUTOMATION_DOCUMENT_VERSION` に Admin が作成した Automation 文書の数値 version を
-設定する。prepare は OIDC ロールの直接起動が拒否されることを先に確かめ、不一致なら失敗する。
-Automation execution ID は開始直後に記録し、instance ID を受け取る前に prepare が失敗した場合は
-cleanup が execution の結果から復元する。
-成功・失敗・キャンセル時の cleanup は、instance の terminate、残ったタグ付き volume、JIT parameter、
-未使用の runner 登録を対象とする。
-
-### runner ホストの bootstrap
-
-EC2 を起動しただけでは runner は online にならない。service 化が使えないため、対話ログオンした
-session で `run.cmd` を実行する必要がある。この設定を再現可能な手順にしたものが `scripts/aws/` の
-スクリプトである（#392）。設定は instance に永続するため、実行するのは初回と runner を再構成した
-ときだけでよい。
-
-| スクリプト | 実行場所 | 役割 |
-|---|---|---|
-| `Initialize-DesktopRunnerInstanceProfile.ps1` | 開発機 | IAM role / instance profile を作成し instance へ関連付ける |
-| `Set-DesktopRunnerAutoLogonPassword.ps1` | 開発機 | 自動ログオン用パスワードを SecureString として登録する |
-| `Invoke-DesktopRunnerBootstrap.ps1` | 開発機 | bootstrap を SSM Run Command で投入する |
-| `Setup-DesktopRunnerHost.ps1` | instance 内 | 自動ログオン、ログオン時の runner 起動、セッション維持設定を適用する |
-| `Start-DesktopRunner.ps1` | instance 内 | ログオンタスクから起動され、永続 runner と JIT runner のどちらで起動するかを判定する |
-| `DesktopRunnerHost.psm1` | instance 内 | 適用内容を組み立てる（Pester で契約を固定する） |
-| `New-DesktopRunnerImage.ps1` | 開発機（Admin） | 停止中の instance から使い捨て instance 用の AMI を作る（#380） |
-| `Initialize-DesktopRunnerLaunchTemplate.ps1` | 開発機（Admin） | inbound の無い Security Group と Launch Template を作成・更新する（#380） |
-| `DesktopRunnerImage.psm1` | 開発機 | AMI のタグと Launch Template の中身を組み立てる（Pester で契約を固定する） |
-| `Initialize-DesktopE2ELaunchAutomation.ps1` | 開発機（Admin） | 固定 SSM Automation 文書と専用実行ロールを作成・更新する（#380） |
-| `Initialize-DesktopE2EOidcRole.ps1` | 開発機（Admin） | workflow が GitHub OIDC で引き受けるロールの信頼ポリシーと権限を適用する（#380） |
-| `DesktopE2EOidcRole.psm1` | 開発機 | OIDC ロールのポリシーを組み立てる（Pester で権限境界を固定する） |
-| `Test-DesktopE2EOidcBoundary.ps1` | GitHub Actions | instance 作成前に OIDC ロールの DryRun を行い、期待と異なれば停止する（#380） |
-| `Start-DesktopEphemeralRunner.ps1` | GitHub Actions | instance を作成し、JIT runner の online を待つ（#380） |
-| `Resolve-DesktopE2EAutomationInstance.ps1` | GitHub Actions | 準備失敗後に Automation execution ID から instance ID を復元する（#380） |
-| `Stop-DesktopEphemeralRunner.ps1` | GitHub Actions | instance・残った volume・JIT parameter・runner 登録を回収する（#380） |
-| `Invoke-DesktopE2EReaper.ps1` | GitHub Actions（`desktop-e2e-reaper.yml`） | cleanup から漏れた使い捨て instance・JIT parameter・runner 登録を回収する（#380） |
-| `DesktopEphemeralRunner.psm1` | 開発機 / GitHub Actions | 使い捨て runner の名前付けと回収対象の選定（Pester で固定する） |
-
-#### 1. IAM リソースの作成
-
-instance profile が無い間は SSM Agent が登録されず、Run Command を使えない。
-
-```powershell
-pwsh -File scripts\aws\Initialize-DesktopRunnerInstanceProfile.ps1 -InstanceId <instance-id> -Region us-east-1
-```
-
-付与するのは `AmazonSSMManagedInstanceCore` と、自動ログオン用 parameter 1 件および JIT config を
-置く `/squirrel-notifier/desktop-e2e/jit/*` の読み取りだけとする。
-`kms:Decrypt` は `kms:ViaService` 条件で SSM 経由に限定する。
-
-#### 2. 自動ログオン用パスワードの登録
-
-パスワードは registry へ平文で書かず、SSM Parameter Store の SecureString に置く。
-
-```powershell
-pwsh -File scripts\aws\Set-DesktopRunnerAutoLogonPassword.ps1 -Region us-east-1
-```
-
-パスワードは対話入力で受け取り、値を引数として外部プロセスへ渡さない。**`aws ssm put-parameter
---value <パスワード>` は使わない。** 値が aws.exe のコマンドライン引数に載るため、shell の履歴と
-実行中プロセスのコマンドラインの両方に平文が残り、SecureString として保存しても登録の時点で
-資格情報が露出する。
-
-初回は AWS Tools for PowerShell の導入が必要になる。
-
-```powershell
-Install-Module -Name AWS.Tools.SimpleSystemsManagement -Scope CurrentUser
-```
-
-#### 3. bootstrap の投入
-
-instance を起動し、SSM に登録されたことを確認してから実行する。
-
-```powershell
-aws ssm describe-instance-information --region us-east-1 --query "InstanceInformationList[?InstanceId=='<instance-id>'].PingStatus" --output text
-pwsh -File scripts\aws\Invoke-DesktopRunnerBootstrap.ps1 -InstanceId <instance-id> -Region us-east-1
-```
-
-bootstrap は次を適用する。
-
-- **自動ログオン**: `AutoAdminLogon` と `DefaultUserName` を registry へ書き、パスワードは
-  LSA secret（`DefaultPassword`）へ格納する。registry に残っていた平文の `DefaultPassword` と、
-  自動ログオン回数を消費する `AutoLogonCount` は削除する
-- **ログオン時の runner 起動**: `LogonType=InteractiveToken`、`RunLevel=HighestAvailable`、
-  `ExecutionTimeLimit=PT0S` のタスクを登録する。runner が service として登録済みの場合は停止する。
-  タスクは `C:\ProgramData\SquirrelNotifier\desktop-runner\Start-DesktopRunner.ps1` を実行する。
-  bootstrap を適用した instance（`launcher.json` の `legacyInstanceId`）では `run.cmd` で永続 runner
-  を起動する。その instance から作った AMI で起動した別 instance では、AMI に残る永続 runner の
-  資格情報（`.runner` / `.credentials` / `.credentials_rsaparams`）を削除し、SSM Parameter Store の
-  `/squirrel-notifier/desktop-e2e/jit/<instance-id>` に JIT config が置かれるのを待って ephemeral
-  runner として起動する（#380）。JIT config は `ACTIONS_RUNNER_INPUT_JITCONFIG` 環境変数で渡し、
-  コマンドライン引数とログには載せない。判定の経過は同じディレクトリの `launcher.log` に残る
-- **セッション維持**: 画面ロック、スクリーンセーバー、スリープ、モニタ電源断、ディスク停止、
-  休止を無効化する
-
-出力は適用したステップとパスワードの出所だけを含む JSON である。パスワードそのものは出力にも
-ログにも残さない。
-
-#### 4. 確認
-
-instance を再起動し、RDP を使わずに runner が online になることを確認する。
-
-```powershell
-aws ec2 reboot-instances --region us-east-1 --instance-ids <instance-id>
-gh api repos/scottlz0310/squirrel-notifier/actions/runners --jq '.runners[] | "\(.name) \(.status)"'
-```
-
-**RDP で接続したまま検証しない。** 切断済み session では描画が止まり screenshot と UI Automation が
-破綻し得るため、自動ログオンの console session だけで DesktopSmoke が完走することを確認する。
-
-#### 5. 使い捨て instance 用の AMI と Launch Template（#380）
-
-bootstrap を main で適用し、runner が永続モードで online になることを確認した instance を停止してから
-AMI を作る。AMI と Launch Template の作成は Operator の権限外のため、Admin ロールで実行する。
-
-```powershell
-$env:AWS_PROFILE = 'admin'
-pwsh -File scripts\aws\New-DesktopRunnerImage.ps1 -SourceInstanceId <instance-id>
-pwsh -File scripts\aws\Initialize-DesktopRunnerLaunchTemplate.ps1 -ImageId <出力の imageId> -SubnetId <subnet-id>
-Remove-Item Env:AWS_PROFILE
-```
-
-- AMI と snapshot には `squirrel-notifier:desktop-e2e=runner-image` を付ける。Launch Template は
-  このタグの無い AMI を拒否する
-- Launch Template から起動した instance・volume・ENI には `squirrel-notifier:desktop-e2e=ephemeral-runner`
-  が付く。instance 内から shutdown した場合も terminate され、IMDSv2 を必須にする
-- Security Group は inbound を持たない。runner と SSM Agent は outbound だけで動く
-- **AMI には自動ログオンの資格情報（LSA secret）と永続 runner の資格情報が含まれる。AMI と snapshot を
-  共有・公開しない。** 永続 runner の資格情報は、使い捨て instance の起動時に `Start-DesktopRunner.ps1`
-  が削除する
-- AMI を作り直したら `Initialize-DesktopRunnerLaunchTemplate.ps1` を再実行する。default version の
-  中身が変わる場合だけ新しい version を作り、default にする
-
-#### 6. workflow の OIDC ロール（#380）
-
-workflow が GitHub OIDC で引き受けるロール（`DESKTOP_E2E_AWS_ROLE_ARN`）の信頼ポリシーと inline policy を
-適用する。IAM の変更のため Admin ロールで実行する。先に SSM Automation 文書と実行ロールを作り、
-出力された数値 version を OIDC ロールと environment variable に同じ値で設定する。
-Launch Template を更新した場合は、この順で文書とポリシーを更新する。
-
-```powershell
-$env:AWS_PROFILE = 'admin'
-$automation = pwsh -File scripts\aws\Initialize-DesktopE2ELaunchAutomation.ps1 | ConvertFrom-Json
-pwsh -File scripts\aws\Initialize-DesktopE2EOidcRole.ps1 -LegacyInstanceId <instance-id> -AutomationDocumentVersion $automation.documentVersion
-Remove-Item Env:AWS_PROFILE
-```
-
-- 信頼は `desktop-e2e` environment の job だけに限る（sub = `repo:<owner>/<repo>:environment:desktop-e2e`、
-  完全一致）。environment の branch / tag policy（`main` / `v*`）を AWS 側でも効かせるため、
-  `repo:<owner>/<repo>:*` のような前方一致は使わない
-- 既存 instance（`-LegacyInstanceId`）は Start / Stop だけを許可し、terminate は許可しない
-- OIDC ロールには直接 `RunInstances`、`CreateTags`、runner role の `PassRole` を付けない。
-  固定 SSM 文書の確定 version の開始、execution の結果参照、専用 SSM 実行ロールの `PassRole` を許可する。
-  文書は Launch Template の数値 version、`MinCount=MaxCount=1`、追加 block device 指定なしを固定する。
-  実行ロールの起動権限は AMI・root volume・network・タグを制限し、OIDC ロールの直接起動とは分離する。
-  terminate と残った volume の削除は `ephemeral-runner` タグの付いたリソースだけに限る
-- JIT config を置く `/squirrel-notifier/desktop-e2e/jit/*` への Put / Delete を許可する。JIT config は
-  約 4 KB で Standard tier の上限（4,096 バイト）を超えることがあるため、Advanced tier で置く
-- 管理外の inline policy や managed policy が付いていれば警告して出力に列挙する（自動では削除しない）
-
-`-WhatIf` を付けると、読み取りと組み立てだけを行う。適用前に Launch Template、Automation 文書、
-管理外のポリシーを確認できる。
-
-#### 7. 使い捨て runner の回収（#380）
-
-使い捨て instance の後始末は、desktop E2E workflow の cleanup（`if: always()`）が行う。runner の障害や
-cleanup 自体の失敗に備え、`desktop-e2e-reaper.yml` は 1 時間ごとの schedule と手動実行を定義する。
-schedule の起動は実環境で調査中のため、定義があることだけで回収済みとは扱わない。
-
-- `ephemeral-runner` タグの instance のうち、起動から 120 分を超えたものを terminate する
-  （desktop E2E の最長経路と job の待ち時間より長くしてある）
-- terminate した instance と破棄済みの instance の JIT config parameter を削除する。parameter には
-  有効期限ポリシーも付けるため、これは二重の保険になる
-- `ephemeral-runner` タグ付きで未接続の volume を削除する。root の `DeleteOnTermination=false` は
-  IAM の条件で拒否できないため、cleanup と reaper の両方で残存を確認する
-- instance が無くなった使い捨て runner（`squirrel-notifier-ephemeral-<instance-id>`）の登録を削除する。
-  候補は offline で job を実行していないものだけで、削除の直前に instance ID ごとに状態を取り直し、
-  破棄中・破棄済みを確認できたときだけ削除する（一覧の取得後に起動・登録された runner を消さないため）。
-  取り直しが NotFound や空応答のときは、作成直後で Describe に未反映の instance や region の設定違いと
-  見分けられないため残す。名前の形式が違う永続 runner は削除しない。残った登録も含め、使われなかった
-  ephemeral runner は GitHub が 1 日で自動削除する
-- online の使い捨て runner に対応する instance が一覧に無い場合は、一覧の取得が誤っている
-  （region の設定違い、空応答など）として、何も書き込まずに失敗する
-
-instance を回収した run は、回収を済ませたうえで失敗として終わる。cleanup が漏れたことを意味するため、
-対応する desktop E2E run の `cleanup-runner` を調べる。手動実行では `dry_run` を指定すると、書き込まずに
-対象だけを表示する。
-
-```powershell
-gh workflow run desktop-e2e-reaper.yml --ref main -f dry_run=true
-```
-
-public リポジトリの schedule は、リポジトリに 60 日間活動が無いと GitHub が自動で無効化する。
-無効化されていないかを Actions 画面で確認する。instance 内の自動シャットダウン（GitHub に依存しない
-最後の保険）は、次に AMI を作り直すときに追加する。
-
 ## テスト資産の配置契約
 
 cross-process E2E は unit test project から分離し、実装時に次の構成へ揃える。
@@ -477,8 +175,7 @@ tests/e2e/
   決まり、runner が artifact の `versions.json`（`productAssembly`）に記録するため、manifest には
   記録しない。外部コンポーネントを使わない scenario は空の object
   （`{}`）にする。
-- DesktopFull は `requiredComponents` と `requiredDriverSteps` を manifest に定義する。
-  runner は `timeoutSeconds`、`schemaVersion`、`phase`、`id` を検証し、待機時間をこの manifest から
+- runner は `timeoutSeconds`、`schemaVersion`、`phase`、`id` を検証し、待機時間をこの manifest から
   取得する。スクリプト引数による timeout の上書きは許可しない。
 - `id` は artifact と failure record でも同じ値を使用する。
 - fixture のファイル名や本文に実 token、実 user code、実 repository を含めない。
@@ -512,61 +209,17 @@ dummy launcher の境界を実装する。MSI、silent install、配布物の残
   その内容にも従う。
 - GitHub Actions は Renovate 管理下の明示 version または commit SHA を使用する。
 - mcp-resource-subscriber は scenario または E2E 用 version manifest で固定する。
-- Phase 2 の Mcp-Docker、container image、review component は commit SHA と image digest を
-  記録する。
 - `latest` を暗黙取得しない。
 - version mismatch は製品テストを続けず `CONTRACT_VERSION_MISMATCH` で終了する。
-
-DesktopFull の `DESKTOP_E2E_COMPONENT_MANIFEST_JSON`（または同じ内容の
-`DESKTOP_E2E_COMPONENT_MANIFEST_PATH`）は、次の形で固定する。`requiredComponents` にない component、
-`version` または `digest` の欠落、未知の schemaVersion は受け付けない。
-
-```json
-{
-  "schemaVersion": 1,
-  "components": {
-    "mcp-docker": {
-      "version": "<40桁のcommit SHA>",
-      "digest": "sha256:<64桁のimage digest>"
-    },
-    "mcp-gateway": {
-      "version": "<40桁のcommit SHA>",
-      "digest": "sha256:<64桁のimage digest>"
-    },
-    "thread-owl": {
-      "version": "<40桁のcommit SHA>",
-      "digest": "sha256:<64桁のimage digest>"
-    },
-    "mcp-resource-subscriber": {
-      "version": "<SemVer または40桁のcommit SHA>",
-      "digest": "sha256:<64桁のimage digest>"
-    }
-  }
-}
-```
-
-検証済みの version と digest だけを `versions.json` に記録し、manifest 本文や資格情報は artifact へ
-出力しない。
 
 互換性 matrix の更新は依存更新として独立レビュー可能にし、製品コード変更へ混在させない。
 
 ## Secret とテストデータ
 
-### Phase 1
-
 - GitHub Actions secret を使用しない。
 - token に見える固定 dummy marker だけを secret scan 用に使用する。
 - `%LOCALAPPDATA%`、環境変数、command line に実資格情報を置かない。
 - production endpoint への outbound request を許可しない。
-
-### Phase 2
-
-- sandbox 専用資格情報を runner の secret store から環境変数で渡す。
-- token、Authorization header、device code、user code を command line に渡さない。
-- secret 値を assertion message、console、screenshot、artifact 名へ出さない。
-- artifact 作成前に既知の secret と token pattern を scan する。
-- secret scan が失敗した場合は artifact upload を停止し、
-  `SECURITY_SECRET_EXPOSURE` として扱う。
 
 ## 一時領域と cleanup
 
@@ -590,7 +243,7 @@ cleanup は PowerShell の `finally` から必ず実行し、次を順番に処�
 7. process、task、製品登録、ファイルが残っていないことの検証
 
 cleanup が失敗した場合は、元の製品テストが成功していても run を失敗させる。診断 artifact
-を採取する前に削除してはならない。Phase 2 は上記に加えて VM snapshot 復元を必須とする。
+を採取する前に削除してはならない。
 専用 root の削除結果は `cleanup.json` の `runRootRemoved` に記録し、削除失敗時は
 `failure.json` を `CLEANUP_FAILED` として生成する。
 
@@ -613,29 +266,7 @@ artifacts/e2e/<phase>/<scenario-id>/
 - `sanitized.log`: secret scan 済みの統合ログ
 - `cleanup.json`: cleanup 対象ごとの実行結果と残留確認
 
-DesktopFull の `DESKTOP_E2E_FULL_DRIVER` は、次の引数を受け取り、`ResultPath` に機械可読な結果を
-必ず出力する。
-
-```text
--MsiPath <MSI path>
--ArtifactDirectory <scenario artifact directory>
--WindowHandle <main window handle>
--ScenarioManifestPath <desktop-full.json>
--ExpectedOutcome <scenario manifest の expectedOutcome>
--ResultPath <full-driver-result.json>
-```
-
-結果は `schemaVersion: 1`、scenario manifest と同じ `scenarioId` / `expectedOutcome` / `outcome`、
-および `requiredDriverSteps` の全 step が `passed` であることを要求する。不足または不一致は
-`PRODUCT_CONTRACT_MISMATCH` として扱う。artifact scan に失敗した場合は upload を行わず、
-`SECURITY_SECRET_EXPOSURE` の failure record を生成する。
-MSI install と driver process は scenario manifest の `timeoutSeconds` で定義する全体 deadline 内に
-終了し、超過時は `TIMEOUT` として cleanup と failure artifact を実行する。cleanup の MSI uninstall
-には、artifact を残すための独立した上限を設ける。
-
 Phase 1 の成功時は job summary と `versions.json` だけを残し、失敗時 artifact は 14 日保持する。
-Phase 2 は screenshot、必要に応じて動画、Windows Event Log、component log を加える。
-`workflow_dispatch` は 14 日、release 前実行は 90 日保持する。定期実行用の retention は設けない。
 
 artifact は成功判定の正本にしない。workflow の exit code と `result.json` が一致しない場合は
 `TEST_HARNESS_FAILED` とする。
@@ -662,16 +293,15 @@ artifact は成功判定の正本にしない。workflow の exit code と `resu
 
 | Category | 意味 | 所有先 |
 |---|---|---|
-| `INFRA_RUNNER_FAILED` | runner、VM、desktop session、disk 等の基盤障害 | runner 管理 |
+| `INFRA_RUNNER_FAILED` | runner、disk 等の基盤障害 | runner 管理 |
 | `DEPENDENCY_ACQUISITION_FAILED` | SDK、tool、固定 artifact の取得失敗 | CI / dependency 管理 |
 | `CONTRACT_VERSION_MISMATCH` | version pin または公開 CLI / payload 契約の不一致 | 対象 component |
 | `TEST_HARNESS_FAILED` | fixture、fake endpoint、assertion harness 自体の欠陥 | squirrel-notifier E2E |
 | `PRODUCT_BUILD_FAILED` | publish、MSI、bundle の生成失敗 | squirrel-notifier |
 | `PRODUCT_INSTALL_FAILED` | install、launch、uninstall の製品不具合 | squirrel-notifier |
 | `PRODUCT_CONTRACT_MISMATCH` | 状態、error classification、通知モデル、launcher 引数の不一致 | squirrel-notifier |
-| `PRODUCT_UI_FAILED` | WinUI、tray、browser を含む Phase 2 の不一致 | squirrel-notifier |
 | `SECURITY_SECRET_EXPOSURE` | log、settings、screenshot、artifact への機密値露出 | 該当 component / harness |
-| `CLEANUP_FAILED` | process、task、製品登録、file、VM の残留 | harness / runner 管理 |
+| `CLEANUP_FAILED` | process、task、製品登録、file の残留 | harness / runner 管理 |
 | `TIMEOUT` | scenario 固有 timeout の超過 | 記録した component |
 
 `INFRA_RUNNER_FAILED` であっても自動 retry はしない。再実行の判断は artifact と runner
@@ -714,8 +344,6 @@ preflight し、不足時は途中まで実行せず明確な failure reason を
 5. Phase 1 は同じ commit と scenario をローカル entrypoint で 1 回再現する。
 6. dependency contract の不一致は owning repository の Issue へ切り出し、Squirrel Notifier 側で
    独自互換 hack を追加しない。
-7. Phase 2 の runner 障害は VM snapshot と runner image を修復し、製品変更と同じ PR に
-   混在させない。
 
 ## Required check への昇格条件
 
@@ -731,14 +359,11 @@ Phase 1 を required check にするには、次をすべて満たす。
 - branch protection へ追加する check 名が固定されている。
 - rollback 手順と一時的に required から外す判断基準が文書化されている。
 
-導入順は `workflow_dispatch`、release gate とする。Phase 2 は PR required check への昇格対象外で、
-手動検証と release 前 gate のみで運用する。
-
 ## 依存順
 
 ```text
 #219 設計 ─┬─> #221 配布物 E2E ─┐
-           └─> #222 契約 E2E ───┼─> #223 プロセス境界 E2E ─> #224 実デスクトップ E2E
+           └─> #222 契約 E2E ───┼─> #223 プロセス境界 E2E
 #220 CI 最適化 ──────────────────┘
 ```
 
@@ -747,7 +372,6 @@ Phase 1 を required check にするには、次をすべて満たす。
   `distribution-e2e` として既存の headless E2E と並列実行するが、安定性・wall clock の
   実測が完了するまで required にはしない。
 - #223 は #221 / #222 の fixture、artifact、failure reason を再利用する。
-- #224 は Phase 1 が安定し、Mcp-Docker の固定 test stack を利用できる状態で着手する。
 
 ## 非スコープ
 
@@ -766,7 +390,8 @@ Phase 1 を required check にするには、次をすべて満たす。
 - Phase 1 配布物 E2E: #221
 - Phase 1 CLI / gateway / 認証 E2E: #222
 - Phase 1 プロセス境界 E2E: #223
-- Phase 2 実デスクトップ E2E: #224
+- Phase 2 実デスクトップ E2E（撤去済み）: #224 / #426 / #429
+- AI エージェントによるリリース前 E2E: #433
 - 責務境界: #48
 - 全手動レビューサイクル検証: #111
 - 手動 E2E ランブック: #166

@@ -234,7 +234,3 @@ dotnet_naming_style.begins_with_underscore.required_suffix =
 dotnet_naming_style.begins_with_underscore.word_separator =
 dotnet_naming_style.begins_with_underscore.capitalization = camel_case
 
-# SSM Run Command から Windows PowerShell 5.1 で実行するスクリプト。
-# BOM が無いと日本語コメントが ANSI として読まれ構文エラーになる。
-[scripts/aws/*.{ps1,psm1}]
-charset = utf-8-bom
