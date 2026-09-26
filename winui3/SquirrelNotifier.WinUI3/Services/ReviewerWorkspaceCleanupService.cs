@@ -67,10 +67,10 @@ internal sealed class ReviewerWorkspaceCleanupService
             return ReviewerWorkspaceCleanupResult.SkippedReviewerRunning;
         }
 
-        // owner / repo の階層がリンクだと、PR 単位のディレクトリの実体が管理外の場所になるため消さない.
+        // ルート・owner・repo の階層がリンクだと、PR 単位のディレクトリの実体が管理外の場所になるため消さない.
         string? repoDirectory = Path.GetDirectoryName(workspace);
         string? ownerDirectory = Path.GetDirectoryName(repoDirectory);
-        foreach (string? ancestor in new[] { ownerDirectory, repoDirectory })
+        foreach (string? ancestor in new[] { _reviewerRoot, ownerDirectory, repoDirectory })
         {
             if (ancestor is not null && IsReparsePoint(ancestor))
             {
@@ -124,10 +124,18 @@ internal sealed class ReviewerWorkspaceCleanupService
     {
         // イベントから fire-and-forget で呼ばれる終端のため、失敗はここでログへ残し、再試行の対象に残す.
         string target = $"{repository}#{prNumber}";
+
+        // 実行中の判定より前に保留へ登録する。判定の直後に reviewer が終了しても、
+        // 終了時の再試行（RunCompleted）が必ずこの PR を拾えるようにするため.
+        SetPending(repository, prNumber, pending: true);
         try
         {
             ReviewerWorkspaceCleanupResult result = Cleanup(repository, prNumber);
-            SetPending(repository, prNumber, result == ReviewerWorkspaceCleanupResult.SkippedReviewerRunning);
+            if (result != ReviewerWorkspaceCleanupResult.SkippedReviewerRunning)
+            {
+                SetPending(repository, prNumber, pending: false);
+            }
+
             string? message = result switch
             {
                 ReviewerWorkspaceCleanupResult.Deleted => $"完了した PR の reviewer 作業領域を削除しました: {target}",
@@ -141,11 +149,11 @@ internal sealed class ReviewerWorkspaceCleanupService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            SetPending(repository, prNumber, pending: true);
             await _loggingService.WriteAsync($"reviewer 作業領域の削除に失敗しました。reviewer の終了時に再試行します ({target}): {ex.Message}").ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
+            SetPending(repository, prNumber, pending: false);
             await _loggingService.WriteAsync($"reviewer 作業領域の削除対象を特定できません ({target}): {ex.Message}").ConfigureAwait(false);
         }
     }

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Recent review events の巡回で PR がマージ済み・クローズ済みと判明したら、その PR の reviewer 作業領域（`launcher-workspace\reviewer\<owner>\<repo>\<PR 番号>`。clone と一時ファイルを含む）を削除するようにした。削除するのはアプリが PR 単位で作ったディレクトリだけで、同じ PR の reviewer が実行中なら見送り、reviewer の終了時に再試行する（ファイルのロックなどで失敗した場合も同じ）。読み取り専用の git object も削除する。領域内のリンク（symlink / junction）と、作業領域そのものがリンクの場合は、先をたどらずリンク自体だけを消す。owner / repo の階層がリンクの場合は削除しない。Recent review events から外れた PR の片付け（TTL）と手動のクリーンナップは後続（#403）
+- Recent review events の巡回で PR がマージ済み・クローズ済みと判明したら、その PR の reviewer 作業領域（`launcher-workspace\reviewer\<owner>\<repo>\<PR 番号>`。clone と一時ファイルを含む）を削除するようにした。削除するのはアプリが PR 単位で作ったディレクトリだけで、同じ PR の reviewer が実行中なら見送り、reviewer の終了時に再試行する（ファイルのロックなどで失敗した場合も同じ）。読み取り専用の git object も削除する。領域内のリンク（symlink / junction）と、作業領域そのものがリンクの場合は、先をたどらずリンク自体だけを消す。作業領域のルート・owner・repo の階層がリンクの場合は削除しない。Recent review events から外れた PR の片付け（TTL）と手動のクリーンナップは後続（#403）
 - agent-statusline 連携用に、reviewer 起動待ちの PR と実行中のレビューをまとめたサマリ `%LOCALAPPDATA%\SquirrelNotifier\statusline-summary.json`（`schemaVersion: 1`）を書き出すようにした。queue event の受信・reviewer の起動と終了・マージ／クローズ済み PR の自動削除のたびに、一時ファイルからの置換でアトミックに書き出す。起動時は空のサマリを書き出し、終了時は削除する（ファイル不在 = 未起動）。スキーマは `docs/statusline-integration.md` に記載した。実行中レビューの `agent` を出すため、レビューサイクル状態に reviewer のプリセット ID を記録する（#427）
 - desktop E2E の使い捨て EC2 を固定された Launch Template version から 1 台だけ起動する SSM Automation 文書と、専用の最小権限実行ロールを Admin が作成するスクリプトを追加した。Automation 文書の version は後続の OIDC 切り替えで固定する（#380）
 

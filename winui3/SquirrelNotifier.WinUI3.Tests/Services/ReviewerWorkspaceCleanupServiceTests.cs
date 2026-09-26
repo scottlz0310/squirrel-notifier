@@ -132,6 +132,50 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     }
 
     [Fact]
+    public void Cleanup_ShouldRefuse_WhenReviewerRootIsLink()
+    {
+        string outside = CreateOutsideDirectoryWithFile(out string outsideFile);
+        string outsideWorkspace = Path.Combine(outside, "owner", "repo", "1");
+        Directory.CreateDirectory(outsideWorkspace);
+        string linkedRoot = Path.Combine(_tempDirectory, "linked-reviewer-root");
+        Directory.CreateSymbolicLink(linkedRoot, outside);
+        var service = new ReviewerWorkspaceCleanupService(linkedRoot, (_, _) => false, _loggingService);
+
+        Action act = () => service.Cleanup("owner/repo", 1);
+
+        act.Should().Throw<IOException>().WithMessage("*リンク*");
+        Directory.Exists(outsideWorkspace).Should().BeTrue();
+        File.Exists(outsideFile).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CleanupAndLogAsync_ShouldNotLoseRetry_WhenReviewerFinishesRightAfterRunningCheck()
+    {
+        // 実行中と判定した直後（保留の処理より前）に reviewer が終了し、終了時の再試行が走る順序を固定する
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        ReviewerWorkspaceCleanupService? service = null;
+        int calls = 0;
+        service = new ReviewerWorkspaceCleanupService(
+            _reviewerRoot,
+            (_, _) =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    service!.RetryPendingAsync().GetAwaiter().GetResult();
+                    return true;
+                }
+
+                return false;
+            },
+            _loggingService);
+
+        await service.CleanupAndLogAsync("owner/repo", 1);
+
+        Directory.Exists(workspace).Should().BeFalse();
+        service.PendingCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task RetryPendingAsync_ShouldDeleteWorkspaceSkippedWhileReviewerWasRunning()
     {
         string workspace = CreateWorkspace("owner", "repo", 1);
