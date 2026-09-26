@@ -22,6 +22,12 @@ internal static class ReviewerWorkspaceLayout
 
     private const string _scratchDirectoryName = "tmp";
 
+    public static string GetReviewerRoot(string settingsDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(settingsDirectory);
+        return Path.Combine(settingsDirectory, "launcher-workspace", "reviewer");
+    }
+
     // owner-repo-pr のように 1 階層へ連結すると、名前に '-' を含む repository 同士
     // （a-b/c と a/b-c）が衝突するため、owner・repo・PR 番号で階層を分ける。
     // GitHub の owner / repo 名は大文字小文字を区別しないため小文字へ正規化し、同じ PR の

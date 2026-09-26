@@ -17,6 +17,19 @@ internal sealed class ReviewEventsRemovedEventArgs : EventArgs
     public IReadOnlyList<string> EventIds { get; }
 }
 
+internal sealed class PullRequestClosedEventArgs : EventArgs
+{
+    public PullRequestClosedEventArgs(string repository, int prNumber)
+    {
+        Repository = repository;
+        PrNumber = prNumber;
+    }
+
+    public string Repository { get; }
+
+    public int PrNumber { get; }
+}
+
 /// <summary>
 /// Recent review events の PR 状態を確認し、マージ済み・クローズ済みのイベントを片付ける.
 /// 照会は PR 単位にまとめ、未認証 GitHub API のレート制限を消費し尽くさない予算内で行う.
@@ -60,6 +73,11 @@ internal sealed class ReviewEventCleanupCoordinator : IAsyncDisposable
     }
 
     public event EventHandler<ReviewEventsRemovedEventArgs>? EventsRemoved;
+
+    /// <summary>
+    /// 追跡中の PR がマージ済み・クローズ済みと判明したときに発火する（reviewer の作業領域の片付け、#403）.
+    /// </summary>
+    public event EventHandler<PullRequestClosedEventArgs>? PullRequestClosed;
 
     internal int TrackedEventCount
     {
@@ -204,9 +222,14 @@ internal sealed class ReviewEventCleanupCoordinator : IAsyncDisposable
                     continue;
                 }
 
-                if (IsClosed(state) && RemovePullRequestEvents(target.Key))
+                if (IsClosed(state))
                 {
-                    await LogRemovalAsync(target.Repository, target.PrNumber, state).ConfigureAwait(false);
+                    if (RemovePullRequestEvents(target.Key))
+                    {
+                        await LogRemovalAsync(target.Repository, target.PrNumber, state).ConfigureAwait(false);
+                    }
+
+                    await NotifyPullRequestClosedAsync(target.Repository, target.PrNumber).ConfigureAwait(false);
                 }
             }
         }
@@ -319,6 +342,19 @@ internal sealed class ReviewEventCleanupCoordinator : IAsyncDisposable
 
         await _loggingService.WriteAsync(
             $"GitHub API のレート制限に達したため、{FormatLocalTime(resetAt)} まで PR 状態の確認を停止します。イベントは保持します: {exception.Message}").ConfigureAwait(false);
+    }
+
+    private async Task NotifyPullRequestClosedAsync(string repository, int prNumber)
+    {
+        try
+        {
+            PullRequestClosed?.Invoke(this, new PullRequestClosedEventArgs(repository, prNumber));
+        }
+        catch (Exception ex)
+        {
+            // 購読側の失敗で巡回を止めない。失敗は購読側の責務で記録されるが、未処理の例外もここで残す.
+            await _loggingService.WriteAsync($"PR 完了の通知処理に失敗しました ({repository}#{prNumber}): {ex.Message}").ConfigureAwait(false);
+        }
     }
 
     private bool RemovePullRequestEvents(string pullRequestKey)

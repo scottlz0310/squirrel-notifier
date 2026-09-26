@@ -62,6 +62,14 @@ public class ReviewerWorkspaceLayoutTests
     }
 
     [Fact]
+    public void GetReviewerRoot_ShouldBeUnderSettingsDirectory()
+    {
+        string settings = Path.Combine(Path.GetTempPath(), "settings");
+
+        ReviewerWorkspaceLayout.GetReviewerRoot(settings).Should().Be(Path.Combine(settings, "launcher-workspace", "reviewer"));
+    }
+
+    [Fact]
     public void GetScratchDirectory_ShouldBeUnderWorkspace()
     {
         string workspace = Path.Combine(_root, "owner", "repo", "1");

@@ -1414,6 +1414,30 @@ public class ReviewLauncherServiceTests : IDisposable
         raisedCount.Should().Be(1);
     }
 
+    // 作業領域の片付け（#403）は、実行中の reviewer と同じ PR の領域を消さない
+    [Theory]
+    [InlineData("Reviewer", "SCOTTLZ0310/Squirrel-Notifier", 52, true)]
+    [InlineData("Reviewer", "scottlz0310/squirrel-notifier", 53, false)]
+    [InlineData("Reviewer", "scottlz0310/other", 52, false)]
+    [InlineData("Reviewed", "scottlz0310/squirrel-notifier", 52, false)]
+    public async Task IsReviewerRunningFor_ShouldMatchOnlyRunningReviewerPullRequest(
+        string roleName, string repository, int prNumber, bool expectedWhileRunning)
+    {
+        ConfigureSettings();
+        ReviewLauncherService? service = null;
+        bool? whileRunning = null;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(_ => whileRunning = service!.IsReviewerRunningFor(repository, prNumber))
+            .Returns(CreateMockProcess(0, "", "").Object);
+        service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+
+        await service.LaunchAsync(CreateReviewEvent("test-running-for"), Enum.Parse<LauncherRole>(roleName), CancellationToken.None);
+
+        whileRunning.Should().Be(expectedWhileRunning);
+        service.IsReviewerRunningFor(repository, prNumber).Should().BeFalse();
+    }
+
     [Fact]
     public async Task LaunchAsync_ShouldDecodeUtf8BomOutputCorrectly_WithoutLatin1Corruption()
     {
