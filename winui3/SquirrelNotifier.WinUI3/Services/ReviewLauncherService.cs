@@ -197,6 +197,14 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 plan.SessionId?.ToString("D"));
             ProcessStartInfo psi = AgentProcessStartInfoFactory.Create(resolvedPath, args);
             psi.WorkingDirectory = workingDirectory;
+            if (role == LauncherRole.Reviewer)
+            {
+                string scratchDirectory = ReviewerWorkspaceLayout.GetScratchDirectory(workingDirectory);
+                foreach ((string name, string value) in ReviewerWorkspaceLayout.BuildEnvironment(scratchDirectory))
+                {
+                    psi.Environment[name] = value;
+                }
+            }
 
             // Latin1 はバイト値を 1 文字 1 バイトで保存するため、行に分割したうえで実際の
             // エンコーディングを行ごとに判定できる。.cmd / .bat 経路では cmd.exe 自身の

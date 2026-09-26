@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- reviewer の作業ディレクトリを、全 PR 共有の `launcher-workspace\reviewer` から PR 単位の `launcher-workspace\reviewer\<owner>\<repo>\<PR 番号>` へ変更した。reviewer プロセスには、その配下の `tmp` を `TEMP` / `TMP` と `SQUIRREL_REVIEW_SCRATCH_DIR` で渡す。これにより、レビューごとに `%TEMP%` へ残っていた clone の置き場所が、アプリの管理するディレクトリ配下にそろう。owner / repo は小文字へ正規化するので、同じ PR の re-review では同じディレクトリになり、session を再開できる。更新前に保存した reviewer の session は作業ディレクトリが一致しないため、更新後の初回だけ再開されない。PR 完了時の片付けは後続（#403）
 - desktop E2E の使い捨て runner 起動を SSM Automation の確定 version 経由へ変更した。OIDC ロールから直接 `RunInstances`・起動時 `CreateTags`・runner role の `PassRole` を外し、固定文書の開始・結果参照と専用実行ロールの `PassRole` に限定する。開始直後に Automation execution ID を残し、instance ID が失われた場合は cleanup で復元する。直接起動と永続 instance の terminate は DryRun で拒否を確認する（#380）
 - 開発者用 IAM ユーザーの権限に、Admin が作った AMI・Launch Template・Security Group・IAM ロールを検証するための読み取りを加えた。EC2 は `ec2:Describe*`、IAM は本プロジェクトのロール・instance profile・GitHub OIDC provider に限った参照と `SimulatePrincipalPolicy` で、IAM の変更系は引き続き持たせない。EC2 instance の on-demand 作成・破棄へ移行する準備（#380）
 - desktop E2E runner のログオンタスクが `run.cmd` を直接起動せず、`scripts/aws/Start-DesktopRunner.ps1` を経由するようにした。bootstrap を適用した instance では従来どおり永続 runner を起動し、その instance から作った AMI で起動した使い捨て instance では、AMI に残る永続 runner の資格情報を削除したうえで SSM Parameter Store の JIT config を待って ephemeral runner として起動する。EC2 instance の on-demand 作成・破棄へ移行する準備（#380）
