@@ -46,7 +46,7 @@ jobs:
           fetch-depth: 1
 
       - name: Configure AWS credentials with OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ vars.DESKTOP_E2E_AWS_REGION }}
           role-to-assume: ${{ vars.DESKTOP_E2E_AWS_ROLE_ARN }}
