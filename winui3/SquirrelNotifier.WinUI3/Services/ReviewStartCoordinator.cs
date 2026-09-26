@@ -301,7 +301,10 @@ internal sealed class ReviewStartCoordinator
             ReviewStartLaunch launch = new(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor);
             if (role == LauncherRole.Reviewer && _reviewCycleCoordinator is not null)
             {
-                await _reviewCycleCoordinator.MarkReviewerStartedAsync(reviewEvent, launch);
+                await _reviewCycleCoordinator.MarkReviewerStartedAsync(
+                    reviewEvent,
+                    launch,
+                    settings.ReviewerLauncherPresetId);
             }
 
             return ReviewStartResult.Launched(launch);

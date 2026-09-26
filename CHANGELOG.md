@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- agent-statusline 連携用に、reviewer 起動待ちの PR と実行中のレビューをまとめたサマリ `%LOCALAPPDATA%\SquirrelNotifier\statusline-summary.json`（`schemaVersion: 1`）を書き出すようにした。queue event の受信・reviewer の起動と終了・マージ／クローズ済み PR の自動削除のたびに、一時ファイルからの置換でアトミックに書き出す。起動時は空のサマリを書き出し、終了時は削除する（ファイル不在 = 未起動）。スキーマは `docs/statusline-integration.md` に記載した。実行中レビューの `agent` を出すため、レビューサイクル状態に reviewer のプリセット ID を記録する（#427）
 - desktop E2E の使い捨て EC2 を固定された Launch Template version から 1 台だけ起動する SSM Automation 文書と、専用の最小権限実行ロールを Admin が作成するスクリプトを追加した。Automation 文書の version は後続の OIDC 切り替えで固定する（#380）
 
 - リポジトリスコープの MCP サーバー設定 `.mcp.json` を追加した。desktop E2E runner の EC2 / SSM を扱うために AWS MCP Server（`mcp-proxy-for-aws-cli` 経由）を `aws` として定義する。認証はローカルの AWS プロファイルへ委ね、リポジトリにシークレットは置かない。end of development の `awslabs.aws-api-mcp-server` ではなく後継を採用した

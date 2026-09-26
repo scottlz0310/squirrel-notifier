@@ -148,7 +148,8 @@ public sealed class ReviewCycleStoreTests : IDisposable
             null,
             null,
             _initialTime,
-            ["event-opened"]);
+            ["event-opened"],
+            "claude");
 
     private string GetCyclesPath() => Path.Combine(_cyclesDirectory, "review-cycles.json");
 

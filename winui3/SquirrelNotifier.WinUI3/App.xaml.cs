@@ -28,6 +28,7 @@ public partial class App : Application
     private readonly ReviewRegistrationService _reviewRegistrationService;
     private readonly RateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitFileService _rateLimitFileService;
+    private readonly StatuslineSummaryService _statuslineSummaryService;
 
     public App()
     {
@@ -58,6 +59,11 @@ public partial class App : Application
         _reviewCycleCoordinator = new ReviewCycleCoordinator(
             new ReviewCycleStore(_settingsService.SettingsDirectory),
             _loggingService);
+        _statuslineSummaryService = new StatuslineSummaryService(
+            _settingsService.SettingsDirectory,
+            _reviewCycleCoordinator,
+            _reviewEventCleanupCoordinator,
+            _loggingService);
         var enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
         _reviewRegistrationService = new ReviewRegistrationService(_subscriptionService, enqueueReviewService);
         _rateLimitReminderService = new RateLimitReminderService(_notificationService);
@@ -82,12 +88,14 @@ public partial class App : Application
 
         Program.Reactivated += OnReactivated;
 
+        _ = _statuslineSummaryService.StartAsync();
         _subscriptionService.Start();
     }
 
     private async void OnWindowClosed(object sender, WindowEventArgs args)
     {
         Program.Reactivated -= OnReactivated;
+        await _statuslineSummaryService.ShutdownAsync().ConfigureAwait(false);
         await _subscriptionService.DisposeAsync().ConfigureAwait(false);
         await _reviewEventCleanupCoordinator.DisposeAsync().ConfigureAwait(false);
         _pullRequestStatusClient.Dispose();
