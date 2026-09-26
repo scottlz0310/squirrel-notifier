@@ -119,3 +119,40 @@ Claude Code の `Stop` / `SessionEnd` hook は、ヘッドレス実行後の sna
 2. エージェントを実際に使用し、statusline が一度呼ばれるのを待つ（`%LOCALAPPDATA%\SquirrelNotifier\ratelimit-status\<agentId>.json` が生成されることを確認）
 3. squirrel-notifier の Settings 画面で対象エージェントのチェックボックスを ON にする
 4. 「レートリミット状態」セクションの「更新」を押す
+
+## 逆方向: レビュー・キュー状態のサマリ（#427）
+
+squirrel-notifier は、reviewer 起動待ちの PR と実行中のレビューを statusline 側（agent-statusline 等）が読むためのサマリを書き出す。内部ストアの `review-cycles.json` は公開契約ではないため、statusline 側はこのサマリだけを読む。
+
+```
+%LOCALAPPDATA%\SquirrelNotifier\statusline-summary.json
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-09-26T06:20:00Z",
+  "queue": {
+    "totalWaiting": 1,
+    "items": [
+      { "repository": "scottlz0310/agent-statusline", "prNumber": 24, "round": 1, "reason": "opened" }
+    ]
+  },
+  "activeReviews": [
+    { "repository": "scottlz0310/squirrel-notifier", "prNumber": 403, "round": 2, "agent": "claude" }
+  ]
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `schemaVersion` | `1` 固定。互換性のない変更をするときに上げる |
+| `updatedAt` | 書き出し時刻（UTC、ISO 8601） |
+| `queue.items[]` | reviewer の起動を待っている PR。`reason` は最後に受信した queue event の reason（`opened` / `synchronized` / `re-review-requested`） |
+| `queue.totalWaiting` | `queue.items` の件数 |
+| `activeReviews[]` | reviewer を実行中の PR。`agent` は reviewer スロットのプリセット ID（`claude` / `codex` / `agy` / `custom` 等）。取得できない場合は `null` |
+
+- 書き出しは状態が変わるたびに行う（queue event の受信、reviewer の起動・終了、マージ・クローズ済み PR の自動削除）。`.tmp` に書いてから置換するため、読み取り側が不完全な JSON を読むことはない。
+- 内容は squirrel-notifier の起動後に観測した状態だけで構成する。起動時に空のサマリを書き出し、終了時にファイルを削除する。**ファイルが無いことは squirrel-notifier が起動していないことを表す**。異常終了した場合はファイルが残るため、鮮度が必要な場合は `updatedAt` を見る。
+- reviewer の実行が終了（成功・失敗）した PR はどちらの一覧にも含めない。
+- 読み取り側は `FileShare.Delete` を付けずに開いていても、置換は短い間隔で数回再試行する。読み取りは開いてすぐ閉じる。

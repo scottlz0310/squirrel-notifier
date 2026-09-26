@@ -34,4 +34,5 @@ internal sealed record ReviewCycleState(
     string? ActiveEventId,
     int? ActiveRound,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<string> ProcessedEventIds);
+    IReadOnlyList<string> ProcessedEventIds,
+    string? ActiveAgent = null);

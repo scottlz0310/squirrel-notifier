@@ -102,7 +102,8 @@ internal sealed class ReviewCycleCoordinator
                     reviewerRunning ? existing!.ActiveEventId : null,
                     reviewerRunning ? existing!.ActiveRound ?? existing.Round : null,
                     _timeProvider.GetUtcNow(),
-                    processedEventIds);
+                    processedEventIds,
+                    reviewerRunning ? existing!.ActiveAgent : null);
                 await SaveStateAsync(key, stateToPublish).ConfigureAwait(false);
                 isNewEvent = true;
             }
@@ -134,8 +135,9 @@ internal sealed class ReviewCycleCoordinator
     /// </summary>
     /// <param name="reviewEvent">起動対象のレビューイベント.</param>
     /// <param name="launch">起動した reviewer セッション.</param>
+    /// <param name="agentId">起動した reviewer スロットのプリセット ID.</param>
     /// <returns>起動状態の記録が完了したタスク.</returns>
-    public async Task MarkReviewerStartedAsync(ReviewEvent reviewEvent, ReviewStartLaunch launch)
+    public async Task MarkReviewerStartedAsync(ReviewEvent reviewEvent, ReviewStartLaunch launch, string? agentId = null)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
         ArgumentNullException.ThrowIfNull(launch);
@@ -152,6 +154,7 @@ internal sealed class ReviewCycleCoordinator
                 Status = ReviewCycleStatus.ReviewerRunning,
                 ActiveEventId = reviewEvent.EventId,
                 ActiveRound = state.Round,
+                ActiveAgent = agentId,
                 UpdatedAt = _timeProvider.GetUtcNow(),
             };
             await SaveStateAsync(key, state).ConfigureAwait(false);
@@ -207,6 +210,7 @@ internal sealed class ReviewCycleCoordinator
                     Status = completionStatus,
                     ActiveEventId = null,
                     ActiveRound = null,
+                    ActiveAgent = null,
                     UpdatedAt = _timeProvider.GetUtcNow(),
                 };
                 stateToPublish = completedState;
@@ -217,6 +221,7 @@ internal sealed class ReviewCycleCoordinator
                         Status = ReviewCycleStatus.AwaitingReviewer,
                         ActiveEventId = null,
                         ActiveRound = null,
+                        ActiveAgent = null,
                         UpdatedAt = _timeProvider.GetUtcNow(),
                     }
                     : completedState;

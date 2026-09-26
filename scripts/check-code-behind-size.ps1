@@ -37,7 +37,8 @@ $limits = [ordered]@{
     "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 318
     # #276 の status client / Coordinator の生成と終了時破棄を反映。
     # #257 の ReviewCycleStore / Coordinator の composition root 配線を反映。
-    "winui3/SquirrelNotifier.WinUI3/App.xaml.cs"                     = 113
+    # #427 の statusline サマリ書き出しの生成・起動時書き出し・終了時削除の配線を反映。
+    "winui3/SquirrelNotifier.WinUI3/App.xaml.cs"                     = 121
     # #340 の保留理由を通知の概要文へ渡す引数を反映。
     "winui3/SquirrelNotifier.WinUI3/ReviewNotificationPopup.xaml.cs" = 83
 }

@@ -115,15 +115,18 @@ public sealed class ReviewCycleCoordinatorTests : IDisposable
         AgentExecutionSession session = new(TimeProvider.System);
         await coordinator.MarkReviewerStartedAsync(
             reviewEvent,
-            new ReviewStartLaunch(session, null!, null!, null!));
+            new ReviewStartLaunch(session, null!, null!, null!),
+            "claude");
 
         reviewEvent.CycleStatus.Should().Be(ReviewCycleStatus.ReviewerRunning);
+        (await new ReviewCycleStore(_testDirectory).TryGetAsync("owner/repo", 42))!.ActiveAgent.Should().Be("claude");
         session.Complete(
             success ? AgentExecutionOutcome.Succeeded : AgentExecutionOutcome.Failed,
             new LauncherResult { Success = success });
 
         ReviewCycleState state = await completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         state.Status.Should().Be(Enum.Parse<ReviewCycleStatus>(expectedStatus));
+        state.ActiveAgent.Should().BeNull();
         reviewEvent.CycleStatusLabel.Should().Contain(success ? "結果未確認" : "失敗");
     }
 
