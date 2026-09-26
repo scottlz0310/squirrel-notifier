@@ -222,6 +222,21 @@ public sealed class StatuslineSummaryServiceTests : IDisposable
         await WaitForSummaryAsync(node => node["queue"]!["totalWaiting"]!.GetValue<int>() == 0);
     }
 
+    [Fact]
+    public async Task WaitForSummaryAsync_ShouldRetry_WhenSummaryIsTemporarilyLocked()
+    {
+        // 置き換えと読み取りの競合（#438）を、読み取り中のロックで再現する
+        await File.WriteAllTextAsync(SummaryPath, """{"queue":{"totalWaiting":1}}""");
+        await using var locked = new FileStream(SummaryPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        Task<JsonNode> waiting = WaitForSummaryAsync(node => node["queue"]!["totalWaiting"]!.GetValue<int>() == 1);
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+        waiting.IsCompleted.Should().BeFalse();
+
+        await locked.DisposeAsync();
+
+        (await waiting)["queue"]!["totalWaiting"]!.GetValue<int>().Should().Be(1);
+    }
+
     private StatuslineSummaryService CreateService()
         => new(_testDirectory, _reviewCycleCoordinator, _cleanupCoordinator, _loggingService, _timeProvider);
 
@@ -236,8 +251,18 @@ public sealed class StatuslineSummaryServiceTests : IDisposable
         {
             if (File.Exists(SummaryPath))
             {
-                JsonNode summary = await ReadSummaryAsync();
-                if (predicate(summary))
+                // 書き出しは一時ファイルからの置き換えで、置き換えと読み取りが重なると IOException になる。
+                // 待機中の一時状態として扱い、次の周回で読み直す（#438）.
+                JsonNode? summary = null;
+                try
+                {
+                    summary = await ReadSummaryAsync();
+                }
+                catch (IOException)
+                {
+                }
+
+                if (summary is not null && predicate(summary))
                 {
                     return summary;
                 }
