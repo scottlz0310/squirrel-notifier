@@ -670,12 +670,20 @@ internal static class ReviewEventFlowE2ERunner
         List<string> assertions)
     {
         bool[] matched = new bool[launcherObservations.Count];
-        string expectedWorkingDirectory = Path.GetFullPath(
-            Path.Combine(caseSettingsDirectory, "launcher-workspace", "reviewer"));
+        string reviewerRoot = Path.Combine(caseSettingsDirectory, "launcher-workspace", "reviewer");
 
         foreach (ReviewEvent reviewEvent in reviewEvents)
         {
             string[] expectedArguments = BuildLauncherArguments(reviewEvent);
+
+            // reviewer の作業ディレクトリは PR 単位（#403）。製品の組み立て規則を呼ばずに契約として明示する。
+            // 大文字小文字の正規化は下の OrdinalIgnoreCase 比較では観測できないため、単体テストで固定する.
+            string[] repositoryParts = reviewEvent.Repository.Split('/');
+            string expectedWorkingDirectory = Path.GetFullPath(Path.Combine(
+                reviewerRoot,
+                repositoryParts[0],
+                repositoryParts[1],
+                reviewEvent.PrNumber.ToString(CultureInfo.InvariantCulture)));
             int matchingIndex = -1;
             for (int index = 0; index < launcherObservations.Count; index++)
             {

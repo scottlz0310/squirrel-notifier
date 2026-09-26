@@ -131,7 +131,7 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedPsi.Should().NotBeNull();
         capturedPsi!.FileName.Should().Contain("launcher-cmd");
         capturedPsi.ArgumentList.Should().Contain("--launcher-arg");
-        capturedPsi.WorkingDirectory.Should().Be(Path.Combine(_tempDir, "launcher-workspace", "reviewer"));
+        capturedPsi.WorkingDirectory.Should().Be(Path.Combine(_tempDir, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "52"));
         Directory.Exists(capturedPsi.WorkingDirectory).Should().BeTrue();
         mockProcess.Verify(p => p.Dispose(), Times.Once);
     }
@@ -346,9 +346,24 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedPsi.Should().NotBeNull();
         capturedPsi!.FileName.Should().Contain(expectedCmd);
         string expectedWorkingDirectory = role == LauncherRole.Reviewer
-            ? Path.Combine(_tempDir, "launcher-workspace", "reviewer")
+            ? Path.Combine(_tempDir, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "52")
             : Path.Combine(_tempDir, "checkouts", "squirrel-notifier");
         capturedPsi.WorkingDirectory.Should().Be(expectedWorkingDirectory);
+
+        // 一時領域の付け替えは reviewer だけに行い、reviewed は利用者の checkout と環境をそのまま使う（#403）
+        string scratchDirectory = Path.Combine(expectedWorkingDirectory, "tmp");
+        if (role == LauncherRole.Reviewer)
+        {
+            capturedPsi.Environment["TEMP"].Should().Be(scratchDirectory);
+            capturedPsi.Environment["TMP"].Should().Be(scratchDirectory);
+            capturedPsi.Environment[ReviewerWorkspaceLayout.ScratchDirectoryEnvironmentVariable].Should().Be(scratchDirectory);
+            Directory.Exists(scratchDirectory).Should().BeTrue();
+        }
+        else
+        {
+            capturedPsi.Environment.Should().NotContainKey(ReviewerWorkspaceLayout.ScratchDirectoryEnvironmentVariable);
+            capturedPsi.Environment["TEMP"].Should().NotBe(scratchDirectory);
+        }
     }
 
     [Fact]
@@ -387,7 +402,7 @@ public class ReviewLauncherServiceTests : IDisposable
 
         result.Success.Should().BeFalse();
         log.Should().Contain("ExitCode=17");
-        log.Should().Contain($"WorkingDirectory={Path.Combine(_tempDir, "launcher-workspace", "reviewer")}");
+        log.Should().Contain($"WorkingDirectory={Path.Combine(_tempDir, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "52")}");
         log.Should().Contain("ResolvedExecutable=");
         log.Should().Contain("ExecutableKind=");
         log.Should().Contain("first failure *** | second failure");
@@ -673,7 +688,7 @@ public class ReviewLauncherServiceTests : IDisposable
             Entry = new SessionResumeEntry(
                 Guid.NewGuid(),
                 "claude",
-                Path.Combine(_tempDir, "launcher-workspace", "reviewer"),
+                Path.Combine(_tempDir, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "52"),
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow),
         };
@@ -816,7 +831,7 @@ public class ReviewLauncherServiceTests : IDisposable
             Entry = new SessionResumeEntry(
                 sessionId,
                 "codex",
-                Path.Combine(_tempDir, "launcher-workspace", "reviewer"),
+                Path.Combine(_tempDir, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "52"),
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow),
         };
@@ -869,7 +884,7 @@ public class ReviewLauncherServiceTests : IDisposable
             Entry = new SessionResumeEntry(
                 sessionId,
                 "claude",
-                Path.Combine(_tempDir, "launcher-workspace", "reviewer"),
+                Path.Combine(_tempDir, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "52"),
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow),
         };
@@ -908,7 +923,7 @@ public class ReviewLauncherServiceTests : IDisposable
             Entry = new SessionResumeEntry(
                 sessionId,
                 "claude",
-                Path.Combine(_tempDir, "launcher-workspace", "reviewer"),
+                Path.Combine(_tempDir, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "52"),
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow),
         };

@@ -207,7 +207,9 @@ internal sealed class SessionResumeStore : ISessionResumeStore
             throw new ArgumentOutOfRangeException(nameof(role), role, "未知の launcher role です。");
         }
 
-        string repository = reviewEvent.Repository.Trim();
+        // GitHub の owner / repo 名は大文字小文字を区別しないため、表記揺れした re-review でも
+        // 同じ session を引けるよう正規化する（ReviewCycleStore のキーと同じ規則。#403）.
+        string repository = reviewEvent.Repository.Trim().ToUpperInvariant();
         return $"{repository}#{reviewEvent.PrNumber}|{role}|{NormalizeAgentId(agentId)}";
     }
 

@@ -35,12 +35,24 @@ public class LauncherWorkingDirectoryResolverTests : IDisposable
     }
 
     [Fact]
-    public void Resolve_ShouldCreateDedicatedReviewerDirectory()
+    public void Resolve_ShouldCreatePrScopedReviewerDirectoryWithScratch()
     {
         string result = _resolver.Resolve(CreateReviewEvent(), LauncherRole.Reviewer);
 
-        result.Should().Be(Path.Combine(_tempDirectory, "launcher-workspace", "reviewer"));
-        Directory.Exists(result).Should().BeTrue();
+        result.Should().Be(Path.Combine(_tempDirectory, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "186"));
+        Directory.Exists(Path.Combine(result, "tmp")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Resolve_ShouldReturnSameReviewerDirectory_ForSamePrRegardlessOfRepositoryCase()
+    {
+        // session 再開は作業ディレクトリの一致を条件にするため、同じ PR の re-review では同じ場所を返す（#403）
+        string first = _resolver.Resolve(CreateReviewEvent(), LauncherRole.Reviewer);
+        string second = _resolver.Resolve(
+            new ReviewEvent { Repository = "ScottLZ0310/Squirrel-Notifier", PrNumber = 186 },
+            LauncherRole.Reviewer);
+
+        second.Should().Be(first);
     }
 
     [Fact]
