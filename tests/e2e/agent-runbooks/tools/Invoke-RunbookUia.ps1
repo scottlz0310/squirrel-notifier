@@ -18,6 +18,7 @@
   -ListId と -ItemText を指定すると、-ListId のリストのうち、項目の文字列が -ItemText の正規表現に
   一致する項目の中から要素を探す（Recent review events のように、同じ AutomationId のボタンが項目ごとにある場合）。
   項目の文字列は、項目内の要素の Name（テキスト・リンク・ボタンの名前）を空白でつないだもの。
+  -Text と -ItemText の正規表現は大文字小文字を区別する（-cmatch）。合否の判定を記載どおりの厳密さにするため。
 
   ボタンの操作に InvokePattern は使わない。UIA だけで reviewer の起動と購読の停止を続けて行うと、
   アプリの UI スレッドが応答しなくなる事象を観測したため（マウス入力では再現しなかった）。
@@ -66,6 +67,48 @@ public static class RunbookMouse
         mouse_event(LeftDown, 0, 0, 0, UIntPtr.Zero);
         mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero);
     }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int maxCount);
+
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint attach, uint attachTo, bool doAttach);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+
+    // 別プロセスからの SetForegroundWindow はフォアグラウンドロックで拒否されうるため、
+    // 現在の前面ウィンドウのスレッドと入力を一時的に結び付けてから前面に出す
+    public static bool BringToFront(IntPtr window)
+    {
+        uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+        uint currentThread = GetCurrentThreadId();
+        bool attached = foregroundThread != currentThread && AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(window);
+            SetForegroundWindow(window);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+
+        return GetForegroundWindow() == window;
+    }
+
+    // 失敗時の証跡用。通知ポップアップはフォーカスを失うと閉じるため、そのときの前面を記録する
+    public static string ForegroundWindow()
+    {
+        IntPtr window = GetForegroundWindow();
+        GetWindowThreadProcessId(window, out uint processId);
+        var title = new System.Text.StringBuilder(256);
+        GetWindowText(window, title, title.Capacity);
+        return processId + " " + title;
+    }
 }
 '@
 [RunbookMouse]::UsePhysicalCoordinates()
@@ -102,7 +145,7 @@ function Find-Element {
             if (-not $list) { continue }
             $items = $list.FindAll($scope::Children, (New-Condition $ae::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem)))
             foreach ($item in $items) {
-                if (((Get-Texts $item) -join ' ') -match $ItemText) {
+                if (((Get-Texts $item) -join ' ') -cmatch $ItemText) {
                     $found = $item.FindFirst($scope::Descendants, $idCondition)
                     if ($found) {
                         $script:MatchedItem = $item
@@ -163,68 +206,101 @@ function Get-Pattern($Element, $Pattern) {
     $result
 }
 
-$element = Wait-Element
-switch ($Action) {
-    'Read' { }
-    'Click' {
-        # 一覧の項目は表示範囲外にあることがあるため、クリック前に項目を表示範囲へ送る
-        $scrollItem = $null
-        if ($script:MatchedItem -and $script:MatchedItem.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$scrollItem)) {
-            $scrollItem.ScrollIntoView()
-            Start-Sleep -Milliseconds 300
-        }
-        if (-not $element.Current.IsEnabled) {
-            throw "AutomationId '$AutomationId' は無効（IsEnabled=False）のため押せません。状態が変わるのを WaitEnabled で待ってから押してください。"
-        }
-        $rect = $element.Current.BoundingRectangle
-        if ($rect.IsEmpty -or $element.Current.IsOffscreen) {
-            throw "AutomationId '$AutomationId' は画面に表示されていません。ウィンドウを前面に出すか、スクロールしてから再実行してください。"
-        }
-        $x = [int]($rect.Left + $rect.Width / 2)
-        $y = [int]($rect.Top + $rect.Height / 2)
-        $hit = $ae::FromPoint([System.Windows.Point]::new($x, $y))
-        if ($hit.Current.ProcessId -ne $ProcessId) {
-            throw "($x, $y) には別プロセス（PID $($hit.Current.ProcessId)）の要素があります。対象のウィンドウを前面に出してから再実行してください。"
-        }
-        [RunbookMouse]::Click($x, $y)
-    }
-    'SetText' {
-        (Get-Pattern $element ([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($Text)
-    }
-    'Select' {
-        (Get-Pattern $element ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)).Expand()
-        Start-Sleep -Milliseconds 300
-        $option = $element.FindFirst($scope::Descendants, (New-Condition $ae::NameProperty $Text))
-        if (-not $option) {
-            throw "AutomationId '$AutomationId' に項目 '$Text' がありません。"
-        }
-        (Get-Pattern $option ([System.Windows.Automation.SelectionItemPattern]::Pattern)).Select()
-        (Get-Pattern $element ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)).Collapse()
-    }
-    { $_ -in 'WaitEnabled', 'WaitDisabled' } {
-        $expected = $Action -eq 'WaitEnabled'
-        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-        while ($element.Current.IsEnabled -ne $expected) {
-            if ((Get-Date) -ge $deadline) {
-                throw "AutomationId '$AutomationId' が $TimeoutSeconds 秒以内に IsEnabled=$expected になりません。"
+try {
+    $element = Wait-Element
+    switch ($Action) {
+        'Read' { }
+        'Click' {
+            # 一覧の項目は表示範囲外にあることがあるため、クリック前に項目を表示範囲へ送る
+            $scrollItem = $null
+            if ($script:MatchedItem -and $script:MatchedItem.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$scrollItem)) {
+                $scrollItem.ScrollIntoView()
+                Start-Sleep -Milliseconds 300
             }
-            Start-Sleep -Milliseconds 500
-            $element = Wait-Element
-        }
-    }
-    'WaitText' {
-        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+            if (-not $element.Current.IsEnabled) {
+                throw "AutomationId '$AutomationId' は無効（IsEnabled=False）のため押せません。状態が変わるのを WaitEnabled で待ってから押してください。"
+            }
+            # 他のウィンドウ（ブラウザや常駐中の既定インスタンスのポップアップなど）が重なっていると押せないため、
+        # 要素のトップレベルウィンドウを前面に出す。常駐インスタンスも同じタイトルなので、タイトルではなく要素から辿る。
+        # 前面に出せなくても、この後のクリック位置の確認で別プロセスなら押さずに止まる
+        $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+        $topLevel = $element
         while ($true) {
-            $state = Get-State $element
-            $haystack = @($state.name, $state.value) + $state.items | Where-Object { $_ }
-            if (($haystack -join "`n") -match $Text) { break }
-            if ((Get-Date) -ge $deadline) {
-                throw "AutomationId '$AutomationId' の文字列が $TimeoutSeconds 秒以内に /$Text/ に一致しません。最後の状態: $($state | ConvertTo-Json -Compress)"
+            $parent = $walker.GetParent($topLevel)
+            if ($null -eq $parent -or $parent -eq $ae::RootElement) { break }
+            $topLevel = $parent
+        }
+        [void][RunbookMouse]::BringToFront([IntPtr]$topLevel.Current.NativeWindowHandle)
+        Start-Sleep -Milliseconds 300
+        $rect = $element.Current.BoundingRectangle
+            if ($rect.IsEmpty -or $element.Current.IsOffscreen) {
+                throw "AutomationId '$AutomationId' は画面に表示されていません。ウィンドウを前面に出すか、スクロールしてから再実行してください。"
             }
-            Start-Sleep -Milliseconds 500
-            $element = Wait-Element
+            $x = [int]($rect.Left + $rect.Width / 2)
+            $y = [int]($rect.Top + $rect.Height / 2)
+            $hit = $ae::FromPoint([System.Windows.Point]::new($x, $y))
+            if ($hit.Current.ProcessId -ne $ProcessId) {
+                throw "($x, $y) には別プロセス（PID $($hit.Current.ProcessId)）の要素があります。対象のウィンドウを前面に出してから再実行してください。"
+            }
+            [RunbookMouse]::Click($x, $y)
+        }
+        'SetText' {
+            (Get-Pattern $element ([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($Text)
+        }
+        'Select' {
+            (Get-Pattern $element ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)).Expand()
+            Start-Sleep -Milliseconds 300
+            $option = $element.FindFirst($scope::Descendants, (New-Condition $ae::NameProperty $Text))
+            if (-not $option) {
+                throw "AutomationId '$AutomationId' に項目 '$Text' がありません。"
+            }
+            (Get-Pattern $option ([System.Windows.Automation.SelectionItemPattern]::Pattern)).Select()
+            (Get-Pattern $element ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)).Collapse()
+        }
+        { $_ -in 'WaitEnabled', 'WaitDisabled' } {
+            $expected = $Action -eq 'WaitEnabled'
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+            while ($element.Current.IsEnabled -ne $expected) {
+                if ((Get-Date) -ge $deadline) {
+                    throw "AutomationId '$AutomationId' が $TimeoutSeconds 秒以内に IsEnabled=$expected になりません。"
+                }
+                Start-Sleep -Milliseconds 500
+                $element = Wait-Element
+            }
+        }
+        'WaitText' {
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+            while ($true) {
+                $state = Get-State $element
+                $haystack = @($state.name, $state.value) + $state.items | Where-Object { $_ }
+                if (($haystack -join "`n") -cmatch $Text) { break }
+                if ((Get-Date) -ge $deadline) {
+                    throw "AutomationId '$AutomationId' の文字列が $TimeoutSeconds 秒以内に /$Text/ に一致しません。最後の状態: $($state | ConvertTo-Json -Compress)"
+                }
+                Start-Sleep -Milliseconds 500
+                $element = Wait-Element
+            }
         }
     }
+}
+catch {
+    # 見つからない・一致しないときも、原因を追えるようにその時点の前面とウィンドウ一覧を証跡に残す
+    if ($EvidencePath) {
+        $windows = @()
+        try { $windows = @(Get-ProcessWindows | ForEach-Object { $_.Current.Name }) } catch { $windows = @("(取得できません: $($_.Exception.Message))") }
+        $failure = [ordered]@{
+            automationId = $AutomationId
+            itemText = $ItemText
+            action = $Action
+            text = $Text
+            error = $_.Exception.Message
+            foregroundWindow = [RunbookMouse]::ForegroundWindow()
+            processWindows = $windows
+            observedAt = (Get-Date).ToUniversalTime().ToString('o')
+        }
+        Add-Content -LiteralPath $EvidencePath -Value ($failure | ConvertTo-Json -Depth 3 -Compress) -Encoding utf8NoBOM
+    }
+    throw
 }
 
 $record = Get-State $element

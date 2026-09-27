@@ -14,12 +14,14 @@ queue のイベントを受信すると、通知ポップアップと Recent rev
 
 ## 手順
 
-1. 環境を起動する（isolated-launch の手順 1 と同じ。`-Scenario review-event-flow`）
-2. **他のウィンドウを操作する前に**、通知ポップアップを読む。ポップアップはフォーカスを失うと閉じる
+1. 環境を起動し、**同じコマンドの中で続けて**手順 2 の読み取りまで行う（isolated-launch の手順 1 と同じ変数を用意する。`-Scenario review-event-flow`）。通知ポップアップはフォーカスを失うと閉じるため、起動から読み取りまでの間に、エージェント自身の画面を含め前面のウィンドウを操作・更新しない
+2. 通知ポップアップを読む。3 件のイベントは同時に届いて並行に処理されるため、どの 1 件が表示されるかは決まっていない。表示は、reason と PR の正しい組のどれかに完全一致しなければならない
 
    ```powershell
-   pwsh -File $uia -ProcessId $run.appProcessId -EvidencePath $ev -Action WaitText -AutomationId TitleText -Text 'third-owner/third-repository#309' -TimeoutSeconds 60
+   pwsh -File $uia -ProcessId $run.appProcessId -EvidencePath $ev -Action WaitText -AutomationId TitleText -TimeoutSeconds 60 -Text '^(opened: fixture-owner/fixture-repository#307|synchronized: second-owner/second-repository#308|re-review-requested: third-owner/third-repository#309)$'
    ```
+
+   見つからずに失敗した場合、`evidence/uia.jsonl` の最後の行に、そのときの前面のウィンドウ（`foregroundWindow`）と、アプリのウィンドウ一覧（`processWindows`）が残る。結果の `flaky` に書き写す
 
 3. Recent review events に 3 件あることを確かめる
 
@@ -50,7 +52,7 @@ queue のイベントを受信すると、通知ポップアップと Recent rev
 
 | 基準 | 証跡 |
 |---|---|
-| 手順 2 のポップアップの `TitleText` が #309 を示す | `evidence/uia.jsonl`（kind: `uia`） |
+| 手順 2 のポップアップの `TitleText` が、`opened: fixture-owner/fixture-repository#307` / `synchronized: second-owner/second-repository#308` / `re-review-requested: third-owner/third-repository#309` のいずれかに完全一致する | `evidence/uia.jsonl`（kind: `uia`） |
 | 手順 3 の `items` に #307 / #308 / #309 の 3 件がある | `evidence/uia.jsonl`（kind: `uia`） |
 | 手順 5 の記録の `arguments` が `["review", "fixture-owner/fixture-repository#307", "opened"]`、`exitCode` が 0、`workingDirectory` が `$run.dataRoot` 配下の `launcher-workspace\reviewer\fixture-owner\fixture-repository\307` | `observations/launcher.jsonl`（kind: `observation`） |
 | 手順 6 の文字列が一致する | `evidence/uia.jsonl`（kind: `uia`） |
