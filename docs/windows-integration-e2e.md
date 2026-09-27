@@ -11,12 +11,13 @@ mcp-gateway、thread-owl、認証、通知購読、WinUI の組み合わせに�
 | Phase | 用途 | Runner | 実行契機 | PR gate |
 |---|---|---|---|---|
 | Phase 1 | 決定的な headless 統合 E2E | GitHub-hosted `windows-2025` | pull request / `workflow_dispatch` | 安定化後に required |
+| エージェントランブック | 実デスクトップの確認（通知ポップアップ、UIA 操作、購読停止中からの登録など） | 利用者の実機（AI エージェントが実行） | リリース前 | リリース準備 PR で `runbook-guard` が結果を検査 |
 
 Phase 1 は外部ネットワークや本番レビュー基盤に依存させない。
 
 self-hosted Windows（AWS EC2）で実デスクトップを動かす Phase 2 は撤去した（#426 / #429）。
-実際の WinUI や既定ブラウザを含む確認は、リリース前に AI エージェントがランブックに沿って
-行う方針とする（#433）。
+実際の WinUI を含む確認は、リリース前に AI エージェントがランブックに沿って行う（#433。
+下記「リリース前の実デスクトップ E2E」）。
 
 本書は Issue #184 の全体設計を定義する。個別実装は #220〜#223 で追跡する。
 
@@ -372,6 +373,24 @@ Phase 1 を required check にするには、次をすべて満たす。
   `distribution-e2e` として既存の headless E2E と並列実行するが、安定性・wall clock の
   実測が完了するまで required にはしない。
 - #223 は #221 / #222 の fixture、artifact、failure reason を再利用する。
+
+## リリース前の実デスクトップ E2E（エージェントランブック）
+
+Phase 2 の後継。AI エージェントが `tests/e2e/agent-runbooks/` のランブックに沿って、利用者の実機でテスト用
+インスタンスを動かす（#433）。手順・合否の基準・結果の形式は同ディレクトリの README とシナリオが正本で、
+ここでは位置づけだけを定める。
+
+- **隔離**: `SQUIRREL_NOTIFIER_DATA_ROOT` でデータディレクトリを run ごとに分け、二重起動判定も root ごとに
+  分ける。購読先は Phase 1 の fake Gateway（`SquirrelNotifier.HeadlessE2E serve-gateway`）、subscriber と
+  launcher は Phase 1 の dummy を使う。後始末で、実データに fixture の痕跡が無いことを検査する
+- **判定**: AutomationId で要素を特定し、UIA の値・ログ・dummy の観測ファイルで合否を決める。ボタンは
+  実際のマウス入力で押す（UIA の InvokePattern だけで操作を続けると UI スレッドが応答しなくなる事象を観測したため）
+- **自己検証の禁止**: 対象リリースを実装したセッションとは別のセッションが実行する
+- **ゲート**: リリース準備 PR（csproj の `<Version>` を上げる PR）で、`runbook-guard.yml` が
+  `results/v<version>.json` を検査する。必須シナリオがすべて pass、テストしたコミットから HEAD までの差分が
+  `results/` だけ、テストしたコミットが base を含むこと（`scripts/Assert-RunbookResult.ps1`）
+- **範囲外**: スリープと復帰（実行中のエージェントのセッションも止まるため）、MSI のインストールとアップグレード
+  （利用者の実インストールと衝突するため。Phase 1 の `distribution-install` が担う）
 
 ## 非スコープ
 

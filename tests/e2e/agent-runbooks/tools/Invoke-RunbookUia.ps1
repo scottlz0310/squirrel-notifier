@@ -72,6 +72,7 @@ public static class RunbookMouse
 
 $ae = [System.Windows.Automation.AutomationElement]
 $scope = [System.Windows.Automation.TreeScope]
+$script:MatchedItem = $null
 
 function New-Condition($Property, $Value) {
     [System.Windows.Automation.PropertyCondition]::new($Property, $Value)
@@ -103,7 +104,10 @@ function Find-Element {
             foreach ($item in $items) {
                 if (((Get-Texts $item) -join ' ') -match $ItemText) {
                     $found = $item.FindFirst($scope::Descendants, $idCondition)
-                    if ($found) { return $found }
+                    if ($found) {
+                        $script:MatchedItem = $item
+                        return $found
+                    }
                 }
             }
         }
@@ -163,6 +167,12 @@ $element = Wait-Element
 switch ($Action) {
     'Read' { }
     'Click' {
+        # 一覧の項目は表示範囲外にあることがあるため、クリック前に項目を表示範囲へ送る
+        $scrollItem = $null
+        if ($script:MatchedItem -and $script:MatchedItem.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$scrollItem)) {
+            $scrollItem.ScrollIntoView()
+            Start-Sleep -Milliseconds 300
+        }
         $rect = $element.Current.BoundingRectangle
         if ($rect.IsEmpty -or $element.Current.IsOffscreen) {
             throw "AutomationId '$AutomationId' は画面に表示されていません。ウィンドウを前面に出すか、スクロールしてから再実行してください。"
