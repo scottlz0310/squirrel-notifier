@@ -28,12 +28,22 @@ function Stop-ProcessTree([int]$Id) {
 Stop-ProcessTree $run.appProcessId
 Stop-ProcessTree $run.gatewayProcessId
 
-# 親が先に終了して孤立した dummy プロセスを、build output のパスで拾って止める
-$leftovers = @(Get-CimInstance Win32_Process | Where-Object {
-        $_.ExecutablePath -and (
-            $_.ExecutablePath -like '*\tests\e2e\fixtures\*' -or
-            $_.ExecutablePath -eq $run.appPath)
-    } | Where-Object { $_.CommandLine -notlike '*--version*' })
+# 親が先に終了して孤立した dummy プロセスを止める。並行する別の run や、同じ build から起動した
+# 別のインスタンスを巻き込まないよう、この run に固有の値（fake Gateway の URL は run ごとにポートが違う、
+# run ディレクトリ）をコマンドラインに含むものだけを対象にする
+# このスクリプトと呼び出し元のシェルもコマンドラインに run ディレクトリを含みうるため、自分と祖先は除く
+$runMarkers = @($run.gatewayUrl.TrimEnd('/'), $run.runDirectory)
+$processes = @(Get-CimInstance Win32_Process)
+$ancestors = [Collections.Generic.HashSet[uint32]]::new()
+$current = [uint32]$PID
+while ($current -and $ancestors.Add($current)) {
+    $current = ($processes | Where-Object ProcessId -eq $current | Select-Object -First 1).ParentProcessId
+}
+$leftovers = @($processes | Where-Object {
+        $commandLine = $_.CommandLine
+        $commandLine -and -not $ancestors.Contains($_.ProcessId) -and
+        @($runMarkers | Where-Object { $commandLine.Contains($_, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+    })
 foreach ($process in $leftovers) {
     Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
 }
