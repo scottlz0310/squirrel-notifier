@@ -1,0 +1,31 @@
+name: Runbook Guard
+
+# リリース準備 PR（csproj の <Version> を上げる PR）に、実デスクトップのランブックの結果があり、
+# リリース対象のコミットで実行されたことを検証する（#433）。changelog-guard と同じ位置づけ。
+# 判定は scripts/Assert-RunbookResult.ps1 に置き、Pester でテストする。
+
+on:
+  pull_request:
+    paths:
+      - 'winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj'
+      - 'tests/e2e/agent-runbooks/**'
+      - '.github/workflows/runbook-guard.yml'
+      - 'scripts/Assert-RunbookResult.ps1'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # テストしたコミットと HEAD の差分、base の取り込みを調べるため、履歴をすべて取得する
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify runbook result for the release version
+        shell: pwsh
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: ./scripts/Assert-RunbookResult.ps1 -HeadSha $env:HEAD_SHA -BaseSha $env:BASE_SHA

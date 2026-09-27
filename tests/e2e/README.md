@@ -67,4 +67,5 @@ headless 境界は #307、#222、#223 のスコープです。`distribution-inst
 ## 実デスクトップの確認
 
 self-hosted Windows（AWS EC2）で実デスクトップを動かす Phase 2 は撤去しました（#426 / #429）。
-実際の WinUI や既定ブラウザを含む確認は、リリース前に AI エージェントがランブックに沿って行う方針です（#433）。
+実際の WinUI を含む確認は、リリース前に AI エージェントが [agent-runbooks](agent-runbooks/README.md) に沿って行います（#433）。
+ランブックの fake Gateway には、headless runner の `serve-gateway` モード（loopback で待ち受け、`--endpoint-file` に URL を書く）を使います。
