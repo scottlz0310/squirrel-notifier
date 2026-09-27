@@ -55,7 +55,7 @@ public sealed class AppDataPathsTests
     [InlineData("   ")]
     public void ResolveSingleInstanceKey_ShouldKeepBaseKeyWhenOverrideIsUnset(string? overrideRoot)
     {
-        string key = AppDataPaths.ResolveSingleInstanceKey(_baseKey, overrideRoot);
+        string key = AppDataPaths.ResolveSingleInstanceKey(_baseKey, overrideRoot, _localAppData);
 
         key.Should().Be(_baseKey);
     }
@@ -66,18 +66,30 @@ public sealed class AppDataPathsTests
     [InlineData(@"D:\e2e\data", @"D:\e2e\run\..\data")]
     public void ResolveSingleInstanceKey_ShouldMatchForSameRoot(string first, string second)
     {
-        string firstKey = AppDataPaths.ResolveSingleInstanceKey(_baseKey, first);
-        string secondKey = AppDataPaths.ResolveSingleInstanceKey(_baseKey, second);
+        string firstKey = AppDataPaths.ResolveSingleInstanceKey(_baseKey, first, _localAppData);
+        string secondKey = AppDataPaths.ResolveSingleInstanceKey(_baseKey, second, _localAppData);
 
         firstKey.Should().Be(secondKey);
         firstKey.Should().MatchRegex($"^{_baseKey}-[0-9a-f]{{16}}$");
     }
 
+    // 既定と同じ root を明示した起動が別キーになると、同じデータを 2 プロセスが共有してしまう
+    [Theory]
+    [InlineData(@"C:\Users\someone\AppData\Local\SquirrelNotifier")]
+    [InlineData(@"c:\users\SOMEONE\appdata\local\squirrelnotifier\")]
+    [InlineData(@"C:\Users\someone\AppData\Local\x\..\SquirrelNotifier")]
+    public void ResolveSingleInstanceKey_ShouldKeepBaseKeyWhenOverrideIsDefaultRoot(string overrideRoot)
+    {
+        string key = AppDataPaths.ResolveSingleInstanceKey(_baseKey, overrideRoot, _localAppData);
+
+        key.Should().Be(_baseKey);
+    }
+
     [Fact]
     public void ResolveSingleInstanceKey_ShouldDifferForDifferentRoots()
     {
-        string firstKey = AppDataPaths.ResolveSingleInstanceKey(_baseKey, @"D:\e2e\data-1");
-        string secondKey = AppDataPaths.ResolveSingleInstanceKey(_baseKey, @"D:\e2e\data-2");
+        string firstKey = AppDataPaths.ResolveSingleInstanceKey(_baseKey, @"D:\e2e\data-1", _localAppData);
+        string secondKey = AppDataPaths.ResolveSingleInstanceKey(_baseKey, @"D:\e2e\data-2", _localAppData);
 
         firstKey.Should().NotBe(secondKey);
     }
@@ -93,13 +105,16 @@ public sealed class AppDataPathsTests
 
         AppDataPaths.Root.Should().Be(expectedRoot);
         AppDataPaths.LogDirectory.Should().Be(Path.Combine(expectedRoot, "logs"));
-        AppDataPaths.SingleInstanceKey(_baseKey).Should().Be(AppDataPaths.ResolveSingleInstanceKey(_baseKey, overrideRoot));
+        AppDataPaths.SingleInstanceKey(_baseKey).Should().Be(AppDataPaths.ResolveSingleInstanceKey(
+            _baseKey,
+            overrideRoot,
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
     }
 
     [Fact]
     public void ResolveSingleInstanceKey_ShouldRejectRelativeOverride()
     {
-        Action act = () => AppDataPaths.ResolveSingleInstanceKey(_baseKey, "data");
+        Action act = () => AppDataPaths.ResolveSingleInstanceKey(_baseKey, "data", _localAppData);
 
         act.Should().Throw<ArgumentException>();
     }
