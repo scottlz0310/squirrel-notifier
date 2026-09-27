@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "version": "0.15.0",
+  "testedCommit": "6f46150df406150b48428b7e6fb022492812ea59",
+  "productVersion": "0.15.0+6f46150df406150b48428b7e6fb022492812ea59",
+  "executedAt": "2026-09-27T08:47:12Z",
+  "executor": {
+    "agent": "claude-code",
+    "model": "claude-opus-5-5",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Windows 11 Pro 10.0.26200",
+    "notes": "PowerShell 7; 常駐インスタンス（PID 24152）を起動したまま実行"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 38,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed."
+        },
+        {
+          "kind": "log",
+          "path": "Get-Process SquirrelNotifier.WinUI3",
+          "summary": "テスト PID 27700 は bin\\x64\\Release の対象 exe、常駐 PID 24152（Programs\\SquirrelNotifier）は別プロセスで稼働継続"
+        },
+        {
+          "kind": "log",
+          "path": "data/",
+          "summary": "dataRoot に settings.json と logs/winui3.log を確認"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true; realSettingsUnchanged=true; findings なし; 残留プロセスなし"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 54,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "停止後 StartButton isEnabled=true、確認ダイアログの PrimaryButton（購読を開始して登録）をクリック、その後 StopButton isEnabled=true"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/subscriber.jsonl",
+          "summary": "mode=call がちょうど1行。--tool enqueue_review、--url=gatewayUrl、--args={\"owner\":\"fixture-owner\",\"repo\":\"fixture-repository\",\"prNumber\":320,\"reason\":\"opened\"}、exitCode=0"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "State: Running（10行目）→ Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened)（12行目）→ enqueue_review call finished. ExitCode=0（13行目）"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true; realSettingsUnchanged=true; 残留プロセスなし"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 56,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "TitleText=opened: fixture-owner/fixture-repository#307"
+        },
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "ReviewEventList に #309 / #308 / #307 の3件。#307 の LaunchReviewerButton クリック後に「#307 ラウンド 1 — reviewer 実行完了（結果未確認）」"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/launcher.jsonl",
+          "summary": "arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectory=dataRoot\\launcher-workspace\\reviewer\\fixture-owner\\fixture-repository\\307"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "Review process finished. ExitCode=0（34行目）と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました（35行目）を確認"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true; realSettingsUnchanged=true; 残留プロセスなし"
+        }
+      ],
+      "flaky": []
+    }
+  ]
+}

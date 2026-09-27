@@ -9,22 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-27
+
+reviewer の作業領域を PR 単位に分けて自動で片付けるようにし、agent-statusline 連携用のサマリを追加したリリースです。EC2 の desktop E2E は撤去し、リリース前の実デスクトップの確認は、AI エージェントが実行するランブックに置き換えました。
+
 ### Added
+
 - テスト: リリース前に AI エージェントが利用者の実機で実行する、実デスクトップ E2E のランブック（`tests/e2e/agent-runbooks/`）を追加した。シナリオは、隔離したデータディレクトリでの起動、イベントの受信から通知ポップアップ・reviewer の起動・レビューサイクルの更新まで、購読停止中からのレビュー登録（#185）の 3 つ。購読先は headless E2E の fake Gateway（`serve-gateway` モードを追加）、subscriber と launcher は dummy を使い、本番の gateway・queue・PR には書き込まない。後始末では、利用者の実データに fixture の痕跡が無いことを検査する。要素は AutomationId で特定し、ボタンは実際のマウス入力で押す。合否は UIA の値・ログ・dummy の観測ファイルで決める。結果は `results/v<version>.json` に記録し、リリース準備 PR で `runbook-guard` ワークフロー（`scripts/Assert-RunbookResult.ps1`）が、必須シナリオがすべて pass であること、実装したセッションとは別のセッションが実行したこと、テストしたコミットから HEAD までの変更が結果だけであること、テストしたコミットが base を含むことを検査する。Claude Code からは `/desktop-e2e-runbook` で呼び出せる（#433）
 - 環境変数 `SQUIRREL_NOTIFIER_DATA_ROOT`（絶対パス）で、設定・ログ・キャッシュ・レビューサイクル・session などを置くデータディレクトリの root を切り替えられるようにした。未設定なら従来どおり `%LOCALAPPDATA%\SquirrelNotifier` を使う。root を切り替えたときは二重起動判定のキーも root ごとに分け、常駐中の既定のインスタンスへ起動が転送されないようにした（既定と同じ root を指定した場合は従来のキーのままにし、同じデータを 2 プロセスで共有しない）。あわせて、シナリオで操作・判定する要素（購読の開始・停止、状態表示、Recent review events と各イベントのボタン、Recent activity、手動開始の入力欄、通知ポップアップ、ライブログウィンドウなど）に `AutomationProperties.AutomationId` を付けた。AI エージェントのランブックで実デスクトップ E2E を行うための前提作業（#433）
 - 設定欄に「reviewer 作業領域: すべて削除」を追加した。reviewer が PR ごとに作った clone と一時ファイルを、確認ダイアログのあとで一括削除する。実行中の PR の領域は残し、削除・見送り・失敗の件数をダイアログとログに出す（#403）
 - reviewer を最後に起動してから 7 日経った reviewer 作業領域を、アプリの起動時と、常駐中は 24 時間ごとに削除するようにした。Recent review events から外れた PR や、アプリの再起動で再試行の保留が失われた PR の領域も回収する。最終起動は、reviewer を起動するたびに作業領域ディレクトリへ記録する更新時刻で判定する。リンクの扱いは PR 完了時の削除と同じ。実行中の PR は、起動時に最終起動が更新されて期限切れではなくなるため、回収では削除も再試行もしない（#403）
 - Recent review events の巡回で PR がマージ済み・クローズ済みと判明したら、その PR の reviewer 作業領域（`launcher-workspace\reviewer\<owner>\<repo>\<PR 番号>`。clone と一時ファイルを含む）を削除するようにした。削除するのはアプリが PR 単位で作ったディレクトリだけで、同じ PR の reviewer が実行中なら見送り、reviewer の終了時に再試行する（ファイルのロックなどで失敗した場合も同じ）。読み取り専用の git object も削除する。領域内のリンク（symlink / junction）と、作業領域そのものがリンクの場合は、先をたどらずリンク自体だけを消す。作業領域のルート・owner・repo の階層がリンクの場合は削除しない。Recent review events から外れた PR の片付け（TTL）と手動のクリーンナップは後続（#403）
 - agent-statusline 連携用に、reviewer 起動待ちの PR と実行中のレビューをまとめたサマリ `%LOCALAPPDATA%\SquirrelNotifier\statusline-summary.json`（`schemaVersion: 1`）を書き出すようにした。queue event の受信・reviewer の起動と終了・マージ／クローズ済み PR の自動削除のたびに、一時ファイルからの置換でアトミックに書き出す。起動時は空のサマリを書き出し、終了時は削除する（ファイル不在 = 未起動）。スキーマは `docs/statusline-integration.md` に記載した。実行中レビューの `agent` を出すため、レビューサイクル状態に reviewer のプリセット ID を記録する（#427）
-- desktop E2E の使い捨て EC2 を固定された Launch Template version から 1 台だけ起動する SSM Automation 文書と、専用の最小権限実行ロールを Admin が作成するスクリプトを追加した。Automation 文書の version は後続の OIDC 切り替えで固定する（#380）
-
-- リポジトリスコープの MCP サーバー設定 `.mcp.json` を追加した。desktop E2E runner の EC2 / SSM を扱うために AWS MCP Server（`mcp-proxy-for-aws-cli` 経由）を `aws` として定義する。認証はローカルの AWS プロファイルへ委ね、リポジトリにシークレットは置かない。end of development の `awslabs.aws-api-mcp-server` ではなく後継を採用した
-- root 資格情報の常用をやめるため、開発者用の IAM ユーザーと Admin ロールを冪等に作成する `scripts/aws/Initialize-DeveloperAccess.ps1` を追加した。`default` プロファイル（AWS MCP Server・エージェント・`scripts/aws`）の権限を desktop E2E runner の操作に限定し、範囲外の作業は MFA 必須の Admin ロールへ切り替える。ポリシーの境界（変更系の操作を runner instance / Run Command ドキュメント / parameter prefix に限定し、IAM の操作を持たせず、ARN へ埋め込む値に wildcard や広すぎる値を受け付けない）と、Admin ロールの作成に失敗したときにユーザーへ権限を残さない書き込み順序を Pester で固定した（#405）
-- desktop E2E の EC2 instance を on-demand 作成・破棄する準備として、既存 instance から AMI を作る `scripts/aws/New-DesktopRunnerImage.ps1` と、inbound の無い Security Group と Launch Template を冪等に作成・更新する `scripts/aws/Initialize-DesktopRunnerLaunchTemplate.ps1` を追加した。AMI・snapshot と、Launch Template から起動した instance・volume・ENI に、OIDC ロールの条件にするタグを付ける。Launch Template は instance 内からの shutdown で terminate し、IMDSv2 を必須にし、UserData を持たない。タグの無い AMI、inbound のある Security Group、NotFound 以外で失敗した Launch Template の存在確認では、何も書き込まずに止まる。中身の組み立てと比較は `DesktopRunnerImage.psm1` に置き、Pester で固定した（#380）
-- desktop E2E workflow が GitHub OIDC で引き受けるロールの信頼ポリシーと inline policy を冪等に適用する `scripts/aws/Initialize-DesktopE2EOidcRole.ps1` を追加した。既存 instance の Start / Stop に加え、使い捨て instance を Launch Template 経由で起動する権限（instance type・subnet・Security Group は Launch Template の default version と同じもの、起動元は `runner-image` タグの付いた自アカウントの AMI と snapshot だけ、Launch Template の値の上書きは `ec2:IsLaunchTemplateResource` で拒否）、起動と同時のタグ付け、`ephemeral-runner` タグの付いた instance だけの terminate、runner role の PassRole、JIT config の parameter への書き込みを許可する。信頼ポリシーを inline policy より先に更新し、読み取りの失敗や前提の欠落では何も書き込まない。ポリシーの組み立ては `DesktopE2EOidcRole.psm1` に置き、権限境界を Pester で固定した（#380）
-- workflow の cleanup から漏れた使い捨て desktop E2E runner を 1 時間ごとに回収する `desktop-e2e-reaper.yml` と `scripts/aws/Invoke-DesktopE2EReaper.ps1` を追加した。起動から 120 分を超えた `ephemeral-runner` タグの instance を terminate し、JIT config parameter と、instance が無くなった使い捨て runner の登録を削除する。runner は offline のものだけを候補にし、削除の直前に instance を取り直して、破棄中・破棄済みを確認できた場合だけ削除する（並行して起動・登録された runner を消さない。NotFound や空応答は作成直後の未反映と見分けられないため削除しない）。online の使い捨て runner に対応する instance が一覧に無ければ、region の設定違いや空応答とみなして何も書き込まずに止まる。永続 instance・永続 runner と job 実行中の runner は対象にしない。instance を回収した run は cleanup の漏れを知らせるため失敗として終わる。回収対象の選定は `DesktopEphemeralRunner.psm1` に置き、Pester で固定した。使い捨て instance を作り始める前に入れる安全網（#380）
-- desktop E2E を使い捨ての EC2 instance で実行するためのスクリプトを追加した（workflow への組み込みは後続）。`scripts/aws/Start-DesktopEphemeralRunner.ps1` は Launch Template の default version で instance を起動し、`ephemeral-runner` タグを確かめて（起動直後の反映待ちは回数を限って再試行する）から run 固有ラベルだけの JIT runner を発行し、JIT config を SSM Parameter Store の Advanced tier（SecureString、有効期限つき、上書きなし）へ一時ファイル経由で置き（一時ファイルを削除できなければ先へ進まない）、 runner の online を待つ。instance ID などは分かった時点で `GITHUB_OUTPUT` に書き、後続の失敗でも cleanup できるようにする。`Stop-DesktopEphemeralRunner.ps1` はタグを確かめてから terminate し、JIT parameter と、job を実行していない runner 登録を削除する。`Test-DesktopE2EOidcBoundary.ps1` は OIDC ロールで DryRun を行い、Launch Template の default version の起動だけが許可され、network interface・block device・instance type の上書きと永続 instance の terminate が拒否されることを、使い捨て instance を作る前に確かめる（判定にならない結果も失敗にする）。aws / gh の呼び出しは `DesktopE2ECli.psm1` にまとめ、reaper もこれを使う。判断は `DesktopEphemeralRunner.psm1` に置き、Pester で固定した（#380）
-- desktop E2E workflow に `runner_mode`（`persistent` / `ephemeral`、既定は `persistent`）を追加し、`Desktop E2E Dispatch` から選べるようにした。`ephemeral` では prepare で OIDC ロールの境界を DryRun で確かめてから Launch Template で使い捨て instance を起動し、この run だけのラベルを持つ JIT runner で E2E を実行し、cleanup で terminate・JIT parameter と runner 登録の削除を行う。Launch Template は environment variable `DESKTOP_E2E_AWS_LAUNCH_TEMPLATE_ID` で指定する。release は引き続き既存 instance（`persistent`）で実行する（#380）
 
 ### Changed
 
@@ -33,26 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - release の publish を desktop E2E（EC2 上の DesktopSmoke）に依存させないようにした。EC2 の desktop E2E は撤去する方針に決めたため（#426）、`desktop-e2e.yml` / `desktop-e2e-dispatch.yml` / `desktop-e2e-reaper.yml` も削除した。代わりに、tag が指すコミットで `ci.yml` の必須ジョブ（`build-and-test` / `headless-e2e` / `distribution-e2e` / `lint`）が成功していることを publish 前に確かめる `verify-ci` ジョブ（`scripts/Assert-CiChecksPassed.ps1`）を追加した。tag push では `ci.yml` が起動しないため。EC2 用のスクリプトと文書の削除、AWS リソースの片付けは後続（#429）
 - テスト: `StatuslineSummaryServiceTests` の待機処理が、summary ファイルの置き換えと読み取りの競合（`IOException`）で失敗しないようにした。待機中の一時状態として扱い、読み直す（#438）
 - reviewer の作業ディレクトリを、全 PR 共有の `launcher-workspace\reviewer` から PR 単位の `launcher-workspace\reviewer\<owner>\<repo>\<PR 番号>` へ変更した。reviewer プロセスには、その配下の `tmp` を `TEMP` / `TMP` と `SQUIRREL_REVIEW_SCRATCH_DIR` で渡す。これにより、レビューごとに `%TEMP%` へ残っていた clone の置き場所が、アプリの管理するディレクトリ配下にそろう。owner / repo は小文字へ正規化するので、同じ PR の re-review では同じディレクトリになる。session の保存キーも repository の大文字小文字を区別しないようにしたので、表記揺れした re-review でも session を再開できる。保存キーと reviewer の作業ディレクトリが変わるため、更新前に保存した session（reviewer / reviewed とも）は更新後の初回だけ再開されない。PR 完了時の片付けは後続（#403）
-- desktop E2E の使い捨て runner 起動を SSM Automation の確定 version 経由へ変更した。OIDC ロールから直接 `RunInstances`・起動時 `CreateTags`・runner role の `PassRole` を外し、固定文書の開始・結果参照と専用実行ロールの `PassRole` に限定する。開始直後に Automation execution ID を残し、instance ID が失われた場合は cleanup で復元する。直接起動と永続 instance の terminate は DryRun で拒否を確認する（#380）
-- 開発者用 IAM ユーザーの権限に、Admin が作った AMI・Launch Template・Security Group・IAM ロールを検証するための読み取りを加えた。EC2 は `ec2:Describe*`、IAM は本プロジェクトのロール・instance profile・GitHub OIDC provider に限った参照と `SimulatePrincipalPolicy` で、IAM の変更系は引き続き持たせない。EC2 instance の on-demand 作成・破棄へ移行する準備（#380）
-- desktop E2E runner のログオンタスクが `run.cmd` を直接起動せず、`scripts/aws/Start-DesktopRunner.ps1` を経由するようにした。bootstrap を適用した instance では従来どおり永続 runner を起動し、その instance から作った AMI で起動した使い捨て instance では、AMI に残る永続 runner の資格情報を削除したうえで SSM Parameter Store の JIT config を待って ephemeral runner として起動する。EC2 instance の on-demand 作成・破棄へ移行する準備（#380）
-- release workflow の publish を desktop E2E（DesktopSmoke）に依存させ、desktop E2E が成功した配布物だけを公開するようにした。release 経路での DesktopSmoke の通過は workflow_dispatch（publish なし）で確認した。DesktopFull への引き上げは引き続き #381 で追跡する
 
 ### Removed
 
 - EC2 の desktop E2E 用のスクリプトと文書を削除した（#429）。`scripts/aws/`、desktop 専用 harness（`Invoke-DesktopE2E.ps1` / `DesktopE2EEvidence.psm1` / `Measure-DesktopE2EStorage.ps1` とそのテスト）、scenario `desktop-smoke` / `desktop-full`、`.mcp.json`（AWS MCP サーバー）、`windows_only_plan/desktop-e2e/`、`docs/windows-integration-e2e.md` の Phase 2 節が対象。実デスクトップの確認は AI エージェントのランブックで行う方針（#433）
-
-### Fixed
-
-- desktop E2E の ephemeral 経路で、`Measure runner storage` step が測定結果を出力した後に exit 1 で失敗し、E2E 本体が実行されなかったのを修正した。測定に使う `docker` / `dotnet` / `wix` の呼び出しが 0 以外で終わると、その値が `$LASTEXITCODE` に残り、GitHub Actions の `shell: pwsh` が step の終了コードにしていた。`Measure-DesktopE2EStorage.ps1` はコマンドごとの終了コードと stderr を storage.json に記録し、失敗を警告として出力したうえで `$LASTEXITCODE` を 0 へ戻す（#380）
-- desktop E2E の ephemeral 経路で、OIDC ロールの境界確認が期待どおりでも `Verify OIDC role boundary` step が失敗していたのを修正した。拒否された DryRun の終了コード（254）が `$LASTEXITCODE` に残り、GitHub Actions の `shell: pwsh` がそれを step の終了コードにしていた。`Invoke-AwsDryRun` は終了コードを戻り値で返した後に `$LASTEXITCODE` を 0 へ戻す（#380）
-- desktop E2E が使い回しの self-hosted runner に残った前回の MSI（例: 0.13.1）を選んでインストールし、`CONTRACT_VERSION_MISMATCH` で失敗していたのを修正した。download / build の前に `release-output` と `artifacts/e2e/desktop` を空にし、MSI はちょうど 1 個を要求する。前回 run の証跡が artifact へ混ざる問題も解消する（#399）
-- desktop E2E の version 不一致失敗で原因を追えなかったのを修正した。失敗メッセージに実際の ProductVersion / FileVersion と参照した実行ファイルを含め、失敗時（cleanup 失敗を含む）は msiexec の install / uninstall ログを runRoot 削除前にサニタイズして artifact（`msi-logs/`）へ退避する。判定と退避は `tests/e2e/scripts/DesktopE2EEvidence.psm1` へ切り出し、Pester で固定した（#397）
-
-### Security
-
-- desktop E2E workflow の OIDC ロールで、使い捨て instance の root volume を要求で変更できたのを修正した。Launch Template が定義しない root volume（AMI の `/dev/sda1`）の容量を変えても `ec2:IsLaunchTemplateResource` は true と評価され、DryRun で 64 GiB → 128 GiB の起動が許可された（実環境の境界確認で検出。使い捨て instance は作られていない）。volume の RunInstances を専用の statement に分け、Launch Template の AMI の root volume の容量・種類を上限とする条件と、IOPS・スループットの上限（キーがある場合）を加えた。上限は `Initialize-DesktopE2EOidcRole.ps1` が AMI の root マッピングから読む。境界確認に volume の種類の変更と volume の追加を加えた。root の `DeleteOnTermination=false` は RunInstances に対応する IAM 条件キーが無く拒否できないため、`ephemeral-runner` タグの volume に限った `ec2:DeleteVolume` を OIDC ロールに加え、cleanup（`Stop-DesktopEphemeralRunner.ps1`）が terminate 後に残る volume を削除し、reaper がどこにも接続されていない使い捨て volume を回収する（回収した run は失敗させる）。境界確認ではこの操作を結果の記録だけにする（#380）
-- desktop E2E workflow の OIDC ロールの信頼条件を、sub の前方一致（`repo:scottlz0310/squirrel-notifier:*`）から `desktop-e2e` environment の完全一致（`repo:scottlz0310/squirrel-notifier:environment:desktop-e2e`）へ絞った。environment を宣言しない任意の branch の job からロールを引き受けられ、environment の branch / tag policy（`main` / `v*`）を AWS 側で素通りできた。適用は `Initialize-DesktopE2EOidcRole.ps1` による（#380）
 
 ## [0.14.0] - 2026-09-22
 
@@ -560,7 +540,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.12.0...v0.13.0

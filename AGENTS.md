@@ -79,8 +79,8 @@ xUnit と FluentAssertions を用いて `winui3/SquirrelNotifier.WinUI3.Tests` �
 ### リリースノート運用
 リリースページの本文は `CHANGELOG.md` を単一の原稿源として機械生成します（`scripts/extract-release-notes.ps1`）。`release.yml` がタグ push 時に該当バージョン節を抽出し、`.github/RELEASE_TEMPLATE.md`（インストール手順・前提条件）と合成して適用します。
 
-- リリース準備 PR では `CHANGELOG.md` に該当バージョン節（`## [x.y.z] - 日付`）を追加し、csproj の `<Version>` と一致させてください（`changelog-guard` ワークフローが PR で検証します）。
-- リリース準備 PR では、実装したセッションとは別のセッションで実デスクトップのランブック（`tests/e2e/agent-runbooks/`）を実行し、結果 `results/vx.y.z.json` だけを追加コミットしてください（`runbook-guard` ワークフローが、必須シナリオの合否と、テストしたコミット以降の変更が結果だけであることを検証します）。
+- リリース準備 PR では `CHANGELOG.md` に該当バージョン節（`## [x.y.z] - 日付`）を追加し、csproj の `<Version>` と一致させてください（`changelog-guard` ワークフローが PR で検証します）。末尾の比較リンク（`[Unreleased]` を `vx.y.z...HEAD` に、`[x.y.z]` を前バージョンとの比較に）も更新してください。
+- リリース準備 PR では、実装したセッションとは別のセッションで実デスクトップのランブック（`tests/e2e/agent-runbooks/`）を実行し、結果 `results/vx.y.z.json` だけを追加コミットしてください（`runbook-guard` ワークフローが、必須シナリオの合否と、テストしたコミット以降の変更が結果だけであることを検証します）。ランブックの実行後に結果以外を直すと再実行が必要になるため、CHANGELOG・version・比較リンクを含むリリース準備の変更は、実行前にすべて済ませてください。
 - 任意で、バージョン見出しの直下に短い導入文（自由文）を書けます。書かれていればリリースページの導入段落になり、無ければ省略されます（強制ではありません）。
 - `### Added` などのセクション名は生成時に日本語へマップされます。箇条書きの体裁は CHANGELOG の記述がそのまま反映されます。
 - リパーパス（旧 WSL-kernel-watcher）前の履歴は `docs/CHANGELOG-archive.md` に分離しています。`CHANGELOG.md` には v0.1.0 以降のみを記載してください。

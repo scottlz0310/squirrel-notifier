@@ -13,7 +13,8 @@ on:
       - 'scripts/Assert-RunbookResult.ps1'
 
 jobs:
-  verify:
+  # changelog-guard の job（verify）と check run の名前で見分けられるよう、別の名前にする
+  verify-runbook:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
