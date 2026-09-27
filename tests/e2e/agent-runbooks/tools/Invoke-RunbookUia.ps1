@@ -72,6 +72,34 @@ public static class RunbookMouse
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int maxCount);
 
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint attach, uint attachTo, bool doAttach);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+
+    // 別プロセスからの SetForegroundWindow はフォアグラウンドロックで拒否されうるため、
+    // 現在の前面ウィンドウのスレッドと入力を一時的に結び付けてから前面に出す
+    public static bool BringToFront(IntPtr window)
+    {
+        uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+        uint currentThread = GetCurrentThreadId();
+        bool attached = foregroundThread != currentThread && AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(window);
+            SetForegroundWindow(window);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+
+        return GetForegroundWindow() == window;
+    }
+
     // 失敗時の証跡用。通知ポップアップはフォーカスを失うと閉じるため、そのときの前面を記録する
     public static string ForegroundWindow()
     {
@@ -193,7 +221,8 @@ try {
                 throw "AutomationId '$AutomationId' は無効（IsEnabled=False）のため押せません。状態が変わるのを WaitEnabled で待ってから押してください。"
             }
             # 他のウィンドウ（ブラウザや常駐中の既定インスタンスのポップアップなど）が重なっていると押せないため、
-        # 要素のトップレベルウィンドウを前面に出す。常駐インスタンスも同じタイトルなので、タイトルではなく要素から辿る
+        # 要素のトップレベルウィンドウを前面に出す。常駐インスタンスも同じタイトルなので、タイトルではなく要素から辿る。
+        # 前面に出せなくても、この後のクリック位置の確認で別プロセスなら押さずに止まる
         $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
         $topLevel = $element
         while ($true) {
@@ -201,7 +230,7 @@ try {
             if ($null -eq $parent -or $parent -eq $ae::RootElement) { break }
             $topLevel = $parent
         }
-        $topLevel.SetFocus()
+        [void][RunbookMouse]::BringToFront([IntPtr]$topLevel.Current.NativeWindowHandle)
         Start-Sleep -Milliseconds 300
         $rect = $element.Current.BoundingRectangle
             if ($rect.IsEmpty -or $element.Current.IsOffscreen) {
