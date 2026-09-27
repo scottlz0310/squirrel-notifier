@@ -29,7 +29,8 @@ $runnerProject = Join-Path $repoRoot 'tests\e2e\SquirrelNotifier.HeadlessE2E\Squ
 $realDataRoot = Join-Path $env:LOCALAPPDATA 'SquirrelNotifier'
 
 function Invoke-Checked([string]$Description, [scriptblock]$Command) {
-    & $Command | Out-Host
+    # 標準出力は run の JSON だけにするため、build の出力は標準エラーへ回す
+    & $Command 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
     if ($LASTEXITCODE -ne 0) {
         throw "$Description に失敗しました（exit $LASTEXITCODE）。"
     }
