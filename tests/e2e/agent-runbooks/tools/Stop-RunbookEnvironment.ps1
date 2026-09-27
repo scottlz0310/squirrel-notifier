@@ -35,9 +35,10 @@ Stop-ProcessTree $run.gatewayProcessId
 $runMarkers = @($run.gatewayUrl.TrimEnd('/'), $run.runDirectory)
 $processes = @(Get-CimInstance Win32_Process)
 $ancestors = [Collections.Generic.HashSet[uint32]]::new()
-$current = [uint32]$PID
-while ($current -and $ancestors.Add($current)) {
-    $current = ($processes | Where-Object ProcessId -eq $current | Select-Object -First 1).ParentProcessId
+$current = $processes | Where-Object ProcessId -eq $PID | Select-Object -First 1
+while ($null -ne $current -and $ancestors.Add($current.ProcessId)) {
+    $parentId = $current.ParentProcessId
+    $current = $processes | Where-Object ProcessId -eq $parentId | Select-Object -First 1
 }
 $leftovers = @($processes | Where-Object {
         $commandLine = $_.CommandLine
