@@ -47,6 +47,11 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
+        if (args.Length > 0 && string.Equals(args[0], FakeGatewayHost.Command, StringComparison.Ordinal))
+        {
+            return await FakeGatewayHost.RunAsync(args[1..]).ConfigureAwait(false);
+        }
+
         DateTimeOffset startedAt = DateTimeOffset.UtcNow;
         RunnerOptions? options = null;
         ScenarioManifest? manifest = null;
