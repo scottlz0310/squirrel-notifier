@@ -29,7 +29,7 @@ $runnerProject = Join-Path $repoRoot 'tests\e2e\SquirrelNotifier.HeadlessE2E\Squ
 $realDataRoot = Join-Path $env:LOCALAPPDATA 'SquirrelNotifier'
 
 function Invoke-Checked([string]$Description, [scriptblock]$Command) {
-    & $Command
+    & $Command | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "$Description に失敗しました（exit $LASTEXITCODE）。"
     }
