@@ -18,6 +18,7 @@
   -ListId と -ItemText を指定すると、-ListId のリストのうち、項目の文字列が -ItemText の正規表現に
   一致する項目の中から要素を探す（Recent review events のように、同じ AutomationId のボタンが項目ごとにある場合）。
   項目の文字列は、項目内の要素の Name（テキスト・リンク・ボタンの名前）を空白でつないだもの。
+  -Text と -ItemText の正規表現は大文字小文字を区別する（-cmatch）。合否の判定を記載どおりの厳密さにするため。
 
   ボタンの操作に InvokePattern は使わない。UIA だけで reviewer の起動と購読の停止を続けて行うと、
   アプリの UI スレッドが応答しなくなる事象を観測したため（マウス入力では再現しなかった）。
@@ -116,7 +117,7 @@ function Find-Element {
             if (-not $list) { continue }
             $items = $list.FindAll($scope::Children, (New-Condition $ae::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem)))
             foreach ($item in $items) {
-                if (((Get-Texts $item) -join ' ') -match $ItemText) {
+                if (((Get-Texts $item) -join ' ') -cmatch $ItemText) {
                     $found = $item.FindFirst($scope::Descendants, $idCondition)
                     if ($found) {
                         $script:MatchedItem = $item
@@ -232,7 +233,7 @@ try {
             while ($true) {
                 $state = Get-State $element
                 $haystack = @($state.name, $state.value) + $state.items | Where-Object { $_ }
-                if (($haystack -join "`n") -match $Text) { break }
+                if (($haystack -join "`n") -cmatch $Text) { break }
                 if ((Get-Date) -ge $deadline) {
                     throw "AutomationId '$AutomationId' の文字列が $TimeoutSeconds 秒以内に /$Text/ に一致しません。最後の状態: $($state | ConvertTo-Json -Compress)"
                 }
