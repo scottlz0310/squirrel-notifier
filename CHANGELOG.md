@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI: `scripts/` の Pester テストのカバレッジを Codecov の `powershell` flag として送るようにした（Cobertura 形式）。既存の project / patch の 80% ゲートは .NET の `unittests` flag だけに掛け、`powershell` flag は当面 informational とする。Pester は `scripts/` を変更したときだけ実行されるため、両 flag を carryforward にし、基準値を残すために main への push でも実行する。Pester テストの拡充は #448（#447）
 - テスト: `changelog-guard.yml` の csproj `<Version>` と CHANGELOG 節の照合と、`reapply-release-notes.yml` の version 入力の検証（x.y.z 形式）を、`scripts/Assert-ChangelogHasVersion.ps1` / `scripts/Assert-ReleaseVersion.ps1` へ切り出して Pester でテストするようにした。workflow の inline に書いた判定は CI で検証されないため。挙動とエラーメッセージは変えていない。`release.yml` の version 抽出は release-automate への移行（#443）で置き換えるため対象外（#384）
 - release の publish を desktop E2E（EC2 上の DesktopSmoke）に依存させないようにした。EC2 の desktop E2E は撤去する方針に決めたため（#426）、`desktop-e2e.yml` / `desktop-e2e-dispatch.yml` / `desktop-e2e-reaper.yml` も削除した。代わりに、tag が指すコミットで `ci.yml` の必須ジョブ（`build-and-test` / `headless-e2e` / `distribution-e2e` / `lint`）が成功していることを publish 前に確かめる `verify-ci` ジョブ（`scripts/Assert-CiChecksPassed.ps1`）を追加した。tag push では `ci.yml` が起動しないため。EC2 用のスクリプトと文書の削除、AWS リソースの片付けは後続（#429）
 - テスト: `StatuslineSummaryServiceTests` の待機処理が、summary ファイルの置き換えと読み取りの競合（`IOException`）で失敗しないようにした。待機中の一時状態として扱い、読み直す（#438）

@@ -15,6 +15,8 @@ coverage:
         threshold: 2%
         informational: false
         if_ci_failed: error
+        flags:
+          - unittests
 
     patch:
       default:
@@ -22,6 +24,8 @@ coverage:
         threshold: 5%
         informational: false
         if_ci_failed: error
+        flags:
+          - unittests
 
   ignore:
     - "**/*.g.cs"
@@ -29,6 +33,19 @@ coverage:
     - "**/obj/**"
     - "**/bin/**"
     - "**/*.Designer.cs"
+
+flag_management:
+  default_rules:
+    carryforward: true
+  individual_flags:
+    - name: powershell
+      paths:
+        - scripts/
+      statuses:
+        - type: project
+          informational: true
+        - type: patch
+          informational: true
 
 comment:
   layout: "reach,diff,flags,tree"
