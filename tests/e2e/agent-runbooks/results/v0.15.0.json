@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "version": "0.15.0",
+  "testedCommit": "ca1d5d756bed91258e78b29deb4d7a93796f32a6",
+  "productVersion": "0.15.0+ca1d5d756bed91258e78b29deb4d7a93796f32a6",
+  "executedAt": "2026-09-27T06:54:42Z",
+  "executor": {
+    "agent": "codex",
+    "model": "GPT-6",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Windows 11 Pro 10.0.26200",
+    "notes": "PowerShell 7.6.6; .NET SDK 10.0.401"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 69,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "StopButton が有効、StatusText が Subscribed."
+        },
+        {
+          "kind": "log",
+          "path": "evidence/processes.json",
+          "summary": "テスト PID 35632 は対象 exe、常駐 PID 24152 とは別プロセス。両方応答あり"
+        },
+        {
+          "kind": "log",
+          "path": "evidence/isolated-files.json",
+          "summary": "隔離領域に settings.json と logs/winui3.log を確認"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true; realSettingsUnchanged=true; 残留プロセスなし"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 19,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "購読停止、PR #320 入力、確認ダイアログ承認後に StopButton が再び有効"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/subscriber.jsonl",
+          "summary": "dummy Gateway に enqueue_review を1回呼び、URL・引数が一致、exitCode=0"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "State: Running が Enqueuing review より前、enqueue_review call finished. ExitCode=0 が後"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true; realSettingsUnchanged=true; 残留プロセスなし"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "fail",
+      "attempts": 2,
+      "durationSeconds": 226,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/retry-summary.json",
+          "summary": "期待する #309 の TitleText は確認できず。1回目は要素未検出、2回目の最終表示は opened: fixture-owner/fixture-repository#307"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/subscriber.jsonl",
+          "summary": "fixture の InitialText (#307/#308) と FinalText (#307/#308/#309) を受信"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "3件のレビューサイクル作成を確認。画面タイトルは #309 に切り替わらず"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "再試行で isolated=true; realSettingsUnchanged=true; 残留プロセスなし"
+        }
+      ],
+      "flaky": [
+        "試行1は TitleText を60秒以内に検出できず、試行2も #309 に一致せず、最後の状態は opened: fixture-owner/fixture-repository#307"
+      ]
+    }
+  ]
+}
