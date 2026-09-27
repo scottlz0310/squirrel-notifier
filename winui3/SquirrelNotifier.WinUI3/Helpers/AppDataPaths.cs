@@ -29,7 +29,10 @@ internal static class AppDataPaths
     public static string LogDirectory => Path.Combine(Root, _logDirectoryName);
 
     public static string SingleInstanceKey(string baseKey)
-        => ResolveSingleInstanceKey(baseKey, Environment.GetEnvironmentVariable(DataRootEnvironmentVariable));
+        => ResolveSingleInstanceKey(
+            baseKey,
+            Environment.GetEnvironmentVariable(DataRootEnvironmentVariable),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 
     internal static string ResolveRoot(string? overrideRoot, string localApplicationData)
     {
@@ -52,8 +55,8 @@ internal static class AppDataPaths
 
     // 上書き時は root ごとに別インスタンスとして扱い、利用者が常駐させている既定のインスタンスへ
     // 起動がリダイレクトされないようにする. 既定の root では従来のキーを変えない.
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1308", Justification = "Windows のパスは大文字小文字を区別しないため、同じ root が同じキーになるよう小文字へ正規化する")]
-    internal static string ResolveSingleInstanceKey(string baseKey, string? overrideRoot)
+    // 既定と同じ root を明示した場合も従来のキーにそろえ、同じデータを 2 プロセスが共有しないようにする.
+    internal static string ResolveSingleInstanceKey(string baseKey, string? overrideRoot, string localApplicationData)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseKey);
         if (string.IsNullOrWhiteSpace(overrideRoot))
@@ -61,10 +64,17 @@ internal static class AppDataPaths
             return baseKey;
         }
 
-        string root = ResolveRoot(overrideRoot, localApplicationData: "unused")
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .ToLowerInvariant();
+        string root = NormalizeForComparison(ResolveRoot(overrideRoot, localApplicationData));
+        if (root == NormalizeForComparison(ResolveRoot(overrideRoot: null, localApplicationData)))
+        {
+            return baseKey;
+        }
+
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(root));
         return string.Create(CultureInfo.InvariantCulture, $"{baseKey}-{Convert.ToHexStringLower(hash)[..16]}");
     }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1308", Justification = "Windows のパスは大文字小文字を区別しないため、同じ root を同じ値へ正規化する")]
+    private static string NormalizeForComparison(string root)
+        => root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToLowerInvariant();
 }
