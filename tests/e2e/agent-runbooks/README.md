@@ -45,7 +45,7 @@ Claude Code 以外のエージェント（Codex / Antigravity など）も、こ
 
 - **ボタンは `-Action Click`（実際のマウス入力）で押す。** UIA の InvokePattern だけで reviewer の起動と購読の停止を続けて行うと、アプリの UI スレッドが応答しなくなる事象を 3 回中 2 回観測した。マウス入力では再現していない。`Click` はクリック位置の要素が対象プロセスのものか確かめてから押すので、同じタイトルの常駐インスタンスを誤って押さない
 - **ウィンドウ全体を子孫まで何度も走査しない。** 一覧の項目は `-ListId` と `-ItemText` で絞って探す
-- **購読の停止は `StatusText` ではなくボタンの状態で判定する。** 停止しても `StatusText` は `Subscribed.` のままになる
+- **購読の状態は `StatusText` ではなくボタンの状態で判定する。** 購読中は `StopButton` が有効、停止中は `StartButton` が有効。起動直後の Starting では両方とも無効なので、`StartButton` が無効になったことを購読中の合図にしない。停止しても `StatusText` は `Subscribed.` のままになる
 - **通知ポップアップはフォーカスを失うと閉じる。** 起動直後、他のウィンドウを操作する前に読む
 - fixture の PR（`fixture-owner/fixture-repository` など）に対して、アプリは GitHub API へ PR 状態を読みに行き 404 を受ける。読み取りだけで、書き込みは起きない
 - 操作のたびに `(Get-Process -Id <pid>).Responding` を確かめ、`False` が 10 秒以上続いたら flaky として記録し、後始末してそのシナリオを再実行する

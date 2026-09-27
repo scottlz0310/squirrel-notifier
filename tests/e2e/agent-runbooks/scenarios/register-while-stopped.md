@@ -38,7 +38,7 @@ required: true
 5. 購読が再開したことを確かめる
 
    ```powershell
-   pwsh -File $uia -ProcessId $run.appProcessId -EvidencePath $ev -Action WaitDisabled -AutomationId StartButton -TimeoutSeconds 30
+   pwsh -File $uia -ProcessId $run.appProcessId -EvidencePath $ev -Action WaitEnabled -AutomationId StopButton -TimeoutSeconds 30
    ```
 
 6. `enqueue_review` の記録を確かめる: `$run.subscriberObservation` のうち `"mode":"call"` の行
@@ -53,7 +53,7 @@ required: true
 |---|---|
 | 手順 2 で `StartButton` が有効になる | `evidence/uia.jsonl`（kind: `uia`） |
 | 手順 4 のダイアログの `PrimaryButton` が見つかり、押せる | `evidence/uia.jsonl`（kind: `uia`） |
-| 手順 5 で `StartButton` が無効になる | `evidence/uia.jsonl`（kind: `uia`） |
+| 手順 5 で `StopButton` が有効になる（購読中） | `evidence/uia.jsonl`（kind: `uia`） |
 | 手順 6 の記録がちょうど 1 行で、`--tool enqueue_review`、`--url` が `$run.gatewayUrl`、`--args` が `{"owner":"fixture-owner","repo":"fixture-repository","prNumber":320,"reason":"opened"}`、`exitCode` が 0 | `observations/subscriber.jsonl`（kind: `observation`） |
 | 手順 7 の順序で行がある | `data/logs/winui3.log`（kind: `log`） |
 | `isolation.json` が `isolated: true` | `evidence/isolation.json`（kind: `isolation`） |

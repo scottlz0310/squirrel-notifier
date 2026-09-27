@@ -173,6 +173,9 @@ switch ($Action) {
             $scrollItem.ScrollIntoView()
             Start-Sleep -Milliseconds 300
         }
+        if (-not $element.Current.IsEnabled) {
+            throw "AutomationId '$AutomationId' は無効（IsEnabled=False）のため押せません。状態が変わるのを WaitEnabled で待ってから押してください。"
+        }
         $rect = $element.Current.BoundingRectangle
         if ($rect.IsEmpty -or $element.Current.IsOffscreen) {
             throw "AutomationId '$AutomationId' は画面に表示されていません。ウィンドウを前面に出すか、スクロールしてから再実行してください。"

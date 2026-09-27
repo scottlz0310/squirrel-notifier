@@ -24,7 +24,7 @@ required: true
 2. 購読が始まるまで待つ
 
    ```powershell
-   pwsh -File $uia -ProcessId $run.appProcessId -EvidencePath $ev -Action WaitDisabled -AutomationId StartButton -TimeoutSeconds 60
+   pwsh -File $uia -ProcessId $run.appProcessId -EvidencePath $ev -Action WaitEnabled -AutomationId StopButton -TimeoutSeconds 60
    pwsh -File $uia -ProcessId $run.appProcessId -EvidencePath $ev -Action WaitText -AutomationId StatusText -Text '^Subscribed' -TimeoutSeconds 60
    ```
 
@@ -42,7 +42,7 @@ required: true
 
 | 基準 | 証跡 |
 |---|---|
-| 手順 2 の `StartButton` が `isEnabled: false`、`StatusText` が `Subscribed.` | `evidence/uia.jsonl`（kind: `uia`） |
+| 手順 2 の `StopButton` が `isEnabled: true`（Starting を過ぎて購読中）、`StatusText` が `Subscribed.` | `evidence/uia.jsonl`（kind: `uia`） |
 | 手順 3 で、テスト用インスタンスが `$run.appPath` から起動している。既定インスタンスがあれば別 PID で動いている | プロセス一覧（kind: `log`、summary に PID と Path） |
 | 手順 4 のファイルがある | ファイル一覧（kind: `log`） |
 | `isolation.json` が `isolated: true`、`realSettingsUnchanged: true` | `evidence/isolation.json`（kind: `isolation`） |
