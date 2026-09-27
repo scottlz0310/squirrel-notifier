@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "version": "0.15.0",
-  "testedCommit": "bf8877d021de15002b9568928fb6c6d273de5c55",
-  "productVersion": "0.15.0+bf8877d021de15002b9568928fb6c6d273de5c55",
-  "executedAt": "2026-09-27T08:06:36Z",
+  "testedCommit": "6f46150df406150b48428b7e6fb022492812ea59",
+  "productVersion": "0.15.0+6f46150df406150b48428b7e6fb022492812ea59",
+  "executedAt": "2026-09-27T08:47:12Z",
   "executor": {
     "agent": "claude-code",
     "model": "claude-opus-5-5",
@@ -18,7 +18,7 @@
       "id": "isolated-launch",
       "result": "pass",
       "attempts": 1,
-      "durationSeconds": 51,
+      "durationSeconds": 38,
       "evidence": [
         {
           "kind": "uia",
@@ -28,7 +28,7 @@
         {
           "kind": "log",
           "path": "Get-Process SquirrelNotifier.WinUI3",
-          "summary": "テスト PID 21848 は bin\\x64\\Release の対象 exe、常駐 PID 24152（Programs\\SquirrelNotifier）は別プロセスで稼働継続"
+          "summary": "テスト PID 27700 は bin\\x64\\Release の対象 exe、常駐 PID 24152（Programs\\SquirrelNotifier）は別プロセスで稼働継続"
         },
         {
           "kind": "log",
@@ -81,7 +81,7 @@
         {
           "kind": "uia",
           "path": "evidence/uia.jsonl",
-          "summary": "TitleText=re-review-requested: third-owner/third-repository#309"
+          "summary": "TitleText=opened: fixture-owner/fixture-repository#307"
         },
         {
           "kind": "uia",
@@ -96,7 +96,7 @@
         {
           "kind": "log",
           "path": "data/logs/winui3.log",
-          "summary": "Review process finished. ExitCode=0 と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました を確認"
+          "summary": "Review process finished. ExitCode=0（34行目）と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました（35行目）を確認"
         },
         {
           "kind": "isolation",
