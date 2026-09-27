@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 環境変数 `SQUIRREL_NOTIFIER_DATA_ROOT`（絶対パス）で、設定・ログ・キャッシュ・レビューサイクル・session などを置くデータディレクトリの root を切り替えられるようにした。未設定なら従来どおり `%LOCALAPPDATA%\SquirrelNotifier` を使う。root を切り替えたときは二重起動判定のキーも root ごとに分け、常駐中の既定のインスタンスへ起動が転送されないようにした（既定と同じ root を指定した場合は従来のキーのままにし、同じデータを 2 プロセスで共有しない）。あわせて、シナリオで操作・判定する要素（購読の開始・停止、状態表示、Recent review events と各イベントのボタン、Recent activity、手動開始の入力欄、通知ポップアップ、ライブログウィンドウなど）に `AutomationProperties.AutomationId` を付けた。AI エージェントのランブックで実デスクトップ E2E を行うための前提作業（#433）
 - 設定欄に「reviewer 作業領域: すべて削除」を追加した。reviewer が PR ごとに作った clone と一時ファイルを、確認ダイアログのあとで一括削除する。実行中の PR の領域は残し、削除・見送り・失敗の件数をダイアログとログに出す（#403）
 - reviewer を最後に起動してから 7 日経った reviewer 作業領域を、アプリの起動時と、常駐中は 24 時間ごとに削除するようにした。Recent review events から外れた PR や、アプリの再起動で再試行の保留が失われた PR の領域も回収する。最終起動は、reviewer を起動するたびに作業領域ディレクトリへ記録する更新時刻で判定する。リンクの扱いは PR 完了時の削除と同じ。実行中の PR は、起動時に最終起動が更新されて期限切れではなくなるため、回収では削除も再試行もしない（#403）
 - Recent review events の巡回で PR がマージ済み・クローズ済みと判明したら、その PR の reviewer 作業領域（`launcher-workspace\reviewer\<owner>\<repo>\<PR 番号>`。clone と一時ファイルを含む）を削除するようにした。削除するのはアプリが PR 単位で作ったディレクトリだけで、同じ PR の reviewer が実行中なら見送り、reviewer の終了時に再試行する（ファイルのロックなどで失敗した場合も同じ）。読み取り専用の git object も削除する。領域内のリンク（symlink / junction）と、作業領域そのものがリンクの場合は、先をたどらずリンク自体だけを消す。作業領域のルート・owner・repo の階層がリンクの場合は削除しない。Recent review events から外れた PR の片付け（TTL）と手動のクリーンナップは後続（#403）

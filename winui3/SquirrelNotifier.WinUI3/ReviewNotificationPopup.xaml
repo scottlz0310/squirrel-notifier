@@ -9,11 +9,11 @@
             BorderThickness="1"
             CornerRadius="8">
         <StackPanel Spacing="12">
-            <TextBlock x:Name="TitleText"
+            <TextBlock x:Name="TitleText" AutomationProperties.AutomationId="TitleText"
                        FontSize="16"
                        FontWeight="SemiBold"
                        TextWrapping="Wrap"/>
-            <TextBlock x:Name="MessageText"
+            <TextBlock x:Name="MessageText" AutomationProperties.AutomationId="MessageText"
                        MaxHeight="120"
                        TextWrapping="Wrap"/>
             <Grid ColumnSpacing="8"
@@ -26,22 +26,24 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <Button x:Name="OpenPrButton"
+                <Button x:Name="OpenPrButton" AutomationProperties.AutomationId="OpenPrButton"
                         HorizontalAlignment="Stretch"
                         Content="PRを開く"
                         Click="OnOpenPrClick"/>
-                <Button x:Name="LaunchReviewButton"
+                <Button x:Name="LaunchReviewButton" AutomationProperties.AutomationId="LaunchReviewButton"
                         Grid.Column="1"
                         HorizontalAlignment="Stretch"
                         Content="レビューする"
                         Style="{StaticResource AccentButtonStyle}"
                         Click="OnLaunchReviewClick"/>
                 <Button Grid.Row="1"
+                        AutomationProperties.AutomationId="OpenAppButton"
                         HorizontalAlignment="Stretch"
                         Content="アプリを開く"
                         Click="OnOpenAppClick"/>
                 <Button Grid.Row="1"
                         Grid.Column="1"
+                        AutomationProperties.AutomationId="DismissPopupButton"
                         HorizontalAlignment="Stretch"
                         Content="閉じる"
                         Click="OnDismissClick"/>

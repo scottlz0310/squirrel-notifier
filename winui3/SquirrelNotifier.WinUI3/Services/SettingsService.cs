@@ -23,7 +23,7 @@ internal sealed class SettingsService
 
     public SettingsService()
         : this(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"),
+            AppDataPaths.Root,
             pnpmBinDir: null)
     {
     }
