@@ -8,8 +8,6 @@ coverage:
   round: down
   range: "70...100"
 
-  # 80% ゲートは .NET（unittests flag）だけに掛ける。PowerShell（powershell flag）は
-  # テストの無いスクリプトが多いため当面 informational とする（#447、拡充は #448）
   status:
     project:
       default:
@@ -36,7 +34,6 @@ coverage:
     - "**/bin/**"
     - "**/*.Designer.cs"
 
-# Pester は scripts/ を変更したときだけ実行されるため、アップロードの無いコミットでは直前の値を引き継ぐ
 flag_management:
   default_rules:
     carryforward: true
