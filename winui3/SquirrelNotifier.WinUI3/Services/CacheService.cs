@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Text.Json;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -13,7 +14,7 @@ internal sealed class CacheService : ICacheService
     private readonly string _tempPath;
 
     public CacheService()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"))
+        : this(AppDataPaths.Root)
     {
     }
 

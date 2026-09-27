@@ -4,6 +4,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
@@ -28,7 +29,7 @@ internal sealed class ReviewCycleStore : IReviewCycleStore
 
     public ReviewCycleStore()
         : this(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelNotifier"),
+            AppDataPaths.Root,
             TimeProvider.System)
     {
     }

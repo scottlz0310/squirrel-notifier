@@ -48,9 +48,9 @@
             <TextBlock Text="Squirrel Notifier"
                        FontSize="20"
                        FontWeight="SemiBold"/>
-            <TextBlock x:Name="StatusText"
+            <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText"
                        Text="Stopped"/>
-            <InfoBar x:Name="OnboardingInfoBar"
+            <InfoBar x:Name="OnboardingInfoBar" AutomationProperties.AutomationId="OnboardingInfoBar"
                      Title="自動起動が未設定です"
                      Message="設定の「自動起動」を有効にすると、ログイン時にバックグラウンドで動作を開始します。"
                      Severity="Warning"
@@ -61,7 +61,7 @@
                     <Button Content="設定へ移動" Click="OnGoToSettingsClick"/>
                 </InfoBar.ActionButton>
             </InfoBar>
-            <InfoBar x:Name="AuthRequiredInfoBar"
+            <InfoBar x:Name="AuthRequiredInfoBar" AutomationProperties.AutomationId="AuthRequiredInfoBar"
                      Title="mcp-gateway の認証が必要です"
                      Message="mcp-gateway への認証が完了していないため、通知の購読やレビュー登録が失敗します。「mcp-gateway にログイン」で device flow 認証を開始してください。"
                      Severity="Error"
@@ -88,10 +88,10 @@
                 <TextBlock Text="レビューを手動開始" FontWeight="SemiBold"/>
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                     <TextBox Grid.Column="0"
-                             x:Name="PrReferenceBox"
+                             x:Name="PrReferenceBox" AutomationProperties.AutomationId="PrReferenceBox"
                              AutomationProperties.Name="PR URL または owner/repo#123"
                              PlaceholderText="https://github.com/owner/repo/pull/123 または owner/repo#123"/>
-                    <ComboBox Grid.Column="1" x:Name="ReasonComboBox" MinWidth="180"
+                    <ComboBox Grid.Column="1" x:Name="ReasonComboBox" AutomationProperties.AutomationId="ReasonComboBox" MinWidth="180"
                               AutomationProperties.Name="レビュー開始理由（reason）"/>
                     <Button Grid.Column="2" x:Name="EnqueueReviewButton"
                             AutomationProperties.AutomationId="EnqueueReviewButton"
@@ -129,10 +129,10 @@
                               ColumnSpacing="8"
                               Margin="0,8,0,8">
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Command Path:" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="CommandPathBox" TextChanged="OnSettingChanged"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="CommandPathBox" AutomationProperties.AutomationId="CommandPathBox" TextChanged="OnSettingChanged"/>
 
                             <TextBlock Grid.Row="1" Grid.Column="0" Text="Arguments:" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="ArgumentsBox" TextChanged="OnSettingChanged"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="ArgumentsBox" AutomationProperties.AutomationId="ArgumentsBox" TextChanged="OnSettingChanged"/>
 
                             <Grid Grid.Row="2" Grid.ColumnSpan="2" RowDefinitions="Auto,Auto"
                                   ColumnDefinitions="Auto,*" RowSpacing="4" ColumnSpacing="8">
@@ -175,10 +175,10 @@
                                       SelectionChanged="OnReviewerPresetSelectionChanged"/>
 
                             <TextBlock Grid.Row="6" Grid.Column="0" Text="Reviewer Path:" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="6" Grid.Column="1" x:Name="ReviewerPathBox" TextChanged="OnSettingChanged"/>
+                            <TextBox Grid.Row="6" Grid.Column="1" x:Name="ReviewerPathBox" AutomationProperties.AutomationId="ReviewerPathBox" TextChanged="OnSettingChanged"/>
 
                             <TextBlock Grid.Row="7" Grid.Column="0" Text="Reviewer Args:" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="7" Grid.Column="1" x:Name="ReviewerArgumentsBox" TextChanged="OnSettingChanged"/>
+                            <TextBox Grid.Row="7" Grid.Column="1" x:Name="ReviewerArgumentsBox" AutomationProperties.AutomationId="ReviewerArgumentsBox" TextChanged="OnSettingChanged"/>
 
                             <TextBlock Grid.Row="8" Grid.Column="0" Text="Reviewer Resume Args:" VerticalAlignment="Top" Margin="0,4,0,0"/>
                             <StackPanel Grid.Row="8" Grid.Column="1" Spacing="2">
@@ -334,7 +334,7 @@
                         <TextBlock Text="Recent review events"
                                    FontWeight="SemiBold"
                                    Margin="0,0,0,4"/>
-                        <ListView Grid.Row="1" x:Name="ReviewEventList"
+                        <ListView Grid.Row="1" x:Name="ReviewEventList" AutomationProperties.AutomationId="ReviewEventList"
                                    SelectionMode="None">
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="models:ReviewEvent">
@@ -354,6 +354,7 @@
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                             <SplitButton Content="レビューする"
+                                                         AutomationProperties.AutomationId="LaunchReviewerButton"
                                                          AutomationProperties.Name="reviewer としてレビューを起動"
                                                          Click="OnLaunchReviewerClick"
                                                          CommandParameter="{x:Bind}">
@@ -366,6 +367,7 @@
                                                 </SplitButton.Flyout>
                                             </SplitButton>
                                             <SplitButton Content="レビューに対応"
+                                                         AutomationProperties.AutomationId="LaunchReviewedButton"
                                                          Visibility="{Binding Source={StaticResource ReviewEventActions}, Path=ReviewedActionVisibility, Mode=OneWay}"
                                                          AutomationProperties.Name="reviewed としてレビュー対応を起動"
                                                          Click="OnLaunchReviewedClick"
@@ -379,6 +381,7 @@
                                                 </SplitButton.Flyout>
                                             </SplitButton>
                                             <Button AutomationProperties.Name="イベントを片付ける"
+                                                    AutomationProperties.AutomationId="DismissEventButton"
                                                     ToolTipService.ToolTip="このイベントを一覧から片付ける"
                                                     Click="OnDismissEventClick"
                                                     CommandParameter="{x:Bind}"
@@ -401,7 +404,7 @@
                         <TextBlock Text="Recent activity"
                                    FontWeight="SemiBold"
                                    Margin="0,0,0,4"/>
-                        <ListView Grid.Row="1" x:Name="LogList"
+                        <ListView Grid.Row="1" x:Name="LogList" AutomationProperties.AutomationId="LogList"
                                   SelectionMode="None">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
@@ -419,9 +422,9 @@
                     Orientation="Horizontal"
                     Spacing="8"
                     VerticalAlignment="Center">
-            <Button x:Name="StartButton" Content="購読を開始" Click="OnStartClick"/>
-            <Button x:Name="StopButton" Content="購読を停止" Click="OnStopClick"/>
-            <Button x:Name="RetryButton" Content="再試行" Click="OnRetryClick"/>
+            <Button x:Name="StartButton" AutomationProperties.AutomationId="StartButton" Content="購読を開始" Click="OnStartClick"/>
+            <Button x:Name="StopButton" AutomationProperties.AutomationId="StopButton" Content="購読を停止" Click="OnStopClick"/>
+            <Button x:Name="RetryButton" AutomationProperties.AutomationId="RetryButton" Content="再試行" Click="OnRetryClick"/>
             <Button Content="Open log folder" Click="OnOpenLogFolder"/>
             <Button Content="Minimize to tray" Click="OnExit"/>
         </StackPanel>

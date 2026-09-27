@@ -7,6 +7,7 @@ using System.Threading;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
+using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Services;
 
 namespace SquirrelNotifier.WinUI3;
@@ -73,7 +74,7 @@ internal static class Program
     private static bool DecideRedirection()
     {
         AppActivationArguments activationArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
-        AppInstance mainInstance = AppInstance.FindOrRegisterForKey(_singleInstanceKey);
+        AppInstance mainInstance = AppInstance.FindOrRegisterForKey(AppDataPaths.SingleInstanceKey(_singleInstanceKey));
 
         if (mainInstance.IsCurrent)
         {
