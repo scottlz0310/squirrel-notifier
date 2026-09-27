@@ -192,7 +192,18 @@ try {
             if (-not $element.Current.IsEnabled) {
                 throw "AutomationId '$AutomationId' は無効（IsEnabled=False）のため押せません。状態が変わるのを WaitEnabled で待ってから押してください。"
             }
-            $rect = $element.Current.BoundingRectangle
+            # 他のウィンドウ（ブラウザや常駐中の既定インスタンスのポップアップなど）が重なっていると押せないため、
+        # 要素のトップレベルウィンドウを前面に出す。常駐インスタンスも同じタイトルなので、タイトルではなく要素から辿る
+        $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+        $topLevel = $element
+        while ($true) {
+            $parent = $walker.GetParent($topLevel)
+            if ($null -eq $parent -or $parent -eq $ae::RootElement) { break }
+            $topLevel = $parent
+        }
+        $topLevel.SetFocus()
+        Start-Sleep -Milliseconds 300
+        $rect = $element.Current.BoundingRectangle
             if ($rect.IsEmpty -or $element.Current.IsOffscreen) {
                 throw "AutomationId '$AutomationId' は画面に表示されていません。ウィンドウを前面に出すか、スクロールしてから再実行してください。"
             }
