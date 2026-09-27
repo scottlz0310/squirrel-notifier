@@ -13,12 +13,13 @@
     Select   ComboBox の項目を名前で選ぶ
     WaitText 要素の文字列（Read の name / value / items）が -Text の正規表現に一致するまで待つ
 
-  -ItemText を指定すると、項目の文字列が正規表現に一致するリスト項目の中から要素を探す
-  （Recent review events のように、同じ AutomationId のボタンが項目ごとにある場合）。
+  -ListId と -ItemText を指定すると、-ListId のリストのうち、項目の文字列が -ItemText の正規表現に
+  一致する項目の中から要素を探す（Recent review events のように、同じ AutomationId のボタンが項目ごとにある場合）。
+  項目の文字列は、項目内の要素の Name（テキスト・リンク・ボタンの名前）を空白でつないだもの。
 .EXAMPLE
   ./Invoke-RunbookUia.ps1 -ProcessId 1234 -Action WaitText -AutomationId StatusText -Text '^Running' -TimeoutSeconds 60
 .EXAMPLE
-  ./Invoke-RunbookUia.ps1 -ProcessId 1234 -Action Invoke -AutomationId LaunchReviewerButton -ItemText 'fixture-repository#307'
+  ./Invoke-RunbookUia.ps1 -ProcessId 1234 -Action Invoke -AutomationId LaunchReviewerButton -ListId ReviewEventList -ItemText 'fixture-repository#307'
 #>
 param(
     [Parameter(Mandatory)][int]$ProcessId,
@@ -26,6 +27,7 @@ param(
     [Parameter(Mandatory)][string]$AutomationId,
     [string]$Text,
     [string]$ItemText,
+    [string]$ListId,
     [int]$TimeoutSeconds = 30,
     [string]$EvidencePath
 )
@@ -49,7 +51,7 @@ function Get-ProcessWindows {
 }
 
 function Get-Texts($Element) {
-    $texts = @($Element.FindAll($scope::Descendants, (New-Condition $ae::ControlTypeProperty ([System.Windows.Automation.ControlType]::Text))) |
+    $texts = @($Element.FindAll($scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
         ForEach-Object { $_.Current.Name } | Where-Object { $_ })
     , $texts
 }
@@ -58,7 +60,12 @@ function Find-Element {
     $idCondition = New-Condition $ae::AutomationIdProperty $AutomationId
     foreach ($window in Get-ProcessWindows) {
         if ($ItemText) {
-            $items = $window.FindAll($scope::Descendants, (New-Condition $ae::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem)))
+            if (-not $ListId) {
+                throw '-ItemText には -ListId（項目を持つリストの AutomationId）が必要です。'
+            }
+            $list = $window.FindFirst($scope::Descendants, (New-Condition $ae::AutomationIdProperty $ListId))
+            if (-not $list) { continue }
+            $items = $list.FindAll($scope::Children, (New-Condition $ae::ControlTypeProperty ([System.Windows.Automation.ControlType]::ListItem)))
             foreach ($item in $items) {
                 if (((Get-Texts $item) -join ' ') -match $ItemText) {
                     $found = $item.FindFirst($scope::Descendants, $idCondition)

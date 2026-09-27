@@ -121,18 +121,18 @@ $settings = [ordered]@{
 foreach ($flag in $migrationFlags) { $settings[$flag] = $true }
 $settings | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Encoding utf8NoBOM
 
-$startInfo = [Diagnostics.ProcessStartInfo]::new($appPath)
-$startInfo.UseShellExecute = $false
-$startInfo.WorkingDirectory = Split-Path $appPath
-$startInfo.Environment['SQUIRREL_NOTIFIER_DATA_ROOT'] = $dataRoot
-$startInfo.Environment['SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_OBSERVATION_PATH'] = Join-Path $observationDirectory 'subscriber.jsonl'
-$startInfo.Environment['SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_TOKEN_CACHE_PATH'] = Join-Path $runDirectory 'token-cache.json'
-$startInfo.Environment['SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_FLOW'] = 'review-event-flow'
-$startInfo.Environment['SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_DELAY_MS'] = [string]$SubscriberDelayMs
-$startInfo.Environment['SQUIRREL_NOTIFIER_E2E_DUMMY_OBSERVATION_PATH'] = Join-Path $observationDirectory 'launcher.jsonl'
+# このスクリプトは pwsh -File の別プロセスで動くため、ここで設定した環境変数は呼び出し元のシェルへ残らない。
+# アプリは Start-Process で起動し、呼び出し元の標準出力のハンドルを引き継がせない
+# （引き継ぐと、パイプラインで受けた呼び出し元がアプリの終了まで待ち続ける）
+$env:SQUIRREL_NOTIFIER_DATA_ROOT = $dataRoot
+$env:SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_OBSERVATION_PATH = Join-Path $observationDirectory 'subscriber.jsonl'
+$env:SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_TOKEN_CACHE_PATH = Join-Path $runDirectory 'token-cache.json'
+$env:SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_FLOW = 'review-event-flow'
+$env:SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_DELAY_MS = [string]$SubscriberDelayMs
+$env:SQUIRREL_NOTIFIER_E2E_DUMMY_OBSERVATION_PATH = Join-Path $observationDirectory 'launcher.jsonl'
 # 利用者のシェルに gateway の token があっても、テスト用インスタンスへ渡さない
-$startInfo.Environment.Remove('MCP_PROBE_AUTH_TOKEN') | Out-Null
-$app = [Diagnostics.Process]::Start($startInfo)
+Remove-Item Env:\MCP_PROBE_AUTH_TOKEN -ErrorAction SilentlyContinue
+$app = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -PassThru
 
 $run = [ordered]@{
     schemaVersion = 1
