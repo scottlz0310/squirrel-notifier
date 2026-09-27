@@ -8,22 +8,27 @@
 
   Action:
     Read     要素の名前・種類・有効状態・値と、リストなら各項目の文字列を返す
-    Invoke   ボタンを押す（InvokePattern）
+    Click    要素の中心を実際のマウスでクリックする。クリック位置の要素が対象プロセスのものでなければ
+             押さずに失敗する（常駐中の既定インスタンスや他のウィンドウを誤って押さないため）
     SetText  テキストボックスに値を設定する（ValuePattern）
     Select   ComboBox の項目を名前で選ぶ
     WaitText 要素の文字列（Read の name / value / items）が -Text の正規表現に一致するまで待つ
+    WaitEnabled / WaitDisabled  要素が有効 / 無効になるまで待つ（購読の開始・停止はボタンの状態で判定する）
 
   -ListId と -ItemText を指定すると、-ListId のリストのうち、項目の文字列が -ItemText の正規表現に
   一致する項目の中から要素を探す（Recent review events のように、同じ AutomationId のボタンが項目ごとにある場合）。
   項目の文字列は、項目内の要素の Name（テキスト・リンク・ボタンの名前）を空白でつないだもの。
+
+  ボタンの操作に InvokePattern は使わない。UIA だけで reviewer の起動と購読の停止を続けて行うと、
+  アプリの UI スレッドが応答しなくなる事象を観測したため（マウス入力では再現しなかった）。
 .EXAMPLE
-  ./Invoke-RunbookUia.ps1 -ProcessId 1234 -Action WaitText -AutomationId StatusText -Text '^Running' -TimeoutSeconds 60
+  ./Invoke-RunbookUia.ps1 -ProcessId 1234 -Action WaitText -AutomationId StatusText -Text '^Subscribed' -TimeoutSeconds 60
 .EXAMPLE
-  ./Invoke-RunbookUia.ps1 -ProcessId 1234 -Action Invoke -AutomationId LaunchReviewerButton -ListId ReviewEventList -ItemText 'fixture-repository#307'
+  ./Invoke-RunbookUia.ps1 -ProcessId 1234 -Action Click -AutomationId LaunchReviewerButton -ListId ReviewEventList -ItemText 'fixture-repository #307'
 #>
 param(
     [Parameter(Mandatory)][int]$ProcessId,
-    [Parameter(Mandatory)][ValidateSet('Read', 'Invoke', 'SetText', 'Select', 'WaitText')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('Read', 'Click', 'SetText', 'Select', 'WaitText', 'WaitEnabled', 'WaitDisabled')][string]$Action,
     [Parameter(Mandatory)][string]$AutomationId,
     [string]$Text,
     [string]$ItemText,
@@ -35,6 +40,35 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class RunbookMouse
+{
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+
+    private const uint LeftDown = 0x0002;
+    private const uint LeftUp = 0x0004;
+
+    // UIA の BoundingRectangle と SetCursorPos を同じ物理座標で扱うため、Per-Monitor v2 にする
+    public static void UsePhysicalCoordinates() => SetThreadDpiAwarenessContext(new IntPtr(-4));
+
+    public static void Click(int x, int y)
+    {
+        if (!SetCursorPos(x, y))
+        {
+            throw new InvalidOperationException("マウスカーソルを移動できませんでした。");
+        }
+
+        mouse_event(LeftDown, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero);
+    }
+}
+'@
+[RunbookMouse]::UsePhysicalCoordinates()
 
 $ae = [System.Windows.Automation.AutomationElement]
 $scope = [System.Windows.Automation.TreeScope]
@@ -128,8 +162,18 @@ function Get-Pattern($Element, $Pattern) {
 $element = Wait-Element
 switch ($Action) {
     'Read' { }
-    'Invoke' {
-        (Get-Pattern $element ([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+    'Click' {
+        $rect = $element.Current.BoundingRectangle
+        if ($rect.IsEmpty -or $element.Current.IsOffscreen) {
+            throw "AutomationId '$AutomationId' は画面に表示されていません。ウィンドウを前面に出すか、スクロールしてから再実行してください。"
+        }
+        $x = [int]($rect.Left + $rect.Width / 2)
+        $y = [int]($rect.Top + $rect.Height / 2)
+        $hit = $ae::FromPoint([System.Windows.Point]::new($x, $y))
+        if ($hit.Current.ProcessId -ne $ProcessId) {
+            throw "($x, $y) には別プロセス（PID $($hit.Current.ProcessId)）の要素があります。対象のウィンドウを前面に出してから再実行してください。"
+        }
+        [RunbookMouse]::Click($x, $y)
     }
     'SetText' {
         (Get-Pattern $element ([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($Text)
@@ -143,6 +187,17 @@ switch ($Action) {
         }
         (Get-Pattern $option ([System.Windows.Automation.SelectionItemPattern]::Pattern)).Select()
         (Get-Pattern $element ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)).Collapse()
+    }
+    { $_ -in 'WaitEnabled', 'WaitDisabled' } {
+        $expected = $Action -eq 'WaitEnabled'
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ($element.Current.IsEnabled -ne $expected) {
+            if ((Get-Date) -ge $deadline) {
+                throw "AutomationId '$AutomationId' が $TimeoutSeconds 秒以内に IsEnabled=$expected になりません。"
+            }
+            Start-Sleep -Milliseconds 500
+            $element = Wait-Element
+        }
     }
     'WaitText' {
         $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
