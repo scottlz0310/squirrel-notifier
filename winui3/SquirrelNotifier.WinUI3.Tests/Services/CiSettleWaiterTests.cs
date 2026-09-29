@@ -240,6 +240,37 @@ public sealed class CiSettleWaiterTests
         result.Waited.Should().Be(TimeSpan.Zero);
     }
 
+    // 待機中は、未確定を観測してから終端・破棄までの間だけ
+    [Theory]
+    [InlineData("Pending", true)]
+    [InlineData("Passed", false)]
+    [InlineData("Failed", false)]
+    public async Task IsWaiting_ShouldBeTrue_OnlyWhilePending(string lastState, bool expectedWaiting)
+    {
+        _source.Add(Snapshot("Pending"), Snapshot(lastState));
+        CiSettleWaiter waiter = CreateWaiter();
+        waiter.IsWaiting(_repository, 42).Should().BeFalse();
+
+        await waiter.CheckAsync(_repository, 42, _options, CancellationToken.None);
+        waiter.IsWaiting("OWNER/REPO", 42).Should().BeTrue();
+        await waiter.CheckAsync(_repository, 42, _options, CancellationToken.None);
+
+        waiter.IsWaiting(_repository, 42).Should().Be(expectedWaiting);
+        waiter.IsWaiting(_repository, 43).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsWaiting_ShouldBeFalse_AfterForget()
+    {
+        _source.Add(Snapshot("Pending"));
+        CiSettleWaiter waiter = CreateWaiter();
+        await waiter.CheckAsync(_repository, 42, _options, CancellationToken.None);
+
+        waiter.Forget(_repository, 42);
+
+        waiter.IsWaiting(_repository, 42).Should().BeFalse();
+    }
+
     [Fact]
     public async Task CheckAsync_ShouldPassArgumentsAndTokenToSource()
     {

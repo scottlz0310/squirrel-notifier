@@ -191,6 +191,21 @@ internal sealed class CiSettleWaiter
     }
 
     /// <summary>
+    /// PR が待機中か（未確定を観測し、まだ終端に達していないか）を返す。
+    /// 確認の間隔ごとに繰り返される再評価を、呼び出し側が記録の対象から外すために使う.
+    /// </summary>
+    /// <param name="repository"><c>owner/repo</c> 形式のリポジトリ.</param>
+    /// <param name="prNumber">PR 番号.</param>
+    /// <returns>待機中の場合は <see langword="true"/>.</returns>
+    public bool IsWaiting(string repository, int prNumber)
+    {
+        lock (_lock)
+        {
+            return _waits.ContainsKey(GetKey(repository, prNumber));
+        }
+    }
+
+    /// <summary>
     /// PR の待機の状態を破棄する。レビューを別の経路で始めた場合など、待機が不要になったときに呼ぶ.
     /// </summary>
     /// <param name="repository"><c>owner/repo</c> 形式のリポジトリ.</param>
