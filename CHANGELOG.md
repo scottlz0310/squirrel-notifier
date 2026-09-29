@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - CI の確定を待つ部品（`CiSettleWaiter`）を追加した。取得は `ICiSettleSource` に任せ、待機の規則だけを持つ。未確定の間は確認を続け、確定（すべて成功）・失敗・取得不能・PR の merge / close・上限のいずれかで終える。失敗と取得不能は待たない。待機の開始は最初に未確定を観測した時点で、head が動いたら新しい head に対して待ち直し、前回の確認から上限以上あいた場合も待ち直す。間隔と上限は呼び出し側が引数で決める。1 回だけ確認して状態を進める `CheckAsync`（保留キューからの再評価用）と、終端まで待つ `WaitAsync`（キャンセルで状態を破棄）を備える。まだ自動起動の判定には使っていない（#456）
-- reviewer を自動起動する前に required checks の確定を待つための前提作業として、PR の head SHA と required checks の確定状態を 1 回取得する部品（`ICiSettleSource`）と、その暫定の実装（`gh api`、読み取りのみ）を追加した。required checks は ruleset を先に、classic の branch protection を後に読んで和集合にし、SHA 固定の check runs（同じ App・同じ名前の run は ID が最大のものだけを採用）と commit status の両方で判定する。読むのは check の名前と状態だけで、コメント本文などは取り込まない。classic の 404（保護設定なし）は「required なし」、403 は「取得不能」として扱う。まだ自動起動の判定には使っていない。thread-owl が CI の状態を返す tool を提供したら、取得元ごと差し替える暫定の実装である（#456）
+- reviewer を自動起動する前に required checks の確定を待つための前提作業として、PR の head SHA と required checks の確定状態を 1 回取得する部品（`ICiSettleSource`）と、その暫定の実装（`gh api`、読み取りのみ）を追加した。required checks は ruleset を先に、classic の branch protection を後に読んで和集合にし、SHA 固定の check runs（同じ App・同じ名前の run は ID が最大のものだけを採用）と commit status の両方で判定する（App が指定された required check は、その App の check run だけで判定し、別の App が同名の context に送った commit status では通さない）。ruleset は既定 30 件でページングされるため、全ページを取得して集約する。読むのは check の名前と状態だけで、コメント本文などは取り込まない。classic の 404（保護設定なし）は「required なし」、403 は「取得不能」として扱う。まだ自動起動の判定には使っていない。thread-owl が CI の状態を返す tool を提供したら、取得元ごと差し替える暫定の実装である（#456）
 
 ## [0.15.0] - 2026-09-27
 

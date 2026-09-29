@@ -40,24 +40,27 @@ public sealed class CiSettleParserTests
         act.Should().Throw<JsonException>();
     }
 
+    // ruleset はページングされる。jq はページごとに適用されるため、複数ページ分の出力は複数行として連結される
     [Fact]
-    public void ParseRulesetRequiredChecks_ShouldReadContextsAndTreatMissingAppAsAny()
+    public void ParseRulesetRequiredChecks_ShouldReadOneCheckPerLine_AcrossPages()
     {
         IReadOnlyList<RequiredCheck> checks = CiSettleParser.ParseRulesetRequiredChecks(
-            """[{"context":"build","integrationId":15368},{"context":"lint","integrationId":null},{"context":"build","integrationId":15368}]""");
+            "{\"context\":\"build\",\"integrationId\":15368}\r\n{\"context\":\"lint\",\"integrationId\":null}\n\n{\"context\":\"build\",\"integrationId\":15368}\n");
 
         checks.Should().Equal(new RequiredCheck("build", 15368), new RequiredCheck("lint", null));
     }
 
     [Theory]
-    [InlineData("[]")]
+    [InlineData("")]
+    [InlineData("\n")]
     public void ParseRulesetRequiredChecks_ShouldReturnEmpty_WhenNoRule(string output)
         => CiSettleParser.ParseRulesetRequiredChecks(output).Should().BeEmpty();
 
     [Theory]
-    [InlineData("""{"context":"build"}""")]
-    [InlineData("""[{"integrationId":1}]""")]
-    [InlineData("""[{"context":""}]""")]
+    [InlineData("""[{"context":"build","integrationId":null}]""")]
+    [InlineData("""{"integrationId":1}""")]
+    [InlineData("""{"context":""}""")]
+    [InlineData("not json")]
     public void ParseRulesetRequiredChecks_ShouldThrowJsonException_WhenShapeIsUnexpected(string output)
     {
         Action act = () => CiSettleParser.ParseRulesetRequiredChecks(output);

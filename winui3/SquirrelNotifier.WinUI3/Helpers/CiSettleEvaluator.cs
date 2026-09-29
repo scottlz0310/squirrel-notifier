@@ -88,6 +88,14 @@ internal static class CiSettleEvaluator
             return FromRun(run);
         }
 
+        // App が指定された required check は、App ID を照合できる check run だけで判定する。
+        // commit status には送信元の App ID が無く、別の App が同名の context に success を送ると、
+        // 指定された App の check が未報告のまま通ってしまうため、status へはフォールバックしない
+        if (required.IntegrationId is not null)
+        {
+            return CheckOutcome.Missing;
+        }
+
         return statuses.TryGetValue(required.Context, out CommitStatusInfo? status)
             ? FromStatus(status)
             : CheckOutcome.Missing;

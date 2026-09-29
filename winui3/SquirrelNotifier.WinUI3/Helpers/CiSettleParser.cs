@@ -62,14 +62,14 @@ internal static class CiSettleParser
         return new CiPullRequestInfo(isClosed, headSha, GetString(root, "baseRef"));
     }
 
-    /// <summary>ruleset の <c>rules/branches/&lt;branch&gt;</c> から絞り込んだ配列（<c>[{context, integrationId}]</c>）を解釈する.</summary>
-    /// <param name="output">jq で絞り込んだ JSON 配列.</param>
-    /// <returns>required な status check の一覧.</returns>
+    /// <summary>
+    /// ruleset の <c>rules/branches/&lt;branch&gt;</c> から絞り込んだ、行ごとに 1 件の JSON（<c>{context, integrationId}</c>）を解釈する。
+    /// ページングされた応答を連結した出力を、そのまま読める形にしている.
+    /// </summary>
+    /// <param name="output">jq が required check ごとに 1 行で出力した JSON.</param>
+    /// <returns>required な status check の一覧（重複は除く）.</returns>
     public static IReadOnlyList<RequiredCheck> ParseRulesetRequiredChecks(string output)
-    {
-        using JsonDocument document = JsonDocument.Parse(output);
-        return ParseRequiredCheckArray(document.RootElement, "integrationId");
-    }
+        => [.. ParseLines(output, element => new RequiredCheck(GetString(element, "context"), GetOptionalAppId(element, "integrationId"))).Distinct()];
 
     /// <summary>classic の branch protection から絞り込んだ <c>{contexts, checks: [{context, appId}]}</c> を解釈する.</summary>
     /// <param name="output">jq で絞り込んだ JSON オブジェクト.</param>

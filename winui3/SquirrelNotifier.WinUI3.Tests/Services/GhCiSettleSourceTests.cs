@@ -32,11 +32,11 @@ public sealed class GhCiSettleSourceTests
         snapshot.HeadSha.Should().Be(_sha);
         _client.Calls.Select(call => call.Path).Should().Equal(
             $"{_repositoryPath}/pulls/42",
-            $"{_repositoryPath}/rules/branches/main",
+            $"{_repositoryPath}/rules/branches/main?per_page=100",
             $"{_repositoryPath}/branches/main/protection/required_status_checks",
             $"{_repositoryPath}/commits/{_sha}/check-runs?per_page=100",
             $"{_repositoryPath}/commits/{_sha}/status?per_page=100");
-        _client.Calls.Select(call => call.Paginate).Should().Equal(false, false, false, true, true);
+        _client.Calls.Select(call => call.Paginate).Should().Equal(false, true, false, true, true);
     }
 
     // コメント本文などを読み込まないため、すべての呼び出しで出力を jq で絞る
@@ -44,7 +44,7 @@ public sealed class GhCiSettleSourceTests
     public async Task GetAsync_ShouldNarrowEveryCallWithJq()
     {
         SetOpenPullRequest("main");
-        SetRuleset("[]");
+        SetRuleset(string.Empty);
         SetClassic(ClassicWith());
         SetCheckRuns();
         SetStatuses();
@@ -103,7 +103,7 @@ public sealed class GhCiSettleSourceTests
     public async Task GetAsync_ShouldWaitForAllReportedChecks_WhenNoRequiredChecksAreDefined()
     {
         SetOpenPullRequest("main");
-        SetRuleset("[]");
+        SetRuleset(string.Empty);
         _client.Set(
             $"{_repositoryPath}/branches/main/protection/required_status_checks",
             GhApiResult.Failure(404, "gh: Branch not protected (HTTP 404)"));
@@ -120,7 +120,7 @@ public sealed class GhCiSettleSourceTests
     public async Task GetAsync_ShouldEscapeBaseBranchInPath()
     {
         SetOpenPullRequest("release/1.0");
-        SetRuleset("[]");
+        SetRuleset(string.Empty);
         SetClassic(ClassicWith());
         SetCheckRuns();
         SetStatuses();
@@ -129,7 +129,7 @@ public sealed class GhCiSettleSourceTests
 
         _client.Calls.Select(call => call.Path).Should().Contain(new[]
         {
-            $"{_repositoryPath}/rules/branches/release%2F1.0",
+            $"{_repositoryPath}/rules/branches/release%2F1.0?per_page=100",
             $"{_repositoryPath}/branches/release%2F1.0/protection/required_status_checks",
         });
     }
@@ -152,14 +152,14 @@ public sealed class GhCiSettleSourceTests
         string expectedDetail)
     {
         SetOpenPullRequest("main");
-        SetRuleset("[]");
+        SetRuleset(string.Empty);
         SetClassic(ClassicWith());
         SetCheckRuns();
         SetStatuses();
         string failingPath = failingCall switch
         {
             "pulls" => $"{_repositoryPath}/pulls/42",
-            "ruleset" => $"{_repositoryPath}/rules/branches/main",
+            "ruleset" => $"{_repositoryPath}/rules/branches/main?per_page=100",
             "classic" => $"{_repositoryPath}/branches/main/protection/required_status_checks",
             "check-runs" => $"{_repositoryPath}/commits/{_sha}/check-runs?per_page=100",
             _ => $"{_repositoryPath}/commits/{_sha}/status?per_page=100",
@@ -174,21 +174,21 @@ public sealed class GhCiSettleSourceTests
 
     [Theory]
     [InlineData("pulls", "not json")]
-    [InlineData("ruleset", "{\"context\":\"build\"}")]
+    [InlineData("ruleset", "[{\"context\":\"build\"}]")]
     [InlineData("classic", "[]")]
     [InlineData("check-runs", "{\"id\":\"x\"}")]
     [InlineData("status", "{\"context\":\"only-context\"}")]
     public async Task GetAsync_ShouldReturnUnavailable_WhenResponseCannotBeParsed(string malformedCall, string output)
     {
         SetOpenPullRequest("main");
-        SetRuleset("[]");
+        SetRuleset(string.Empty);
         SetClassic(ClassicWith());
         SetCheckRuns();
         SetStatuses();
         string malformedPath = malformedCall switch
         {
             "pulls" => $"{_repositoryPath}/pulls/42",
-            "ruleset" => $"{_repositoryPath}/rules/branches/main",
+            "ruleset" => $"{_repositoryPath}/rules/branches/main?per_page=100",
             "classic" => $"{_repositoryPath}/branches/main/protection/required_status_checks",
             "check-runs" => $"{_repositoryPath}/commits/{_sha}/check-runs?per_page=100",
             _ => $"{_repositoryPath}/commits/{_sha}/status?per_page=100",
@@ -217,6 +217,45 @@ public sealed class GhCiSettleSourceTests
 
         snapshot.State.Should().Be(CiSettleState.Unavailable);
         _client.Calls.Should().BeEmpty();
+    }
+
+    // ruleset は既定 30 件でページングされる。required_status_checks が後続のページにだけあっても見落とさない。
+    // gh の --paginate を使わない場合は先頭ページ（required なし）しか返らない、という応答を模して固定する
+    [Fact]
+    public async Task GetAsync_ShouldReadRequiredChecksOnLaterRulesetPages()
+    {
+        SetOpenPullRequest("main");
+        _client.SetPaged(
+            $"{_repositoryPath}/rules/branches/main?per_page=100",
+            firstPage: GhApiResult.Success(string.Empty),
+            allPages: GhApiResult.Success(RulesetWith("codecov/patch")));
+        _client.Set(
+            $"{_repositoryPath}/branches/main/protection/required_status_checks",
+            GhApiResult.Failure(404, "gh: Branch not protected (HTTP 404)"));
+        SetCheckRuns(Run("build", "completed", "success"));
+        SetStatuses();
+
+        CiSettleSnapshot snapshot = await CreateSource().GetAsync("owner/repo", 42, CancellationToken.None);
+
+        snapshot.State.Should().Be(CiSettleState.Pending);
+        snapshot.Detail.Should().Contain("codecov/patch（未報告）");
+        _client.Calls.Should().Contain(call => call.Path.Contains("/rules/branches/", StringComparison.Ordinal) && call.Paginate);
+    }
+
+    // 複数ページ分の出力は複数行として連結される。すべてを集約する
+    [Fact]
+    public async Task GetAsync_ShouldAggregateRequiredChecksFromAllRulesetPages()
+    {
+        SetOpenPullRequest("main");
+        SetRuleset(RulesetWith("build", "lint", "codecov/patch"));
+        SetClassic(ClassicWith());
+        SetCheckRuns(Run("build", "completed", "success"), Run("lint", "completed", "success"));
+        SetStatuses();
+
+        CiSettleSnapshot snapshot = await CreateSource().GetAsync("owner/repo", 42, CancellationToken.None);
+
+        snapshot.State.Should().Be(CiSettleState.Pending);
+        snapshot.Detail.Should().Be("未完了: codecov/patch（未報告）");
     }
 
     [Fact]
@@ -255,7 +294,7 @@ public sealed class GhCiSettleSourceTests
             GhApiResult.Success(string.Join('\n', lines)));
 
     private static string RulesetWith(params string[] contexts)
-        => "[" + string.Join(',', contexts.Select(context => $$"""{"context":"{{context}}","integrationId":null}""")) + "]";
+        => string.Join('\n', contexts.Select(context => $$"""{"context":"{{context}}","integrationId":null}"""));
 
     private static string ClassicWith(params string[] contexts)
         => $$"""{"contexts":[{{string.Join(',', contexts.Select(context => $"\"{context}\""))}}],"checks":[]}""";
@@ -267,6 +306,7 @@ public sealed class GhCiSettleSourceTests
     {
         private readonly Dictionary<string, GhApiResult> _exact = new(StringComparer.Ordinal);
         private readonly List<(string Prefix, GhApiResult Result)> _prefixes = [];
+        private readonly Dictionary<string, (GhApiResult FirstPage, GhApiResult AllPages)> _paged = new(StringComparer.Ordinal);
 
         public List<(string Path, string Jq, bool Paginate)> Calls { get; } = [];
 
@@ -275,6 +315,9 @@ public sealed class GhCiSettleSourceTests
         public void Set(string path, GhApiResult result) => _exact[path] = result;
 
         public void SetPrefix(string prefix, GhApiResult result) => _prefixes.Add((prefix, result));
+
+        // paginate=false なら先頭ページだけ、paginate=true なら全ページを連結した出力を返す
+        public void SetPaged(string path, GhApiResult firstPage, GhApiResult allPages) => _paged[path] = (firstPage, allPages);
 
         public Task<GhApiResult> GetAsync(string path, string jq, bool paginate, CancellationToken cancellationToken)
         {
@@ -287,6 +330,11 @@ public sealed class GhCiSettleSourceTests
             if (_exact.TryGetValue(path, out GhApiResult? result))
             {
                 return Task.FromResult(result);
+            }
+
+            if (_paged.TryGetValue(path, out (GhApiResult FirstPage, GhApiResult AllPages) pages))
+            {
+                return Task.FromResult(paginate ? pages.AllPages : pages.FirstPage);
             }
 
             foreach ((string prefix, GhApiResult prefixResult) in _prefixes)
