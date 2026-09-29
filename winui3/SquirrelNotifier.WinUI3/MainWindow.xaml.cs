@@ -50,6 +50,7 @@ internal sealed partial class MainWindow : Window
     private readonly SubscriptionStateCoordinator _subscriptionStateCoordinator = new();
     private readonly PendingReviewStartQueue _pendingReviewStartQueue = new();
     private readonly AutoPauseResumeScheduler _autoPauseResumeScheduler = new();
+    private readonly ReviewCiSettleGate _ciSettleGate = new(new CiSettleWaiter(new GhCiSettleSource(new GhApiClient())));
     private readonly ReviewStartCoordinator _reviewStartCoordinator;
     private readonly TrayCommandCoordinator _trayCommandCoordinator;
     private readonly WindowLifecycleCoordinator _windowLifecycleCoordinator;
@@ -159,7 +160,8 @@ internal sealed partial class MainWindow : Window
             _pendingReviewStartQueue,
             _autoPauseResumeScheduler,
             _loggingService,
-            _reviewCycleCoordinator);
+            _reviewCycleCoordinator,
+            _ciSettleGate);
         _agentExecutionWindowCoordinator = new AgentExecutionWindowCoordinator(
             launch => new AgentExecutionWindowAdapter(
                 new AgentExecutionWindow(
@@ -175,13 +177,17 @@ internal sealed partial class MainWindow : Window
             _pendingReviewStartQueue,
             _loggingService,
             _reviewStartCoordinator.TryStartAutomaticallyAsync,
-            _reviewCycleCoordinator);
+            _reviewCycleCoordinator,
+            _reviewStartCoordinator.IsWaitingForCiSettle);
         _launcherService.RunCompleted += OnPendingReviewReevaluationRequested;
         _reviewStartCoordinator.StartAbandoned += OnPendingReviewReevaluationRequested;
 
         // Auto-Pause で保留した分は、解除の確認とリセット時刻の通過を契機に再評価する（#340）
         _autoPauseGate.Released += OnPendingReviewReevaluationRequested;
         _autoPauseResumeScheduler.RetryDue += OnPendingReviewReevaluationRequested;
+
+        // CI の確定待ちで保留した分は、確認の間隔ごとに再評価する（暫定、#456）
+        _ciSettleGate.RetryDue += OnPendingReviewReevaluationRequested;
         _service.StatusTextChanged += OnStatusTextChanged;
         _service.StateChanged += OnStateChanged;
         _loggingService.LogAppended += OnLogAppended;
@@ -378,6 +384,7 @@ internal sealed partial class MainWindow : Window
         _reviewStartCoordinator.StartAbandoned -= OnPendingReviewReevaluationRequested;
         _autoPauseGate.Released -= OnPendingReviewReevaluationRequested;
         _autoPauseResumeScheduler.RetryDue -= OnPendingReviewReevaluationRequested;
+        _ciSettleGate.RetryDue -= OnPendingReviewReevaluationRequested;
         _reviewEventCleanupCoordinator.EventsRemoved -= OnReviewEventsRemoved;
         _reviewCycleCoordinator.StateChanged -= OnReviewCycleStateChanged;
         _notificationService.NotificationRequested -= OnNotificationRequested;
@@ -396,6 +403,7 @@ internal sealed partial class MainWindow : Window
     {
         _copyFeedbackCoordinator.Dispose();
         _autoPauseResumeScheduler.Dispose();
+        _ciSettleGate.Dispose();
         _trayIconService.Dispose();
     }
 
@@ -897,7 +905,7 @@ internal sealed partial class MainWindow : Window
 
             ReviewStartResult result = processingResult.StartResult!;
             _agentExecutionWindowCoordinator.Show(result);
-            _reviewNotificationCoordinator.Show(reviewEvent, result.IsStarted, result.HoldReason);
+            _reviewNotificationCoordinator.Show(reviewEvent, result.IsStarted, result.HoldReason ?? result.StartNote);
         }
         catch (Exception ex)
         {
@@ -927,7 +935,7 @@ internal sealed partial class MainWindow : Window
             if (pending is not null)
             {
                 _agentExecutionWindowCoordinator.Show(pending.StartResult);
-                _reviewNotificationCoordinator.Show(pending.ReviewEvent, isAutoStarted: true);
+                _reviewNotificationCoordinator.Show(pending.ReviewEvent, isAutoStarted: true, pending.StartResult.StartNote);
             }
         }
         catch (Exception ex)
@@ -937,15 +945,15 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private void ShowReviewPopup(Models.ReviewEvent reviewEvent, bool isAutoStarted, string? holdReason)
+    private void ShowReviewPopup(Models.ReviewEvent reviewEvent, bool isAutoStarted, string? statusNote)
     {
-        _reviewNotificationContent.SetReviewEvent(reviewEvent, isAutoStarted, holdReason);
+        _reviewNotificationContent.SetReviewEvent(reviewEvent, isAutoStarted, statusNote);
         _trayIconService.ShowReviewPopup();
     }
 
-    private void ShowReviewBalloon(Models.ReviewEvent reviewEvent, bool isAutoStarted, string? holdReason)
+    private void ShowReviewBalloon(Models.ReviewEvent reviewEvent, bool isAutoStarted, string? statusNote)
     {
-        string message = ReviewNotificationFormatter.BuildSummary(reviewEvent, isAutoStarted, holdReason);
+        string message = ReviewNotificationFormatter.BuildSummary(reviewEvent, isAutoStarted, statusNote);
         _trayIconService.ShowNotification(
             "レビュー通知",
             message,

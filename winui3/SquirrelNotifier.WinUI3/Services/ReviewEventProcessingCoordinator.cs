@@ -17,6 +17,7 @@ internal sealed class ReviewEventProcessingCoordinator
     private readonly LoggingService _loggingService;
     private readonly Func<ReviewEvent, Task<ReviewStartResult>> _tryStartAutomaticallyAsync;
     private readonly ReviewCycleCoordinator? _reviewCycleCoordinator;
+    private readonly Func<ReviewEvent, bool> _isWaitingForCiSettle;
     private bool _isProcessingPending;
     private bool _isReprocessRequested;
 
@@ -26,7 +27,8 @@ internal sealed class ReviewEventProcessingCoordinator
         PendingReviewStartQueue pendingQueue,
         LoggingService loggingService,
         Func<ReviewEvent, Task<ReviewStartResult>> tryStartAutomaticallyAsync,
-        ReviewCycleCoordinator? reviewCycleCoordinator = null)
+        ReviewCycleCoordinator? reviewCycleCoordinator = null,
+        Func<ReviewEvent, bool>? isWaitingForCiSettle = null)
     {
         _collectionCoordinator = collectionCoordinator ?? throw new ArgumentNullException(nameof(collectionCoordinator));
         _cleanupCoordinator = cleanupCoordinator ?? throw new ArgumentNullException(nameof(cleanupCoordinator));
@@ -34,6 +36,7 @@ internal sealed class ReviewEventProcessingCoordinator
         _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
         _tryStartAutomaticallyAsync = tryStartAutomaticallyAsync ?? throw new ArgumentNullException(nameof(tryStartAutomaticallyAsync));
         _reviewCycleCoordinator = reviewCycleCoordinator;
+        _isWaitingForCiSettle = isWaitingForCiSettle ?? (_ => false);
     }
 
     /// <summary>
@@ -67,8 +70,8 @@ internal sealed class ReviewEventProcessingCoordinator
     }
 
     /// <summary>
-    /// 実行中（#339）または Auto-Pause 中（#340）のため保留したイベントを、保留した順に再評価し、
-    /// 最初に起動できた 1 件を返す.
+    /// 実行中（#339）、Auto-Pause 中（#340）、または CI の確定待ち（暫定、#456）のため保留したイベントを、
+    /// 保留した順に再評価し、最初に起動できた 1 件を返す.
     /// </summary>
     /// <remarks>
     /// 一覧から消えたイベント（手動削除・保持上限による押し出し・終了済み PR の自動削除）と、
@@ -108,8 +111,14 @@ internal sealed class ReviewEventProcessingCoordinator
 
     private async Task<PendingReviewStartResult?> StartFirstPendingAsync()
     {
-        while (_pendingQueue.Peek() is ReviewEvent pendingEvent)
+        foreach (ReviewEvent pendingEvent in _pendingQueue.Snapshot())
         {
+            // 評価の await 中に、手動起動などで保留から外れたイベントは評価しない（再び保留に戻してしまうため）
+            if (!_pendingQueue.Contains(pendingEvent))
+            {
+                continue;
+            }
+
             if (!_collectionCoordinator.Events.Contains(pendingEvent))
             {
                 _pendingQueue.Remove(pendingEvent);
@@ -118,19 +127,34 @@ internal sealed class ReviewEventProcessingCoordinator
                 continue;
             }
 
-            if (!await _cleanupCoordinator.IsActionAllowedAsync(pendingEvent, CancellationToken.None))
+            // CI の確定待ちは確認の間隔（30 秒）ごとに再評価される。
+            // - PR の状態は判定の側（gh）が毎回確認し、閉じていれば起動しない。未認証の GitHub API（60 req/h）を
+            //   消費する終了確認をここで重ねると、枠を使い切って巡回や更新チェックまで巻き込むため省く
+            // - 毎回残すと Recent activity が埋まるため、再評価の行も残さない。待機の開始・head の移動・終了は判定の側が残す
+            bool isWaitingForCiSettle = _isWaitingForCiSettle(pendingEvent);
+            if (!isWaitingForCiSettle)
             {
-                _pendingQueue.Remove(pendingEvent);
-                continue;
+                if (!await _cleanupCoordinator.IsActionAllowedAsync(pendingEvent, CancellationToken.None))
+                {
+                    _pendingQueue.Remove(pendingEvent);
+                    continue;
+                }
+
+                await _loggingService.WriteAsync(
+                    $"[Auto] 保留していた {pendingEvent.PrCaption} の自動起動を再評価します（reason: {pendingEvent.Reason}）。");
             }
 
-            await _loggingService.WriteAsync(
-                $"[Auto] 保留していた {pendingEvent.PrCaption} の自動起動を再評価します（reason: {pendingEvent.Reason}）。");
             ReviewStartResult startResult = await _tryStartAutomaticallyAsync(pendingEvent);
             if (startResult.Status is ReviewStartStatus.SkippedBusy or ReviewStartStatus.SkippedAutoPaused)
             {
                 // 保留したまま。後続の保留も同じ判定になるため、次の契機を待つ
                 return null;
+            }
+
+            if (startResult.Status == ReviewStartStatus.SkippedCiPending)
+            {
+                // 保留したまま。CI の確定は PR ごとに決まるため、後続の PR は評価を続ける
+                continue;
             }
 
             _pendingQueue.Remove(pendingEvent);

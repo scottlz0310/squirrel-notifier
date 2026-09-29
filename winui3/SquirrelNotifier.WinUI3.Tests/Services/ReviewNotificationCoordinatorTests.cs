@@ -39,7 +39,7 @@ public sealed class ReviewNotificationCoordinatorTests
             coordinator.AttachPopup(() => recorder.Attached = true);
         }
 
-        coordinator.Show(reviewEvent, isAutoStarted: false, holdReason: "Auto-Pause 中");
+        coordinator.Show(reviewEvent, isAutoStarted: false, statusNote: "Auto-Pause 中");
 
         List<(ReviewEvent ReviewEvent, bool IsAutoStarted, string? HoldReason)> target =
             popupAttached ? recorder.PopupEvents : recorder.BalloonEvents;

@@ -154,6 +154,8 @@ uninstall.cmd -KeepSettings
 
 Auto-Pause の解除は fresh なレートリミット snapshot でしか確認できないため、保留中はレートリミットのリセット時刻を過ぎた時点で再評価し、そこで解除を確認できない場合は 15 分ごとに再評価します。レートリミット欄の「更新」やレビューの終了で解除を確認できた場合は、その時点で再評価します。待機中の実装側エージェントへ保留を伝える経路は持たないため、待機が `--timeout-ms` に達した場合は「Recent activity」で理由を確認してください。
 
+自動起動の前には、PR の required checks が確定するまで（暫定の処置です）最長 12 分待ちます。GitHub CLI（`gh`）で 30 秒ごとに確認し、確定・失敗・上限のいずれかで起動します。`gh` が使えない場合は待たずに起動します。手動の「レビューする」は待ちません。詳細は [docs/review-cycle-automation.md](docs/review-cycle-automation.md#ci-の確定待ち暫定) を参照してください。
+
 「レビューに対応」は既定で非表示です。レビュー指摘への対応は、その PR を実装した CLI エージェントが同じセッションで引き受けるほうが、設計意図や棄却案をコンテキストに残したまま対応でき、リポジトリとスレッドの再調査も要らないためです（実装側は PR 作成・更新後にレビュー完了を待機します）。このボタンは reviewed 側をコールドスタートするので、その CLI を使えない場面の退避手段と位置づけています。設定で表示に切り替えると従来どおり起動・コマンドコピーができ、切り替えは再起動なしで反映されます。reviewed launcher スロットの設定欄は表示状態に関わらず常に編集できます。
 
 launcher の作業ディレクトリはロールごとに固定されます。「レビューする」（reviewer）は `%LocalAppData%\SquirrelNotifier\launcher-workspace\reviewer` から起動し、対象 checkout を直接操作しません。「レビューに対応」（reviewed）は Checkout Mappings に登録した Git checkout から起動します。mapping が未設定、存在しない、Git checkout ではない、または Windows／Program Files／アプリのインストール先を指す場合は、プロセスを起動せずエラーにします。タスクスケジューラーやアプリの起動元ディレクトリには依存しません。

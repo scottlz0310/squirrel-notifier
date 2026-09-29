@@ -30,6 +30,15 @@ internal enum ReviewStartStatus
     /// </summary>
     SkippedAutoPaused,
 
+    /// <summary>
+    /// required checks が未確定のため見送った（暫定、#456）。自動起動では確定または上限まで、
+    /// 確認の間隔ごとに再評価する保留にする.
+    /// </summary>
+    SkippedCiPending,
+
+    /// <summary>自動起動の対象の PR が merge または close されていたため見送った（暫定、#456）.</summary>
+    SkippedPullRequestClosed,
+
     /// <summary>「レビュー自動開始」設定が off のため見送った.</summary>
     SkippedDisabled,
 
@@ -53,12 +62,14 @@ internal sealed record ReviewStartLaunch(
 /// <summary>
 /// レビュー起動の結果。<see cref="Launch"/> が非 null のときだけウィンドウを開く。
 /// 見送りの理由は <see cref="Status"/> で表現し、ダイアログを出すか・何も出さないかは呼び出し側が決める.
+/// <see cref="StartNote"/> は、起動したときに通知へ添える注記（CI 待機の上限に達して起動した場合など、#456）.
 /// </summary>
 internal sealed record ReviewStartResult(
     ReviewStartStatus Status,
     ReviewStartLaunch? Launch,
     string? FailureMessage,
-    string? HoldReason = null)
+    string? HoldReason = null,
+    string? StartNote = null)
 {
     public bool IsStarted => Status == ReviewStartStatus.Started;
 
@@ -101,6 +112,7 @@ internal sealed class ReviewStartCoordinator
     private readonly AutoPauseResumeScheduler _autoPauseResumeScheduler;
     private readonly LoggingService _loggingService;
     private readonly ReviewCycleCoordinator? _reviewCycleCoordinator;
+    private readonly ReviewCiSettleGate? _ciSettleGate;
 
     // Auto-Pause 確認ダイアログ等の await 中は IsRunning がまだ false のため、起動ボタンの
     // 連打で再入し ContentDialog の多重表示（WinUI3 では例外）になる。それを防ぐフラグ
@@ -114,7 +126,8 @@ internal sealed class ReviewStartCoordinator
         PendingReviewStartQueue pendingQueue,
         AutoPauseResumeScheduler autoPauseResumeScheduler,
         LoggingService loggingService,
-        ReviewCycleCoordinator? reviewCycleCoordinator = null)
+        ReviewCycleCoordinator? reviewCycleCoordinator = null,
+        ReviewCiSettleGate? ciSettleGate = null)
     {
         ArgumentNullException.ThrowIfNull(launcherService);
         ArgumentNullException.ThrowIfNull(settingsService);
@@ -132,6 +145,7 @@ internal sealed class ReviewStartCoordinator
         _autoPauseResumeScheduler = autoPauseResumeScheduler;
         _loggingService = loggingService;
         _reviewCycleCoordinator = reviewCycleCoordinator;
+        _ciSettleGate = ciSettleGate;
     }
 
     /// <summary>
@@ -147,9 +161,18 @@ internal sealed class ReviewStartCoordinator
     public bool IsBusy => _isStartPending || _launcherService.IsRunning;
 
     /// <summary>
+    /// イベントの PR が、reviewer の自動起動の前に CI の確定を待っている最中か（暫定、#456）。
+    /// 確認の間隔ごとに繰り返される再評価を、Recent activity の記録の対象から外すために使う.
+    /// </summary>
+    /// <param name="reviewEvent">対象のレビューイベント.</param>
+    /// <returns>待機中の場合は <see langword="true"/>.</returns>
+    public bool IsWaitingForCiSettle(ReviewEvent reviewEvent) => _ciSettleGate?.IsWaiting(reviewEvent) ?? false;
+
+    /// <summary>
     /// 「レビュー自動開始」設定（#254）に従って reviewer を自動起動する。
     /// 起動を見送った場合はその理由を Recent activity へ残す。別のレビューが実行中で見送った場合は、
-    /// 実行終了後に再評価するためイベントを保留する（#339）。Auto-Pause 中で見送った場合は
+    /// 実行終了後に再評価するためイベントを保留する（#339）。required checks が未確定の場合は、
+    /// 確定または上限まで保留する（暫定、#456）。Auto-Pause 中で見送った場合は
     /// <see cref="StartAsync"/> が解除後の再評価まで保留する（#340）.
     /// </summary>
     /// <param name="reviewEvent">受信したレビューイベント.</param>
@@ -179,9 +202,34 @@ internal sealed class ReviewStartCoordinator
             return ReviewStartResult.Skipped(MapAutoStartSkip(outcome));
         }
 
+        // 別のレビューが実行中のときは CI を確認しない（保留のまま、実行終了後の再評価で確認する）
+        CiSettleGateDecision? ciDecision = null;
+        if (_ciSettleGate is not null)
+        {
+            ciDecision = await _ciSettleGate.EvaluateAsync(reviewEvent);
+            if (ciDecision.ActivityLog is not null)
+            {
+                await _loggingService.WriteAsync($"[Auto] {reviewEvent.PrCaption}: {ciDecision.ActivityLog}");
+            }
+
+            if (ciDecision.Action == CiSettleGateAction.Hold)
+            {
+                await HoldAsync(reviewEvent, ciDecision.HoldReasonText!);
+                return ReviewStartResult.Held(ReviewStartStatus.SkippedCiPending, ReviewAutoStartPolicy.CiSettleHoldLabel);
+            }
+
+            if (ciDecision.Action == CiSettleGateAction.SkipPullRequestClosed)
+            {
+                return ReviewStartResult.Skipped(ReviewStartStatus.SkippedPullRequestClosed);
+            }
+        }
+
         await _loggingService.WriteAsync(
             $"[Auto] {reviewEvent.PrCaption} のレビューを自動起動します（reason: {reviewEvent.Reason}）。");
-        return await StartAsync(reviewEvent, LauncherRole.Reviewer, ReviewStartTrigger.Automatic);
+        ReviewStartResult result = await StartAsync(reviewEvent, LauncherRole.Reviewer, ReviewStartTrigger.Automatic);
+        return result.IsStarted && ciDecision?.StartNote is string startNote
+            ? result with { StartNote = startNote }
+            : result;
     }
 
     /// <summary>
@@ -296,6 +344,7 @@ internal sealed class ReviewStartCoordinator
             {
                 // 手動起動でも、同じ PR のレビューを始めた時点で保留分を再評価する意味はなくなる
                 _pendingQueue.RemovePullRequest(reviewEvent);
+                _ciSettleGate?.Forget(reviewEvent);
             }
 
             ReviewStartLaunch launch = new(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor);

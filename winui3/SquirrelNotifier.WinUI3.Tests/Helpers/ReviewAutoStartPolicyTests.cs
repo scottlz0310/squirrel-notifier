@@ -4,6 +4,7 @@
 
 using FluentAssertions;
 using SquirrelNotifier.WinUI3.Helpers;
+using SquirrelNotifier.WinUI3.Services;
 
 namespace SquirrelNotifier.WinUI3.Tests.Helpers;
 
@@ -56,5 +57,59 @@ public sealed class ReviewAutoStartPolicyTests
     {
         ReviewAutoStartPolicy.DescribeSkipReason(Enum.Parse<ReviewAutoStartOutcome>(outcome))
             .Should().BeNull();
+    }
+
+    // 保留理由のラベルは通知に出る（#456）
+    [Fact]
+    public void CiSettleHoldLabel_ShouldBeCiCompletionWait()
+    {
+        ReviewAutoStartPolicy.CiSettleHoldLabel.Should().Be("CI 完了待ち");
+    }
+
+    // CI の確定待ちは最適化であり安全性の gate ではない。起動しないのは PR が閉じている場合だけ（#456）
+    [Theory]
+    [InlineData("Waiting", false, 0, "Hold", null, "CI 完了待ち（未完了: build）。確定後に自動起動します", null)]
+    [InlineData("Waiting", true, 0, "Hold", "head が更新されたため、新しい head の CI を待ち直します（未完了: build）。", "CI 完了待ち（未完了: build）。確定後に自動起動します", null)]
+    [InlineData("Settled", false, 0, "Start", null, null, null)]
+    [InlineData("Settled", false, 200, "Start", "CI が確定しました（未完了: build。待機 3 分 20 秒）。", null, null)]
+    [InlineData("Settled", false, 45, "Start", "CI が確定しました（未完了: build。待機 45 秒）。", null, null)]
+    [InlineData("Failed", false, 90, "Start", "CI に失敗があるため、待たずに起動します（未完了: build）。", null, null)]
+    [InlineData("TimedOut", false, 720, "Start", "CI 待機の上限に達したため起動します（未完了: build。待機 12 分 0 秒）。", null, "CI 待機の上限に達したため起動")]
+    [InlineData("Unavailable", false, 0, "Start", "CI の状態を取得できないため、待たずに起動します: 未完了: build", null, null)]
+    [InlineData("PullRequestClosed", false, 0, "SkipPullRequestClosed", "PR が merge または close されているため、自動起動しません。", null, null)]
+    public void DecideCiSettle_ShouldMapWaitResultToAutoStartDecision(
+        string outcome,
+        bool headMoved,
+        int waitedSeconds,
+        string expectedAction,
+        string? expectedActivityLog,
+        string? expectedHoldReasonText,
+        string? expectedStartNote)
+    {
+        CiSettleWaitResult result = new(
+            Enum.Parse<CiSettleWaitOutcome>(outcome),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "未完了: build",
+            TimeSpan.FromSeconds(waitedSeconds),
+            TimeSpan.FromSeconds(30),
+            headMoved);
+
+        CiSettleGateDecision decision = ReviewAutoStartPolicy.DecideCiSettle(result);
+
+        decision.Action.Should().Be(Enum.Parse<CiSettleGateAction>(expectedAction));
+        decision.ActivityLog.Should().Be(expectedActivityLog);
+        decision.HoldReasonText.Should().Be(expectedHoldReasonText);
+        decision.StartNote.Should().Be(expectedStartNote);
+    }
+
+    [Fact]
+    public void DecideCiSettle_ShouldRejectNullAndUnknownOutcome()
+    {
+        Action nullResult = () => ReviewAutoStartPolicy.DecideCiSettle(null!);
+        Action unknownOutcome = () => ReviewAutoStartPolicy.DecideCiSettle(
+            new CiSettleWaitResult((CiSettleWaitOutcome)99, null, string.Empty, TimeSpan.Zero));
+
+        nullResult.Should().Throw<ArgumentNullException>();
+        unknownOutcome.Should().Throw<ArgumentOutOfRangeException>();
     }
 }

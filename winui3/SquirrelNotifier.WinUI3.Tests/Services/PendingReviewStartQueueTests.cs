@@ -36,7 +36,7 @@ public sealed class PendingReviewStartQueueTests
 
         change.Should().Be(Enum.Parse<PendingReviewStartChange>(expectedChange));
         queue.Count.Should().Be(expectedCount);
-        queue.Peek()!.EventId.Should().Be(expectedFirstEventId);
+        queue.Snapshot()[0].EventId.Should().Be(expectedFirstEventId);
     }
 
     [Fact]
@@ -60,15 +60,46 @@ public sealed class PendingReviewStartQueueTests
 
         queue.AddOrReplace(CreateReviewEvent("evt_3", "owner/repo", 42, _baseTime.AddSeconds(2)));
 
-        queue.Peek()!.EventId.Should().Be("evt_3");
-        queue.Remove(queue.Peek()!).Should().BeTrue();
-        queue.Peek()!.EventId.Should().Be("evt_2");
+        queue.Snapshot()[0].EventId.Should().Be("evt_3");
+        queue.Remove(queue.Snapshot()[0]).Should().BeTrue();
+        queue.Snapshot()[0].EventId.Should().Be("evt_2");
     }
 
     [Fact]
-    public void Peek_ShouldReturnNull_WhenEmpty()
+    public void Snapshot_ShouldReturnEmpty_WhenNothingIsPending()
     {
-        new PendingReviewStartQueue().Peek().Should().BeNull();
+        new PendingReviewStartQueue().Snapshot().Should().BeEmpty();
+    }
+
+    // 保留した順に返し、返した一覧は、その後の保留の変化に影響されない
+    [Fact]
+    public void Snapshot_ShouldReturnPendingEventsInOrder_AndNotFollowLaterChanges()
+    {
+        PendingReviewStartQueue queue = new();
+        ReviewEvent first = CreateReviewEvent("evt_1", "owner/repo", 42, _baseTime);
+        ReviewEvent second = CreateReviewEvent("evt_2", "owner/repo", 43, _baseTime.AddSeconds(1));
+        queue.AddOrReplace(first);
+        queue.AddOrReplace(second);
+
+        IReadOnlyList<ReviewEvent> snapshot = queue.Snapshot();
+        queue.Remove(first);
+        queue.AddOrReplace(CreateReviewEvent("evt_3", "owner/repo", 44, _baseTime.AddSeconds(2)));
+
+        snapshot.Should().Equal(first, second);
+    }
+
+    [Fact]
+    public void Contains_ShouldMatchOnlyTheSameInstance()
+    {
+        PendingReviewStartQueue queue = new();
+        ReviewEvent pending = CreateReviewEvent("evt_1", "owner/repo", 42, _baseTime);
+        ReviewEvent samePullRequest = CreateReviewEvent("evt_2", "owner/repo", 42, _baseTime.AddSeconds(1));
+        queue.AddOrReplace(pending);
+
+        queue.Contains(pending).Should().BeTrue();
+        queue.Contains(samePullRequest).Should().BeFalse();
+        queue.Remove(pending);
+        queue.Contains(pending).Should().BeFalse();
     }
 
     [Theory]

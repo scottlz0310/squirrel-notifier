@@ -57,9 +57,20 @@ internal sealed class PendingReviewStartQueue
         return PendingReviewStartChange.Replaced;
     }
 
-    /// <summary>最も早く保留した PR のイベントを返す.</summary>
-    /// <returns>保留中のイベント。無い場合は <see langword="null"/>.</returns>
-    public ReviewEvent? Peek() => _events.Count > 0 ? _events[0] : null;
+    /// <summary>
+    /// 保留中のイベントを、保留した順に返す。返した一覧は、その後の保留の変化に影響されない.
+    /// </summary>
+    /// <returns>保留中のイベントの一覧。無い場合は空.</returns>
+    public IReadOnlyList<ReviewEvent> Snapshot() => [.. _events];
+
+    /// <summary>指定したイベントそのものを保留しているか.</summary>
+    /// <param name="reviewEvent">確認するイベント.</param>
+    /// <returns>保留している場合は <see langword="true"/>.</returns>
+    public bool Contains(ReviewEvent reviewEvent)
+    {
+        ArgumentNullException.ThrowIfNull(reviewEvent);
+        return _events.Contains(reviewEvent);
+    }
 
     /// <summary>指定したイベントそのものを保留している場合だけ外す.</summary>
     /// <param name="reviewEvent">外すイベント.</param>
