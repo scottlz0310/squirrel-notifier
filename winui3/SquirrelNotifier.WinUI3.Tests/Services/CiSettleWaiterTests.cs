@@ -432,6 +432,24 @@ public sealed class CiSettleWaiterTests
         second.Waited.Should().Be(TimeSpan.FromSeconds(20));
     }
 
+    // 次回確認が予定時刻を過ぎ、前回確認から上限以上空いていたら待機を新しく始める
+    [Fact]
+    public async Task CheckAsync_ShouldRestartWait_WhenNextCheckIsDelayedBeyondMaxWait()
+    {
+        _source.Add(Snapshot("Pending"));
+        CiSettleWaitOptions options = new(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(45));
+        CiSettleWaiter waiter = CreateWaiter();
+        CiSettleWaitResult first = await waiter.CheckAsync(_repository, 42, options, CancellationToken.None);
+        _clock.Advance(TimeSpan.FromSeconds(50));
+
+        CiSettleWaitResult second = await waiter.CheckAsync(_repository, 42, options, CancellationToken.None);
+
+        first.RetryAfter.Should().Be(TimeSpan.FromSeconds(30));
+        second.Outcome.Should().Be(CiSettleWaitOutcome.Waiting);
+        second.Waited.Should().Be(TimeSpan.Zero);
+        second.RetryAfter.Should().Be(TimeSpan.FromSeconds(30));
+    }
+
     // CheckAsync（保留キューからの再評価）が予約する次の確認も、残りの上限を越えない
     [Theory]
     [InlineData(30, 45, 0, 30)]
