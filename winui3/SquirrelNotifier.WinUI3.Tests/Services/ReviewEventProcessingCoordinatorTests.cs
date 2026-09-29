@@ -180,6 +180,7 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
     [Theory]
     [InlineData("SkippedDisabled")]
     [InlineData("SkippedUnsupportedReason")]
+    [InlineData("SkippedSuperseded")]
     [InlineData("Failed")]
     public async Task ProcessPendingAsync_ShouldDropEventAndContinue_WhenNotStarted(string firstStatus)
     {
@@ -364,6 +365,26 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
 
         evaluatedEventIds.Should().Equal("evt_1");
         pendingQueue.Snapshot().Should().Equal(first);
+    }
+
+    // 評価中に同じ PR が起動された場合は、起動済みのレビューに任せる。「レビューする」を促す通知は出さない（#456）
+    [Theory]
+    [InlineData("SkippedSuperseded", false)]
+    [InlineData("SkippedDisabled", true)]
+    [InlineData("SkippedCiPending", true)]
+    [InlineData("SkippedPullRequestClosed", true)]
+    public async Task ProcessAsync_ShouldNotify_UnlessSupersededByAnotherReviewerStart(string status, bool expectedShouldNotify)
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            new ReviewEventCollectionCoordinator(),
+            cleanupCoordinator,
+            _ => Task.FromResult(ReviewStartResult.Skipped(Enum.Parse<ReviewStartStatus>(status))));
+
+        ReviewEventProcessingResult result = await coordinator.ProcessAsync(CreateReviewEvent());
+
+        result.ShouldNotify.Should().Be(expectedShouldNotify);
     }
 
     [Fact]

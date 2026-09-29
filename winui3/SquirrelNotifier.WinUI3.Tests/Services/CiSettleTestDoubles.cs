@@ -37,6 +37,26 @@ internal sealed class ScriptedCiSettleSource : ICiSettleSource
 }
 
 /// <summary>
+/// 呼び出しごとに完了を手動で制御できる取得元。CI の確認（gh）の await の間に、別の操作
+/// （手動起動など）が入る状況を再現する.
+/// </summary>
+internal sealed class ControllableCiSettleSource : ICiSettleSource
+{
+    private readonly List<TaskCompletionSource<CiSettleSnapshot>> _calls = [];
+
+    public int CallCount => _calls.Count;
+
+    public Task<CiSettleSnapshot> GetAsync(string repository, int prNumber, CancellationToken cancellationToken)
+    {
+        TaskCompletionSource<CiSettleSnapshot> call = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _calls.Add(call);
+        return call.Task;
+    }
+
+    public void Complete(int callIndex, CiSettleSnapshot snapshot) => _calls[callIndex].SetResult(snapshot);
+}
+
+/// <summary>
 /// 時刻を手動で進める <see cref="TimeProvider"/>。作成されたタイマーを記録し、
 /// <see cref="FireTimersImmediately"/> の間は、待機（<c>Task.Delay</c>）を要求された分だけ時刻を進めて即座に満了させる.
 /// </summary>

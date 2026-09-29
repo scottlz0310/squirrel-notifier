@@ -748,6 +748,107 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         coordinator.IsWaitingForCiSettle(reviewEvent).Should().BeTrue();
     }
 
+    // CI の確認（gh）の await の間に、同じ PR を手動で起動した場合、自動評価はそれを知らずに続行してはならない。
+    // 続行すると、手動のレビューが実行中なら保留に復活して終了後に二重起動し、終わっていればそのまま二重起動する（#459 のレビュー指摘）
+    [Theory]
+    [InlineData("Passed")]
+    [InlineData("Pending")]
+    [InlineData("Failed")]
+    public async Task TryStartAutomaticallyAsync_ShouldAbandon_WhenReviewerIsStartedManuallyDuringCiCheck(string ciState)
+    {
+        ControllableCiSettleSource source = new();
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = new(new CiSettleWaiter(source, _ciClock), _ciClock);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        Task<ReviewStartResult> automatic = coordinator.TryStartAutomaticallyAsync(reviewEvent);
+        source.CallCount.Should().Be(1);
+
+        ReviewStartResult manual = await coordinator.StartAsync(
+            reviewEvent,
+            LauncherRole.Reviewer,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+        source.Complete(0, ScriptedCiSettleSource.Snapshot(ciState));
+        ReviewStartResult result = await automatic;
+
+        manual.Status.Should().Be(ReviewStartStatus.Started);
+        result.Status.Should().Be(ReviewStartStatus.SkippedSuperseded);
+        result.Launch.Should().BeNull();
+        launcher.StartSessionCalls.Should().ContainSingle();
+        _pendingQueue.Count.Should().Be(0);
+        coordinator.IsWaitingForCiSettle(reviewEvent).Should().BeFalse();
+        _logLines.Should().ContainSingle(line => line.Contains("同じ PR のレビューが起動されたため、自動起動を取りやめます", StringComparison.Ordinal));
+    }
+
+    // 自動起動どうしでも同じ。同じ PR の 2 つの評価が並行し、先に起動した側があれば、後の側は起動しない
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldAbandon_WhenAnotherAutomaticEvaluationStartedTheSamePullRequest()
+    {
+        ControllableCiSettleSource source = new();
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = new(new CiSettleWaiter(source, _ciClock), _ciClock);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        Task<ReviewStartResult> first = coordinator.TryStartAutomaticallyAsync(CreateReviewEvent());
+        Task<ReviewStartResult> second = coordinator.TryStartAutomaticallyAsync(CreateReviewEvent("synchronized"));
+        source.CallCount.Should().Be(2);
+
+        source.Complete(0, ScriptedCiSettleSource.Snapshot("Passed"));
+        ReviewStartResult firstResult = await first;
+        source.Complete(1, ScriptedCiSettleSource.Snapshot("Passed"));
+        ReviewStartResult secondResult = await second;
+
+        firstResult.Status.Should().Be(ReviewStartStatus.Started);
+        secondResult.Status.Should().Be(ReviewStartStatus.SkippedSuperseded);
+        launcher.StartSessionCalls.Should().ContainSingle();
+    }
+
+    // 世代は PR ごと。別の PR の手動起動では、自動評価を取りやめない（取りやめると、その PR のイベントが失われる）
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldContinue_WhenAnotherPullRequestIsStartedManuallyDuringCiCheck()
+    {
+        ControllableCiSettleSource source = new();
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = new(new CiSettleWaiter(source, _ciClock), _ciClock);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent automaticEvent = CreateReviewEvent();
+        ReviewEvent otherEvent = new() { Repository = "owner/repo", PrNumber = 43, Reason = "opened" };
+        Task<ReviewStartResult> automatic = coordinator.TryStartAutomaticallyAsync(automaticEvent);
+
+        await coordinator.StartAsync(
+            otherEvent,
+            LauncherRole.Reviewer,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+        source.Complete(0, ScriptedCiSettleSource.Snapshot("Passed"));
+        ReviewStartResult result = await automatic;
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        launcher.StartSessionCalls.Should().HaveCount(2);
+    }
+
+    // reviewed 側の起動は reviewer の世代を進めない
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldContinue_WhenReviewedSideIsStartedDuringCiCheck()
+    {
+        ControllableCiSettleSource source = new();
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = new(new CiSettleWaiter(source, _ciClock), _ciClock);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        Task<ReviewStartResult> automatic = coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        await coordinator.StartAsync(
+            reviewEvent,
+            LauncherRole.Reviewed,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+        source.Complete(0, ScriptedCiSettleSource.Snapshot("Passed"));
+        ReviewStartResult result = await automatic;
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+    }
+
     [Fact]
     public async Task TryStartAutomaticallyAsync_ShouldStartWithoutCiCheck_WhenNoGateIsConfigured()
     {

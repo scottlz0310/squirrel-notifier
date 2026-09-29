@@ -173,7 +173,8 @@ internal sealed class ReviewEventProcessingCoordinator
 /// </summary>
 internal sealed record ReviewEventProcessingResult(ReviewStartResult? StartResult)
 {
-    public bool ShouldNotify => StartResult is not null;
+    // 評価中に同じ PR が起動された場合は、起動済みのレビューに任せる。「レビューする」を促す通知は出さない
+    public bool ShouldNotify => StartResult is not null && StartResult.Status != ReviewStartStatus.SkippedSuperseded;
 }
 
 /// <summary>

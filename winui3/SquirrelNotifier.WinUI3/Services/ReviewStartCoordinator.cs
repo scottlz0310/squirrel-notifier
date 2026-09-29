@@ -39,6 +39,12 @@ internal enum ReviewStartStatus
     /// <summary>自動起動の対象の PR が merge または close されていたため見送った（暫定、#456）.</summary>
     SkippedPullRequestClosed,
 
+    /// <summary>
+    /// 自動起動の評価中に、同じ PR の reviewer が別経路（手動起動など）で起動されたため取りやめた（暫定、#456）。
+    /// 起動済みのレビューに任せるため、保留にも通知にもしない.
+    /// </summary>
+    SkippedSuperseded,
+
     /// <summary>「レビュー自動開始」設定が off のため見送った.</summary>
     SkippedDisabled,
 
@@ -113,6 +119,9 @@ internal sealed class ReviewStartCoordinator
     private readonly LoggingService _loggingService;
     private readonly ReviewCycleCoordinator? _reviewCycleCoordinator;
     private readonly ReviewCiSettleGate? _ciSettleGate;
+
+    // PR ごとの reviewer 起動の世代。await をまたぐ自動評価が、その間の別経路の起動を検出するために使う
+    private readonly Dictionary<string, int> _reviewerStartGenerations = new(StringComparer.OrdinalIgnoreCase);
 
     // Auto-Pause 確認ダイアログ等の await 中は IsRunning がまだ false のため、起動ボタンの
     // 連打で再入し ContentDialog の多重表示（WinUI3 では例外）になる。それを防ぐフラグ
@@ -202,11 +211,20 @@ internal sealed class ReviewStartCoordinator
             return ReviewStartResult.Skipped(MapAutoStartSkip(outcome));
         }
 
+        // CI の確認（gh）は数十秒かかり得る。その await の間に同じ PR の reviewer が別経路（手動起動など）で
+        // 起動されたら、この自動評価はそれを知らずに続行し、二重起動・保留への復活を起こす。起動の世代で検出する
+        int startGeneration = GetReviewerStartGeneration(reviewEvent);
+
         // 別のレビューが実行中のときは CI を確認しない（保留のまま、実行終了後の再評価で確認する）
         CiSettleGateDecision? ciDecision = null;
         if (_ciSettleGate is not null)
         {
             ciDecision = await _ciSettleGate.EvaluateAsync(reviewEvent);
+            if (GetReviewerStartGeneration(reviewEvent) != startGeneration)
+            {
+                return await AbandonSupersededAsync(reviewEvent);
+            }
+
             if (ciDecision.ActivityLog is not null)
             {
                 await _loggingService.WriteAsync($"[Auto] {reviewEvent.PrCaption}: {ciDecision.ActivityLog}");
@@ -226,6 +244,14 @@ internal sealed class ReviewStartCoordinator
 
         await _loggingService.WriteAsync(
             $"[Auto] {reviewEvent.PrCaption} のレビューを自動起動します（reason: {reviewEvent.Reason}）。");
+
+        // 記録の await の間にも、同じ PR が起動され得る。StartAsync の判定（実行中・起動処理中）は
+        // 同じ PR を区別しないため、ここで確認してから、await を挟まずに StartAsync へ入る
+        if (GetReviewerStartGeneration(reviewEvent) != startGeneration)
+        {
+            return await AbandonSupersededAsync(reviewEvent);
+        }
+
         ReviewStartResult result = await StartAsync(reviewEvent, LauncherRole.Reviewer, ReviewStartTrigger.Automatic);
         return result.IsStarted && ciDecision?.StartNote is string startNote
             ? result with { StartNote = startNote }
@@ -345,6 +371,7 @@ internal sealed class ReviewStartCoordinator
                 // 手動起動でも、同じ PR のレビューを始めた時点で保留分を再評価する意味はなくなる
                 _pendingQueue.RemovePullRequest(reviewEvent);
                 _ciSettleGate?.Forget(reviewEvent);
+                _reviewerStartGenerations[GetPullRequestKey(reviewEvent)] = GetReviewerStartGeneration(reviewEvent) + 1;
             }
 
             ReviewStartLaunch launch = new(session, viewModel, rateLimitGaugeViewModel, rateLimitSessionMonitor);
@@ -390,6 +417,8 @@ internal sealed class ReviewStartCoordinator
         return $"{reviewEvent.Repository}#{reviewEvent.PrNumber}（{roleLabel}）";
     }
 
+    private static string GetPullRequestKey(ReviewEvent reviewEvent) => $"{reviewEvent.Repository}#{reviewEvent.PrNumber}";
+
     private static ReviewStartStatus MapAutoStartSkip(ReviewAutoStartOutcome outcome)
         => outcome switch
         {
@@ -397,6 +426,19 @@ internal sealed class ReviewStartCoordinator
             ReviewAutoStartOutcome.SkippedUnsupportedReason => ReviewStartStatus.SkippedUnsupportedReason,
             _ => ReviewStartStatus.SkippedBusy,
         };
+
+    private int GetReviewerStartGeneration(ReviewEvent reviewEvent)
+        => _reviewerStartGenerations.GetValueOrDefault(GetPullRequestKey(reviewEvent));
+
+    // 評価の途中で同じ PR が起動された。起動済みのレビューに任せ、保留へ戻さず、待機の状態も残さない
+    // （CI の確認で作り直された状態が、次の評価に持ち越されないようにする）
+    private async Task<ReviewStartResult> AbandonSupersededAsync(ReviewEvent reviewEvent)
+    {
+        _ciSettleGate?.Forget(reviewEvent);
+        await _loggingService.WriteAsync(
+            $"[Auto] {reviewEvent.PrCaption}: 同じ PR のレビューが起動されたため、自動起動を取りやめます。");
+        return ReviewStartResult.Skipped(ReviewStartStatus.SkippedSuperseded);
+    }
 
     private Task HoldForBusyAsync(ReviewEvent reviewEvent)
         => HoldAsync(reviewEvent, $"{ReviewAutoStartPolicy.BusyReasonText}。実行終了後に自動起動します");
