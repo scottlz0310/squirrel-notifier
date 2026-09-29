@@ -46,26 +46,26 @@ internal sealed class ReviewNotificationCoordinator
         }
     }
 
-    public void Show(ReviewEvent reviewEvent, bool isAutoStarted, string? holdReason = null)
+    public void Show(ReviewEvent reviewEvent, bool isAutoStarted, string? statusNote = null)
     {
         if (!_isPopupAvailable)
         {
-            ShowFallback(reviewEvent, isAutoStarted, holdReason);
+            ShowFallback(reviewEvent, isAutoStarted, statusNote);
             return;
         }
 
         try
         {
-            _showPopup(reviewEvent, isAutoStarted, holdReason);
+            _showPopup(reviewEvent, isAutoStarted, statusNote);
         }
         catch (Exception ex)
         {
             _ = _writeLogAsync(
                 $"[UI] Failed to show review popup: {ex.Message}");
-            ShowFallback(reviewEvent, isAutoStarted, holdReason);
+            ShowFallback(reviewEvent, isAutoStarted, statusNote);
         }
     }
 
-    public void ShowFallback(ReviewEvent reviewEvent, bool isAutoStarted, string? holdReason = null)
-        => _showBalloon(reviewEvent, isAutoStarted, holdReason);
+    public void ShowFallback(ReviewEvent reviewEvent, bool isAutoStarted, string? statusNote = null)
+        => _showBalloon(reviewEvent, isAutoStarted, statusNote);
 }

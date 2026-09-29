@@ -32,7 +32,8 @@ $limits = [ordered]@{
     # #349 のログインダイアログ Closed 通知を反映。ユーザー閉鎖とプログラム閉鎖の判定は Services 側に配置している。
     # #257 の review cycle 状態変更購読と UI スレッド配送を反映。サイクル判定・永続化は Services 側に配置している。
     # #388 のトレイ通知初期化待ちを TrayNotificationCoordinator へ移し、code-behind の行数が減った。
-    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1465
+    # #456 の CI 確定待ちのゲートの生成・再評価の契機の購読と破棄・通知への注記の受け渡しを反映。判断は Helpers / Services 側に配置している。
+    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1473
     # #305 の resume 失敗メッセージを既存 InfoBar に表示する配線を反映。
     "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 318
     # #276 の status client / Coordinator の生成と終了時破棄を反映。

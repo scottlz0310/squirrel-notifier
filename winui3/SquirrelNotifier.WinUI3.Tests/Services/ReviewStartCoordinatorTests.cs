@@ -19,6 +19,8 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
     private readonly List<string> _logLines = [];
     private readonly PendingReviewStartQueue _pendingQueue = new();
     private readonly AutoPauseResumeScheduler _autoPauseResumeScheduler = new();
+    private readonly CiSettleTestClock _ciClock = new(new DateTimeOffset(2026, 9, 29, 12, 0, 0, TimeSpan.Zero));
+    private readonly ScriptedCiSettleSource _ciSource = new();
 
     [Theory]
     [InlineData("Reviewer", "Manual")]
@@ -134,7 +136,7 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         result.HoldReason.Should().Be(ReviewAutoStartPolicy.AutoPausedHoldLabel);
         promptShown.Should().BeFalse();
         launcher.StartSessionCalls.Should().BeEmpty();
-        _pendingQueue.Peek().Should().BeSameAs(reviewEvent);
+        _pendingQueue.Snapshot()[0].Should().BeSameAs(reviewEvent);
         _logLines.Should().ContainSingle(line =>
             line.Contains("のレビューを保留しました: Auto-Pause 中のため", StringComparison.Ordinal)
             && line.Contains("解除後に自動起動します（reason: opened）。", StringComparison.Ordinal));
@@ -274,14 +276,14 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(pendingEvent);
 
         result.Status.Should().Be(ReviewStartStatus.SkippedBusy);
-        _pendingQueue.Peek().Should().BeSameAs(pendingEvent);
+        _pendingQueue.Snapshot()[0].Should().BeSameAs(pendingEvent);
         abandonedCount.Should().Be(0);
 
         overridePrompt.SetResult(false);
         (await manualStart!).Status.Should().Be(ReviewStartStatus.CancelledByUser);
 
         launcher.StartSessionCalls.Should().BeEmpty();
-        _pendingQueue.Peek().Should().BeSameAs(pendingEvent);
+        _pendingQueue.Snapshot()[0].Should().BeSameAs(pendingEvent);
         abandonedCount.Should().Be(1);
     }
 
@@ -497,7 +499,7 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(reviewEvent);
 
         result.Status.Should().Be(ReviewStartStatus.SkippedBusy);
-        _pendingQueue.Peek().Should().BeSameAs(reviewEvent);
+        _pendingQueue.Snapshot()[0].Should().BeSameAs(reviewEvent);
         _logLines.Should().ContainSingle().Which.Should().Contain(
             $"[Auto] owner/repo #42 のレビューを保留しました: {ReviewAutoStartPolicy.BusyReasonText}。実行終了後に自動起動します（reason: opened）。");
     }
@@ -553,6 +555,313 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             line.Contains("[Auto] owner/repo #42 のレビューを自動起動します（reason: opened）。", StringComparison.Ordinal));
     }
 
+    // --- CI の確定待ち（暫定、#456） ---
+
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldHoldEvent_WhenCiIsPending()
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Pending"));
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        result.Status.Should().Be(ReviewStartStatus.SkippedCiPending);
+        result.HoldReason.Should().Be("CI 完了待ち");
+        result.Launch.Should().BeNull();
+        launcher.StartSessionCalls.Should().BeEmpty();
+        _pendingQueue.Snapshot()[0].Should().BeSameAs(reviewEvent);
+        coordinator.IsWaitingForCiSettle(reviewEvent).Should().BeTrue();
+        _logLines.Should().ContainSingle().Which.Should().Contain(
+            "[Auto] owner/repo #42 のレビューを保留しました: CI 完了待ち（Pending detail）。確定後に自動起動します（reason: opened）。");
+    }
+
+    // 保留したイベントを再評価して、確定していたら起動する。待った時間を Recent activity に残す
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldStart_WhenPendingCiSettlesOnReevaluation()
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Pending"), ScriptedCiSettleSource.Snapshot("Passed"));
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+        _ciClock.Advance(TimeSpan.FromSeconds(60));
+        _logLines.Clear();
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        result.StartNote.Should().BeNull();
+        launcher.StartSessionCalls.Should().ContainSingle();
+        _pendingQueue.Count.Should().Be(0);
+        coordinator.IsWaitingForCiSettle(reviewEvent).Should().BeFalse();
+        _logLines.Should().HaveCount(2);
+        _logLines[0].Should().Contain("[Auto] owner/repo #42: CI が確定しました（Passed detail。待機 1 分 0 秒）。");
+        _logLines[1].Should().Contain("のレビューを自動起動します");
+    }
+
+    // 待機が続いている間の再評価は、保留を更新せず、Recent activity にも行を増やさない
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldNotLogAgain_WhenStillPendingOnReevaluation()
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Pending"));
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(new FakeLauncherService(), CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+        _ciClock.Advance(TimeSpan.FromSeconds(30));
+        _logLines.Clear();
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        result.Status.Should().Be(ReviewStartStatus.SkippedCiPending);
+        _pendingQueue.Count.Should().Be(1);
+        _logLines.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldStartWithNote_WhenMaxWaitIsReached()
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Pending"));
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        // 確認の間隔ごとの再評価を、上限に達するまで続ける
+        for (TimeSpan elapsed = TimeSpan.Zero; elapsed < ReviewCiSettleGate.WaitOptions.MaxWait; elapsed += ReviewCiSettleGate.WaitOptions.Interval)
+        {
+            result.Status.Should().Be(ReviewStartStatus.SkippedCiPending);
+            _ciClock.Advance(ReviewCiSettleGate.WaitOptions.Interval);
+            _logLines.Clear();
+            result = await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+        }
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        result.StartNote.Should().Be(ReviewAutoStartPolicy.CiSettleTimedOutText);
+        launcher.StartSessionCalls.Should().ContainSingle();
+        _logLines[0].Should().Contain("CI 待機の上限に達したため起動します");
+    }
+
+    // 失敗・取得不能は待たずに起動し、理由を Recent activity に残す。PR が閉じていれば起動しない
+    [Theory]
+    [InlineData("Failed", "Started", "CI に失敗があるため、待たずに起動します（Failed detail）。")]
+    [InlineData("Unavailable", "Started", "CI の状態を取得できないため、待たずに起動します: Unavailable detail")]
+    [InlineData("PullRequestClosed", "SkippedPullRequestClosed", "PR が merge または close されているため、自動起動しません。")]
+    public async Task TryStartAutomaticallyAsync_ShouldNotWait_WhenCiIsAlreadyDetermined(
+        string ciState,
+        string expectedStatus,
+        string expectedLog)
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot(ciState));
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(CreateReviewEvent());
+
+        result.Status.Should().Be(Enum.Parse<ReviewStartStatus>(expectedStatus));
+        result.StartNote.Should().BeNull();
+        launcher.StartSessionCalls.Should().HaveCount(expectedStatus == "Started" ? 1 : 0);
+        _pendingQueue.Count.Should().Be(0);
+        _logLines.Should().Contain(line => line.Contains($"[Auto] owner/repo #42: {expectedLog}", StringComparison.Ordinal));
+    }
+
+    // 待たずに確定した場合は、CI の待機を入れる前と記録が変わらない
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldOnlyLogStart_WhenCiIsAlreadyPassed()
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Passed"));
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(new FakeLauncherService(), CreateAutoStartSettings(), ciSettleGate: gate);
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(CreateReviewEvent());
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        _logLines.Should().ContainSingle().Which.Should().Contain("[Auto] owner/repo #42 のレビューを自動起動します（reason: opened）。");
+    }
+
+    // 設定 off・対象外の reason・別のレビューの実行中では、CI を確認しない（gh を呼ばない）
+    [Theory]
+    [InlineData(false, "opened", false)]
+    [InlineData(true, "review-posted", false)]
+    [InlineData(true, "opened", true)]
+    public async Task TryStartAutomaticallyAsync_ShouldNotCheckCi_WhenNotReadyToStart(bool autoStartEnabled, string reason, bool isRunning)
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Passed"));
+        SettingsService settingsService = CreateSettingsService();
+        settingsService.UpdateAutoReviewStartEnabled(autoStartEnabled);
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(
+            new FakeLauncherService { IsRunning = isRunning }, settingsService, ciSettleGate: gate);
+
+        await coordinator.TryStartAutomaticallyAsync(CreateReviewEvent(reason));
+
+        _ciSource.Calls.Should().BeEmpty();
+    }
+
+    // 手動の「レビューする」は従来どおり即時に起動する。CI を確認せず、待機の状態も破棄する
+    [Fact]
+    public async Task StartAsync_ShouldStartManuallyWithoutCheckingCi_AndForgetWait()
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Pending"));
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+        _ciSource.Calls.Should().ContainSingle();
+
+        ReviewStartResult result = await coordinator.StartAsync(
+            reviewEvent,
+            LauncherRole.Reviewer,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        launcher.StartSessionCalls.Should().ContainSingle();
+        _ciSource.Calls.Should().ContainSingle();
+        coordinator.IsWaitingForCiSettle(reviewEvent).Should().BeFalse();
+        _pendingQueue.Count.Should().Be(0);
+    }
+
+    // reviewed 側の起動は CI の待機と無関係
+    [Fact]
+    public async Task StartAsync_ShouldKeepWait_WhenReviewedSideStarts()
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Pending"));
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(new FakeLauncherService(), CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        await coordinator.StartAsync(
+            reviewEvent,
+            LauncherRole.Reviewed,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+
+        coordinator.IsWaitingForCiSettle(reviewEvent).Should().BeTrue();
+    }
+
+    // CI の確認（gh）の await の間に、同じ PR を手動で起動した場合、自動評価はそれを知らずに続行してはならない。
+    // 続行すると、手動のレビューが実行中なら保留に復活して終了後に二重起動し、終わっていればそのまま二重起動する（#459 のレビュー指摘）
+    [Theory]
+    [InlineData("Passed")]
+    [InlineData("Pending")]
+    [InlineData("Failed")]
+    public async Task TryStartAutomaticallyAsync_ShouldAbandon_WhenReviewerIsStartedManuallyDuringCiCheck(string ciState)
+    {
+        ControllableCiSettleSource source = new();
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = new(new CiSettleWaiter(source, _ciClock), _ciClock);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        Task<ReviewStartResult> automatic = coordinator.TryStartAutomaticallyAsync(reviewEvent);
+        source.CallCount.Should().Be(1);
+
+        ReviewStartResult manual = await coordinator.StartAsync(
+            reviewEvent,
+            LauncherRole.Reviewer,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+        source.Complete(0, ScriptedCiSettleSource.Snapshot(ciState));
+        ReviewStartResult result = await automatic;
+
+        manual.Status.Should().Be(ReviewStartStatus.Started);
+        result.Status.Should().Be(ReviewStartStatus.SkippedSuperseded);
+        result.Launch.Should().BeNull();
+        launcher.StartSessionCalls.Should().ContainSingle();
+        _pendingQueue.Count.Should().Be(0);
+        coordinator.IsWaitingForCiSettle(reviewEvent).Should().BeFalse();
+        _logLines.Should().ContainSingle(line => line.Contains("同じ PR のレビューが起動されたため、自動起動を取りやめます", StringComparison.Ordinal));
+    }
+
+    // 自動起動どうしでも同じ。同じ PR の 2 つの評価が並行し、先に起動した側があれば、後の側は起動しない
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldAbandon_WhenAnotherAutomaticEvaluationStartedTheSamePullRequest()
+    {
+        ControllableCiSettleSource source = new();
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = new(new CiSettleWaiter(source, _ciClock), _ciClock);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        Task<ReviewStartResult> first = coordinator.TryStartAutomaticallyAsync(CreateReviewEvent());
+        Task<ReviewStartResult> second = coordinator.TryStartAutomaticallyAsync(CreateReviewEvent("synchronized"));
+        source.CallCount.Should().Be(2);
+
+        source.Complete(0, ScriptedCiSettleSource.Snapshot("Passed"));
+        ReviewStartResult firstResult = await first;
+        source.Complete(1, ScriptedCiSettleSource.Snapshot("Passed"));
+        ReviewStartResult secondResult = await second;
+
+        firstResult.Status.Should().Be(ReviewStartStatus.Started);
+        secondResult.Status.Should().Be(ReviewStartStatus.SkippedSuperseded);
+        launcher.StartSessionCalls.Should().ContainSingle();
+    }
+
+    // 世代は PR ごと。別の PR の手動起動では、自動評価を取りやめない（取りやめると、その PR のイベントが失われる）
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldContinue_WhenAnotherPullRequestIsStartedManuallyDuringCiCheck()
+    {
+        ControllableCiSettleSource source = new();
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = new(new CiSettleWaiter(source, _ciClock), _ciClock);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent automaticEvent = CreateReviewEvent();
+        ReviewEvent otherEvent = new() { Repository = "owner/repo", PrNumber = 43, Reason = "opened" };
+        Task<ReviewStartResult> automatic = coordinator.TryStartAutomaticallyAsync(automaticEvent);
+
+        await coordinator.StartAsync(
+            otherEvent,
+            LauncherRole.Reviewer,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+        source.Complete(0, ScriptedCiSettleSource.Snapshot("Passed"));
+        ReviewStartResult result = await automatic;
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        launcher.StartSessionCalls.Should().HaveCount(2);
+    }
+
+    // reviewed 側の起動は reviewer の世代を進めない
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldContinue_WhenReviewedSideIsStartedDuringCiCheck()
+    {
+        ControllableCiSettleSource source = new();
+        FakeLauncherService launcher = new();
+        using ReviewCiSettleGate gate = new(new CiSettleWaiter(source, _ciClock), _ciClock);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), ciSettleGate: gate);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+        Task<ReviewStartResult> automatic = coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        await coordinator.StartAsync(
+            reviewEvent,
+            LauncherRole.Reviewed,
+            ReviewStartTrigger.Manual,
+            _ => Task.FromResult(true));
+        source.Complete(0, ScriptedCiSettleSource.Snapshot("Passed"));
+        ReviewStartResult result = await automatic;
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+    }
+
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldStartWithoutCiCheck_WhenNoGateIsConfigured()
+    {
+        FakeLauncherService launcher = new();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings());
+        ReviewEvent reviewEvent = CreateReviewEvent();
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        coordinator.IsWaitingForCiSettle(reviewEvent).Should().BeFalse();
+    }
+
     [Fact]
     public void IsBusy_ShouldFollowLauncherRunningState()
     {
@@ -584,10 +893,20 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
 
     private SettingsService CreateSettingsService() => new(_workingDirectory, pnpmBinDir: string.Empty);
 
+    private SettingsService CreateAutoStartSettings()
+    {
+        SettingsService settingsService = CreateSettingsService();
+        settingsService.UpdateAutoReviewStartEnabled(true);
+        return settingsService;
+    }
+
+    private ReviewCiSettleGate CreateCiSettleGate() => new(new CiSettleWaiter(_ciSource, _ciClock), _ciClock);
+
     private ReviewStartCoordinator CreateCoordinator(
         IReviewLauncherService launcherService,
         SettingsService? settingsService = null,
-        Action<string>? onLogAppended = null)
+        Action<string>? onLogAppended = null,
+        ReviewCiSettleGate? ciSettleGate = null)
     {
         LoggingService loggingService = new(_workingDirectory);
         loggingService.LogAppended += (_, line) =>
@@ -602,7 +921,9 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             new AutoPauseGate(),
             _pendingQueue,
             _autoPauseResumeScheduler,
-            loggingService);
+            loggingService,
+            reviewCycleCoordinator: null,
+            ciSettleGate);
     }
 
     private async Task WriteSnapshotAsync(string agentId, double usedPercentage)

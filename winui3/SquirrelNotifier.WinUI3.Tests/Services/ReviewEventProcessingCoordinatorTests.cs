@@ -139,7 +139,7 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
         result!.ReviewEvent.Should().BeSameAs(first);
         result.StartResult.IsStarted.Should().BeTrue();
         startedEventIds.Should().Equal("evt_1");
-        pendingQueue.Peek().Should().BeSameAs(second);
+        pendingQueue.Snapshot()[0].Should().BeSameAs(second);
         logLines.Should().ContainSingle().Which.Should().Contain(
             "[Auto] 保留していた owner/repo #42 の自動起動を再評価します（reason: opened）。");
     }
@@ -173,13 +173,14 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
         result.Should().BeNull();
         startCalls.Should().Be(1);
         pendingQueue.Count.Should().Be(2);
-        pendingQueue.Peek().Should().BeSameAs(first);
+        pendingQueue.Snapshot()[0].Should().BeSameAs(first);
     }
 
     // 起動しなかった結果（設定 off・対象外・起動失敗）は保留から外し、次の保留を評価する
     [Theory]
     [InlineData("SkippedDisabled")]
     [InlineData("SkippedUnsupportedReason")]
+    [InlineData("SkippedSuperseded")]
     [InlineData("Failed")]
     public async Task ProcessPendingAsync_ShouldDropEventAndContinue_WhenNotStarted(string firstStatus)
     {
@@ -202,6 +203,188 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
 
         result!.ReviewEvent.Should().BeSameAs(second);
         pendingQueue.Count.Should().Be(0);
+    }
+
+    // CI の確定待ち（暫定、#456）は PR ごとの判定。保留を残したまま、後続の PR の評価を続ける
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldKeepCiPendingEventAndContinueWithNext()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent first = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent second = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, first, second);
+        List<string> evaluatedEventIds = new();
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            reviewEvent =>
+            {
+                evaluatedEventIds.Add(reviewEvent.EventId);
+                return Task.FromResult(ReferenceEquals(reviewEvent, first)
+                    ? ReviewStartResult.Held(ReviewStartStatus.SkippedCiPending, "CI 完了待ち")
+                    : CreateStartedResult());
+            },
+            pendingQueue);
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result!.ReviewEvent.Should().BeSameAs(second);
+        evaluatedEventIds.Should().Equal("evt_1", "evt_2");
+        pendingQueue.Snapshot().Should().Equal(first);
+    }
+
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldReturnNull_AndKeepAll_WhenEveryEventIsWaitingForCi()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent first = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent second = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, first, second);
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            _ => Task.FromResult(ReviewStartResult.Held(ReviewStartStatus.SkippedCiPending, "CI 完了待ち")),
+            pendingQueue);
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result.Should().BeNull();
+        pendingQueue.Snapshot().Should().Equal(first, second);
+    }
+
+    // 確認の間隔（30 秒）ごとの再評価を毎回残すと Recent activity が埋まるため、CI の確定待ちは残さない
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldNotLogReevaluation_ForEventWaitingForCi()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent waiting = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent other = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, waiting, other);
+        List<string> logLines = CaptureLogLines();
+        ReviewEventProcessingCoordinator coordinator = new(
+            collectionCoordinator,
+            cleanupCoordinator,
+            pendingQueue,
+            _loggingService,
+            reviewEvent => Task.FromResult(ReferenceEquals(reviewEvent, waiting)
+                ? ReviewStartResult.Held(ReviewStartStatus.SkippedCiPending, "CI 完了待ち")
+                : CreateStartedResult()),
+            reviewCycleCoordinator: null,
+            isWaitingForCiSettle: reviewEvent => ReferenceEquals(reviewEvent, waiting));
+
+        await coordinator.ProcessPendingAsync();
+
+        logLines.Should().ContainSingle().Which.Should().Contain("保留していた owner/repo #43 の自動起動を再評価します");
+    }
+
+    // 未認証の GitHub API（60 req/h）を、30 秒ごとの再評価で使い切らない。PR の状態は判定の側が確認する
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldNotCheckPullRequestStatus_ForEventWaitingForCi()
+    {
+        StubStatusClient statusClient = new(PullRequestLifecycleState.Open);
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(statusClient);
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent waiting = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent other = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, waiting, other);
+        ReviewEventProcessingCoordinator coordinator = new(
+            collectionCoordinator,
+            cleanupCoordinator,
+            pendingQueue,
+            _loggingService,
+            reviewEvent => Task.FromResult(ReferenceEquals(reviewEvent, waiting)
+                ? ReviewStartResult.Held(ReviewStartStatus.SkippedCiPending, "CI 完了待ち")
+                : CreateStartedResult()),
+            reviewCycleCoordinator: null,
+            isWaitingForCiSettle: reviewEvent => ReferenceEquals(reviewEvent, waiting));
+
+        await coordinator.ProcessPendingAsync();
+
+        statusClient.Calls.Should().ContainSingle().Which.Should().Be(("owner/repo", 43));
+    }
+
+    // 判定の側が PR の close を見つけた場合は、保留から外す（起動しない）
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldDropEvent_WhenPullRequestIsClosedWhileWaitingForCi()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent waiting = CreateReviewEvent("evt_1", prNumber: 42);
+        AddPending(collectionCoordinator, pendingQueue, waiting);
+        ReviewEventProcessingCoordinator coordinator = new(
+            collectionCoordinator,
+            cleanupCoordinator,
+            pendingQueue,
+            _loggingService,
+            _ => Task.FromResult(ReviewStartResult.Skipped(ReviewStartStatus.SkippedPullRequestClosed)),
+            reviewCycleCoordinator: null,
+            isWaitingForCiSettle: _ => true);
+
+        PendingReviewStartResult? result = await coordinator.ProcessPendingAsync();
+
+        result.Should().BeNull();
+        pendingQueue.Count.Should().Be(0);
+    }
+
+    // 評価の await 中に手動起動などで保留から外れたイベントを評価すると、再び保留へ戻してしまう
+    [Fact]
+    public async Task ProcessPendingAsync_ShouldSkipEventRemovedFromPendingDuringPass()
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventCollectionCoordinator collectionCoordinator = new();
+        PendingReviewStartQueue pendingQueue = new();
+        ReviewEvent first = CreateReviewEvent("evt_1", prNumber: 42);
+        ReviewEvent second = CreateReviewEvent("evt_2", prNumber: 43);
+        AddPending(collectionCoordinator, pendingQueue, first, second);
+        List<string> evaluatedEventIds = new();
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            collectionCoordinator,
+            cleanupCoordinator,
+            reviewEvent =>
+            {
+                evaluatedEventIds.Add(reviewEvent.EventId);
+                pendingQueue.RemovePullRequest(second);
+                return Task.FromResult(ReviewStartResult.Held(ReviewStartStatus.SkippedCiPending, "CI 完了待ち"));
+            },
+            pendingQueue);
+
+        await coordinator.ProcessPendingAsync();
+
+        evaluatedEventIds.Should().Equal("evt_1");
+        pendingQueue.Snapshot().Should().Equal(first);
+    }
+
+    // 評価中に同じ PR が起動された場合は、起動済みのレビューに任せる。「レビューする」を促す通知は出さない（#456）
+    [Theory]
+    [InlineData("SkippedSuperseded", false)]
+    [InlineData("SkippedDisabled", true)]
+    [InlineData("SkippedCiPending", true)]
+    [InlineData("SkippedPullRequestClosed", true)]
+    public async Task ProcessAsync_ShouldNotify_UnlessSupersededByAnotherReviewerStart(string status, bool expectedShouldNotify)
+    {
+        await using ReviewEventCleanupCoordinator cleanupCoordinator = CreateCleanupCoordinator(
+            new StubStatusClient(PullRequestLifecycleState.Open));
+        ReviewEventProcessingCoordinator coordinator = CreateCoordinator(
+            new ReviewEventCollectionCoordinator(),
+            cleanupCoordinator,
+            _ => Task.FromResult(ReviewStartResult.Skipped(Enum.Parse<ReviewStartStatus>(status))));
+
+        ReviewEventProcessingResult result = await coordinator.ProcessAsync(CreateReviewEvent());
+
+        result.ShouldNotify.Should().Be(expectedShouldNotify);
     }
 
     [Fact]

@@ -18,8 +18,8 @@ public sealed class CiSettleWaiterTests
     private static readonly CiSettleWaitOptions _options = new(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(12));
     private static readonly DateTimeOffset _start = new(2026, 9, 29, 12, 0, 0, TimeSpan.Zero);
 
-    private readonly TestTimeProvider _clock = new(_start);
-    private readonly ScriptedSource _source = new();
+    private readonly CiSettleTestClock _clock = new(_start);
+    private readonly ScriptedCiSettleSource _source = new();
 
     [Theory]
     [InlineData("Passed", "Settled")]
@@ -509,78 +509,7 @@ public sealed class CiSettleWaiterTests
     }
 
     private static CiSettleSnapshot Snapshot(string state, string sha = _shaA)
-        => new(Enum.Parse<CiSettleState>(state), state == "Unavailable" ? null : sha, $"{state} detail");
+        => ScriptedCiSettleSource.Snapshot(state, sha);
 
     private CiSettleWaiter CreateWaiter() => new(_source, _clock);
-
-    // 記録した順に返し、尽きたら最後の 1 件を返し続ける
-    private sealed class ScriptedSource : ICiSettleSource
-    {
-        private readonly List<object> _script = [];
-        private int _index;
-
-        public List<(string Repository, int PrNumber, CancellationToken Token)> Calls { get; } = [];
-
-        public void Add(params object[] items) => _script.AddRange(items);
-
-        public Task<CiSettleSnapshot> GetAsync(string repository, int prNumber, CancellationToken cancellationToken)
-        {
-            Calls.Add((repository, prNumber, cancellationToken));
-            object item = _script[Math.Min(_index, _script.Count - 1)];
-            _index++;
-            return item switch
-            {
-                Exception exception => throw exception,
-                CiSettleSnapshot snapshot => Task.FromResult(snapshot),
-                _ => throw new InvalidOperationException("スクリプトの要素が不正です。"),
-            };
-        }
-    }
-
-    // 時刻を手動で進める。FireTimersImmediately の間は、待機（Task.Delay）を要求された分だけ時刻を進めて即座に満了させる
-    private sealed class TestTimeProvider(DateTimeOffset start) : TimeProvider
-    {
-        private DateTimeOffset _now = start;
-
-        public bool FireTimersImmediately { get; set; }
-
-        public List<RecordedTimer> Timers { get; } = [];
-
-        public void Advance(TimeSpan by) => _now += by;
-
-        public override DateTimeOffset GetUtcNow() => _now;
-
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        {
-            // 待機が上限に達しない不具合（待ち直しの繰り返し）で、メモリを使い切るまで回り続けないよう、その場で失敗させる
-            if (Timers.Count >= 1000)
-            {
-                throw new InvalidOperationException("タイマーの作成が想定を超えました。待機が終わらない不具合の疑いがあります。");
-            }
-
-            Timers.Add(new RecordedTimer(dueTime));
-            if (FireTimersImmediately && dueTime > TimeSpan.Zero)
-            {
-                Advance(dueTime);
-
-                // Task.Delay が ITimer を受け取る前に完了させないため、コールバックは ThreadPool へ回す
-                ThreadPool.QueueUserWorkItem(_ => callback(state));
-            }
-
-            return new NoopTimer();
-        }
-
-        internal sealed record RecordedTimer(TimeSpan DueTime);
-
-        private sealed class NoopTimer : ITimer
-        {
-            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
-
-            public void Dispose()
-            {
-            }
-
-            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-        }
-    }
 }
