@@ -42,7 +42,11 @@ internal enum CiSettleWaitOutcome
 /// <param name="HeadSha">判定に使った時点の PR の head SHA。取得できなかった場合は <see langword="null"/>.</param>
 /// <param name="Detail">Recent activity に残す、判定の根拠となる短い説明.</param>
 /// <param name="Waited">未確定を最初に観測してからの経過時間。待たずに確定した場合は <see cref="TimeSpan.Zero"/>.</param>
-/// <param name="RetryAfter"><see cref="CiSettleWaitOutcome.Waiting"/> のとき、次に確認するまでの間隔.</param>
+/// <param name="RetryAfter">
+/// <see cref="CiSettleWaitOutcome.Waiting"/> のとき、次に確認するまでの間隔。
+/// <see cref="CiSettleWaitOptions.Interval"/> と、残りの上限（<see cref="CiSettleWaitOptions.MaxWait"/> - <paramref name="Waited"/>）の小さいほうで、
+/// 上限を越えて待たない.
+/// </param>
 /// <param name="HeadMoved">今回の確認で head が動いたことを検出し、新しい head に対して待ち直したか.</param>
 internal sealed record CiSettleWaitResult(
     CiSettleWaitOutcome Outcome,
@@ -115,7 +119,7 @@ internal sealed class CiSettleWaiter
                 ToOutcome(snapshot.State),
                 snapshot.HeadSha,
                 snapshot.Detail,
-                EndWait(key, now, options.MaxWait));
+                EndWait(key, now, GetInterruptionThreshold(options)));
         }
 
         lock (_lock)
@@ -128,7 +132,7 @@ internal sealed class CiSettleWaiter
                     headMoved = true;
                     wait = null;
                 }
-                else if (now - wait.LastCheckedAt >= options.MaxWait)
+                else if (now - wait.LastCheckedAt >= GetInterruptionThreshold(options))
                 {
                     wait = null;
                 }
@@ -145,12 +149,15 @@ internal sealed class CiSettleWaiter
                 return new CiSettleWaitResult(CiSettleWaitOutcome.TimedOut, snapshot.HeadSha, snapshot.Detail, waited);
             }
 
+            // 間隔が上限を割り切らない場合に、次の確認が上限を越えないよう、残りの上限で頭打ちにする
+            // （例: 間隔 30 秒・上限 45 秒なら、30 秒後の次は 15 秒後に確認して、45 秒で打ち切る）
+            TimeSpan retryAfter = TimeSpan.FromTicks(Math.Min(options.Interval.Ticks, (options.MaxWait - waited).Ticks));
             return new CiSettleWaitResult(
                 CiSettleWaitOutcome.Waiting,
                 snapshot.HeadSha,
                 snapshot.Detail,
                 waited,
-                options.Interval,
+                retryAfter,
                 headMoved);
         }
     }
@@ -261,13 +268,19 @@ internal sealed class CiSettleWaiter
         }
     }
 
+    // 連続した待機の確認は、間隔（と多少の遅れ）ごとに続く。それより大きく途切れていたら連続した待機ではない
+    // （別のレビューが長く実行されていた、など）。上限だけを基準にすると、上限が間隔以下のとき、待機自身の確認の間隔が
+    // 途切れと判定され、待ち直しを繰り返して上限に達しなくなるため、間隔の 2 倍を下限にする
+    private static TimeSpan GetInterruptionThreshold(CiSettleWaitOptions options)
+        => options.MaxWait > options.Interval * 2 ? options.MaxWait : options.Interval * 2;
+
     // 待機が終わったら状態を破棄し、待った時間を返す。待たずに確定した場合、
     // および確認が途切れて連続した待機ではなくなっていた場合は 0
-    private TimeSpan EndWait(string key, DateTimeOffset now, TimeSpan maxWait)
+    private TimeSpan EndWait(string key, DateTimeOffset now, TimeSpan interruptionThreshold)
     {
         lock (_lock)
         {
-            if (!_waits.Remove(key, out WaitState? wait) || now - wait.LastCheckedAt >= maxWait)
+            if (!_waits.Remove(key, out WaitState? wait) || now - wait.LastCheckedAt >= interruptionThreshold)
             {
                 return TimeSpan.Zero;
             }
