@@ -25,7 +25,10 @@ namespace SquirrelNotifier.WinUI3.Services;
 internal sealed class GhCiSettleSource : ICiSettleSource
 {
     private const string _pullRequestJq = "{state: .state, headSha: .head.sha, baseRef: .base.ref} | tojson";
-    private const string _rulesetJq = "[.[] | select(.type == \"required_status_checks\") | (.parameters.required_status_checks // [])[] | {context: .context, integrationId: .integration_id}] | tojson";
+
+    // ruleset はページングされる（既定 30 件）。jq はページごとに適用されるため、配列ではなく required check ごとに 1 行を出力し、
+    // 後続のページにだけ required_status_checks があっても、全ページ分をそのまま連結して読めるようにする
+    private const string _rulesetJq = ".[] | select(.type == \"required_status_checks\") | (.parameters.required_status_checks // [])[] | {context: .context, integrationId: .integration_id} | tojson";
     private const string _classicJq = "{contexts: (.contexts // []), checks: [(.checks // [])[] | {context: .context, appId: .app_id}]} | tojson";
     private const string _checkRunsJq = ".check_runs[] | {id: .id, name: .name, status: .status, conclusion: .conclusion, appId: .app.id} | tojson";
     private const string _statusesJq = ".statuses[] | {context: .context, state: .state} | tojson";
@@ -115,7 +118,7 @@ internal sealed class GhCiSettleSource : ICiSettleSource
         string branchPath = Uri.EscapeDataString(baseRef);
 
         GhApiResult rulesetResult = await _ghApiClient
-            .GetAsync($"{repositoryPath}/rules/branches/{branchPath}", _rulesetJq, paginate: false, cancellationToken)
+            .GetAsync($"{repositoryPath}/rules/branches/{branchPath}?per_page=100", _rulesetJq, paginate: true, cancellationToken)
             .ConfigureAwait(false);
         if (!rulesetResult.IsSuccess)
         {

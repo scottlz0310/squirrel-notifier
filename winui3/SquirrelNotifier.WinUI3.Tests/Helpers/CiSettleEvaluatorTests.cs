@@ -68,6 +68,23 @@ public sealed class CiSettleEvaluatorTests
         string expectedState)
         => AssertEvaluation(required, runs, statuses, expectedState, expectedDetail: null);
 
+    // App が指定された required check は、App ID を照合できる check run だけで判定する。
+    // commit status には送信元の App ID が無いため、別の App が同名の context に送った success で通してはならない
+    [Theory]
+    [InlineData("build@15368", "", "build|success", "Pending", "build（未報告）")]
+    [InlineData("build@15368", "build|completed|success|1|99", "build|success", "Pending", "build（未報告）")]
+    [InlineData("build@15368", "build|completed|failure|1|99", "build|success", "Pending", "build（未報告）")]
+    [InlineData("build@15368", "build|completed|success|1|15368", "build|failure", "Passed", "required checks 1 件")]
+    [InlineData("build@15368", "build|in_progress|-|1|15368", "build|success", "Pending", "未完了: build")]
+    [InlineData("build", "", "build|success", "Passed", "required checks 1 件")]
+    public void Evaluate_ShouldNotFallBackToCommitStatus_WhenRequiredCheckSpecifiesApp(
+        string required,
+        string runs,
+        string statuses,
+        string expectedState,
+        string expectedDetail)
+        => AssertEvaluation(required, runs, statuses, expectedState, expectedDetail);
+
     [Fact]
     public void Evaluate_ShouldIgnoreFailingOptionalCheck_WhenRequiredChecksAreDefined()
         => AssertEvaluation(
