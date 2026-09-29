@@ -389,6 +389,94 @@ public sealed class CiSettleWaiterTests
         _source.Calls.Should().HaveCount(expectedChecks);
     }
 
+    // 間隔が上限を割り切らない場合に、上限を越えて待たない（#458 のレビュー指摘）。
+    // 例: 間隔 30 秒・上限 45 秒なら、30 秒後の次は 15 秒後に確認して、45 秒で打ち切る（60 秒後ではない）
+    [Theory]
+    [InlineData(30, 45, new[] { 30, 15 }, 45)]
+    [InlineData(30, 10, new[] { 10 }, 10)]
+    [InlineData(30, 30, new[] { 30 }, 30)]
+    [InlineData(30, 75, new[] { 30, 30, 15 }, 75)]
+    [InlineData(30, 60, new[] { 30, 30 }, 60)]
+    public async Task WaitAsync_ShouldNotWaitBeyondMaxWait_WhenIntervalDoesNotDivideMaxWait(
+        int intervalSeconds,
+        int maxWaitSeconds,
+        int[] expectedDelaySeconds,
+        int expectedWaitedSeconds)
+    {
+        _clock.FireTimersImmediately = true;
+        _source.Add(Snapshot("Pending"));
+        CiSettleWaitOptions options = new(TimeSpan.FromSeconds(intervalSeconds), TimeSpan.FromSeconds(maxWaitSeconds));
+
+        CiSettleWaitResult result = await CreateWaiter().WaitAsync(_repository, 42, options, CancellationToken.None);
+
+        result.Outcome.Should().Be(CiSettleWaitOutcome.TimedOut);
+        result.Waited.Should().Be(TimeSpan.FromSeconds(expectedWaitedSeconds));
+        _clock.Timers.Select(timer => timer.DueTime).Should().Equal(expectedDelaySeconds.Select(seconds => TimeSpan.FromSeconds(seconds)));
+        _source.Calls.Should().HaveCount(expectedDelaySeconds.Length + 1);
+    }
+
+    // 上限が間隔以下でも、待機自身の確認の間隔を「途切れ」と誤判定せず、上限で打ち切る（待ち直しを繰り返さない）
+    [Fact]
+    public async Task CheckAsync_ShouldTimeOut_WhenMaxWaitIsNotLongerThanInterval()
+    {
+        _source.Add(Snapshot("Pending"));
+        CiSettleWaitOptions options = new(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(20));
+        CiSettleWaiter waiter = CreateWaiter();
+        CiSettleWaitResult first = await waiter.CheckAsync(_repository, 42, options, CancellationToken.None);
+        _clock.Advance(first.RetryAfter);
+
+        CiSettleWaitResult second = await waiter.CheckAsync(_repository, 42, options, CancellationToken.None);
+
+        first.RetryAfter.Should().Be(TimeSpan.FromSeconds(20));
+        second.Outcome.Should().Be(CiSettleWaitOutcome.TimedOut);
+        second.Waited.Should().Be(TimeSpan.FromSeconds(20));
+    }
+
+    // 次回確認が予定時刻を過ぎ、前回確認から上限以上空いていたら待機を新しく始める
+    [Fact]
+    public async Task CheckAsync_ShouldRestartWait_WhenNextCheckIsDelayedBeyondMaxWait()
+    {
+        _source.Add(Snapshot("Pending"));
+        CiSettleWaitOptions options = new(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(45));
+        CiSettleWaiter waiter = CreateWaiter();
+        CiSettleWaitResult first = await waiter.CheckAsync(_repository, 42, options, CancellationToken.None);
+        _clock.Advance(TimeSpan.FromSeconds(50));
+
+        CiSettleWaitResult second = await waiter.CheckAsync(_repository, 42, options, CancellationToken.None);
+
+        first.RetryAfter.Should().Be(TimeSpan.FromSeconds(30));
+        second.Outcome.Should().Be(CiSettleWaitOutcome.Waiting);
+        second.Waited.Should().Be(TimeSpan.Zero);
+        second.RetryAfter.Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    // CheckAsync（保留キューからの再評価）が予約する次の確認も、残りの上限を越えない
+    [Theory]
+    [InlineData(30, 45, 0, 30)]
+    [InlineData(30, 45, 30, 15)]
+    [InlineData(30, 45, 44, 1)]
+    [InlineData(30, 720, 690, 30)]
+    [InlineData(30, 10, 0, 10)]
+    public async Task CheckAsync_ShouldCapRetryAfterByRemainingMaxWait(
+        int intervalSeconds,
+        int maxWaitSeconds,
+        int elapsedSeconds,
+        int expectedRetryAfterSeconds)
+    {
+        _source.Add(Snapshot("Pending"));
+        CiSettleWaitOptions options = new(TimeSpan.FromSeconds(intervalSeconds), TimeSpan.FromSeconds(maxWaitSeconds));
+        CiSettleWaiter waiter = CreateWaiter();
+        CiSettleWaitResult result = await waiter.CheckAsync(_repository, 42, options, CancellationToken.None);
+        if (elapsedSeconds > 0)
+        {
+            _clock.Advance(TimeSpan.FromSeconds(elapsedSeconds));
+            result = await waiter.CheckAsync(_repository, 42, options, CancellationToken.None);
+        }
+
+        result.Outcome.Should().Be(CiSettleWaitOutcome.Waiting);
+        result.RetryAfter.Should().Be(TimeSpan.FromSeconds(expectedRetryAfterSeconds));
+    }
+
     [Fact]
     public async Task WaitAsync_ShouldRestartWait_WhenHeadMovesWhileWaiting()
     {

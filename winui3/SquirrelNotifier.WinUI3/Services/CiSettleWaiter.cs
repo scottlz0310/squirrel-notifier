@@ -42,7 +42,11 @@ internal enum CiSettleWaitOutcome
 /// <param name="HeadSha">判定に使った時点の PR の head SHA。取得できなかった場合は <see langword="null"/>.</param>
 /// <param name="Detail">Recent activity に残す、判定の根拠となる短い説明.</param>
 /// <param name="Waited">未確定を最初に観測してからの経過時間。待たずに確定した場合は <see cref="TimeSpan.Zero"/>.</param>
-/// <param name="RetryAfter"><see cref="CiSettleWaitOutcome.Waiting"/> のとき、次に確認するまでの間隔.</param>
+/// <param name="RetryAfter">
+/// <see cref="CiSettleWaitOutcome.Waiting"/> のとき、次に確認するまでの間隔。
+/// <see cref="CiSettleWaitOptions.Interval"/> と、残りの上限（<see cref="CiSettleWaitOptions.MaxWait"/> - <paramref name="Waited"/>）の小さいほうで、
+/// 上限を越えて待たない.
+/// </param>
 /// <param name="HeadMoved">今回の確認で head が動いたことを検出し、新しい head に対して待ち直したか.</param>
 internal sealed record CiSettleWaitResult(
     CiSettleWaitOutcome Outcome,
@@ -68,7 +72,8 @@ internal sealed record CiSettleWaitResult(
 /// </para>
 /// <para>
 /// 待機の状態は PR ごとに持つ。head が動いた場合は新しい head に対して待ち直す（開始時刻と上限を数え直す）。
-/// 前回の確認から上限以上あいた場合も、連続した待機ではないため待ち直す.
+/// <see cref="CheckAsync"/> では、予定した次回確認時刻を過ぎ、かつ前回確認から上限以上あいた場合に待ち直す。
+/// <see cref="WaitAsync"/> は自身の再確認間隔を中断と誤認しない閾値で判定する.
 /// </para>
 /// </remarks>
 internal sealed class CiSettleWaiter
@@ -96,10 +101,18 @@ internal sealed class CiSettleWaiter
     /// <param name="options">間隔と上限.</param>
     /// <param name="cancellationToken">取得を中断するトークン.</param>
     /// <returns>判定結果.</returns>
-    public async Task<CiSettleWaitResult> CheckAsync(
+    public Task<CiSettleWaitResult> CheckAsync(
         string repository,
         int prNumber,
         CiSettleWaitOptions options,
+        CancellationToken cancellationToken)
+        => CheckCoreAsync(repository, prNumber, options, isWaitAsyncPoll: false, cancellationToken: cancellationToken);
+
+    private async Task<CiSettleWaitResult> CheckCoreAsync(
+        string repository,
+        int prNumber,
+        CiSettleWaitOptions options,
+        bool isWaitAsyncPoll,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repository);
@@ -115,7 +128,7 @@ internal sealed class CiSettleWaiter
                 ToOutcome(snapshot.State),
                 snapshot.HeadSha,
                 snapshot.Detail,
-                EndWait(key, now, options.MaxWait));
+                EndWait(key, now, options, isWaitAsyncPoll));
         }
 
         lock (_lock)
@@ -128,7 +141,7 @@ internal sealed class CiSettleWaiter
                     headMoved = true;
                     wait = null;
                 }
-                else if (now - wait.LastCheckedAt >= options.MaxWait)
+                else if (IsInterrupted(wait, now, options, isWaitAsyncPoll))
                 {
                     wait = null;
                 }
@@ -145,12 +158,16 @@ internal sealed class CiSettleWaiter
                 return new CiSettleWaitResult(CiSettleWaitOutcome.TimedOut, snapshot.HeadSha, snapshot.Detail, waited);
             }
 
+            // 間隔が上限を割り切らない場合に、次の確認が上限を越えないよう、残りの上限で頭打ちにする
+            // （例: 間隔 30 秒・上限 45 秒なら、30 秒後の次は 15 秒後に確認して、45 秒で打ち切る）
+            TimeSpan retryAfter = TimeSpan.FromTicks(Math.Min(options.Interval.Ticks, (options.MaxWait - waited).Ticks));
+            wait.NextCheckAt = now + retryAfter;
             return new CiSettleWaitResult(
                 CiSettleWaitOutcome.Waiting,
                 snapshot.HeadSha,
                 snapshot.Detail,
                 waited,
-                options.Interval,
+                retryAfter,
                 headMoved);
         }
     }
@@ -174,7 +191,12 @@ internal sealed class CiSettleWaiter
         {
             while (true)
             {
-                CiSettleWaitResult result = await CheckAsync(repository, prNumber, options, cancellationToken).ConfigureAwait(false);
+                CiSettleWaitResult result = await CheckCoreAsync(
+                    repository,
+                    prNumber,
+                    options,
+                    isWaitAsyncPoll: true,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
                 if (result.IsTerminal)
                 {
                     return result;
@@ -261,13 +283,28 @@ internal sealed class CiSettleWaiter
         }
     }
 
+    private static bool IsInterrupted(WaitState wait, DateTimeOffset now, CiSettleWaitOptions options, bool isWaitAsyncPoll)
+    {
+        TimeSpan sinceLastCheck = now - wait.LastCheckedAt;
+        if (isWaitAsyncPoll)
+        {
+            return sinceLastCheck >= GetWaitAsyncInterruptionThreshold(options);
+        }
+
+        return sinceLastCheck >= options.MaxWait && now > wait.NextCheckAt;
+    }
+
+    // WaitAsync の次回確認は Interval または残り上限で予定されるため、間隔の 2 倍を閾値の下限にする
+    private static TimeSpan GetWaitAsyncInterruptionThreshold(CiSettleWaitOptions options)
+        => options.MaxWait > options.Interval * 2 ? options.MaxWait : options.Interval * 2;
+
     // 待機が終わったら状態を破棄し、待った時間を返す。待たずに確定した場合、
     // および確認が途切れて連続した待機ではなくなっていた場合は 0
-    private TimeSpan EndWait(string key, DateTimeOffset now, TimeSpan maxWait)
+    private TimeSpan EndWait(string key, DateTimeOffset now, CiSettleWaitOptions options, bool isWaitAsyncPoll)
     {
         lock (_lock)
         {
-            if (!_waits.Remove(key, out WaitState? wait) || now - wait.LastCheckedAt >= maxWait)
+            if (!_waits.Remove(key, out WaitState? wait) || IsInterrupted(wait, now, options, isWaitAsyncPoll))
             {
                 return TimeSpan.Zero;
             }
@@ -283,5 +320,7 @@ internal sealed class CiSettleWaiter
         public DateTimeOffset StartedAt { get; } = startedAt;
 
         public DateTimeOffset LastCheckedAt { get; set; } = startedAt;
+
+        public DateTimeOffset NextCheckAt { get; set; } = startedAt;
     }
 }

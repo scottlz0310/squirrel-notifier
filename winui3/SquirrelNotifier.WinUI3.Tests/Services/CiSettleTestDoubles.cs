@@ -74,6 +74,11 @@ internal sealed class CiSettleTestClock(DateTimeOffset start) : TimeProvider
 
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
+        if (Timers.Count >= 1000)
+        {
+            throw new InvalidOperationException("タイマーの作成が想定を超えました。待機が終わらない不具合の疑いがあります。");
+        }
+
         RecordingTimer timer = new(callback, state, dueTime);
         Timers.Add(timer);
         if (FireTimersImmediately && dueTime > TimeSpan.Zero)
