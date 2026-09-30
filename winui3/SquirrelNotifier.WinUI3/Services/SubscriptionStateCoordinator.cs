@@ -33,6 +33,7 @@ internal sealed class SubscriptionStateCoordinator
     private const string _normalIconFileName = "squirrel-notifier.ico";
     private const string _errorIconFileName = "squirrel-notifier-error.ico";
     private const string _applicationTitle = "Squirrel Notifier";
+    private const string _stoppedStatusText = "Stopped";
 
     private bool _hasShownErrorBalloon;
 
@@ -49,10 +50,13 @@ internal sealed class SubscriptionStateCoordinator
         if (state != SubscriptionState.Error)
         {
             _hasShownErrorBalloon = false;
+
+            // 状態表示は購読ループの ReportStatus が更新するだけで、停止しても Subscribed. のまま残るため、停止は状態から示す
+            string? statusText = state == SubscriptionState.Stopped ? _stoppedStatusText : null;
             return new SubscriptionStatePresentation(
                 _normalIconFileName,
                 _applicationTitle,
-                null,
+                statusText,
                 false,
                 null,
                 $"[UI] Updating tray icon to normal state. State: {state}",
