@@ -11,11 +11,11 @@ namespace SquirrelNotifier.WinUI3.Tests.Services;
 public sealed class SubscriptionStateCoordinatorTests
 {
     [Theory]
-    [InlineData("Stopped")]
-    [InlineData("Starting")]
-    [InlineData("Running")]
-    [InlineData("Stopping")]
-    public void Update_ShouldReturnNormalPresentation_ForNonErrorStates(string stateName)
+    [InlineData("Stopped", "Stopped")]
+    [InlineData("Starting", null)]
+    [InlineData("Running", null)]
+    [InlineData("Stopping", null)]
+    public void Update_ShouldReturnNormalPresentation_ForNonErrorStates(string stateName, string? expectedStatusText)
     {
         SubscriptionStateCoordinator coordinator = new();
 
@@ -26,7 +26,7 @@ public sealed class SubscriptionStateCoordinatorTests
 
         presentation.IconFileName.Should().Be("squirrel-notifier.ico");
         presentation.Tooltip.Should().Be("Squirrel Notifier");
-        presentation.StatusText.Should().BeNull();
+        presentation.StatusText.Should().Be(expectedStatusText);
         presentation.IsAuthenticationRequired.Should().BeFalse();
         presentation.Notification.Should().BeNull();
         presentation.StateLogMessage.Should().Be($"[UI] Updating tray icon to normal state. State: {stateName}");
