@@ -213,6 +213,92 @@ public sealed class ReviewCycleCoordinatorTests : IDisposable
         reviewEvent.CycleRound.Should().Be(0);
     }
 
+    // reviewer プロセスの終了コードは、終了を表す状態の通知にだけ付ける（公開状態 review-status.json の exitCode、#462）
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(false, 1)]
+    [InlineData(false, null)]
+    public async Task MarkReviewerStartedAsync_ShouldPublishProcessExitCodeOnlyWithCompletion(bool success, int? exitCode)
+    {
+        ReviewCycleCoordinator coordinator = CreateCoordinator();
+        ReviewEvent reviewEvent = CreateReviewEvent("opened");
+        List<ReviewCycleStateChangedEventArgs> published = [];
+        TaskCompletionSource completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.StateChanged += (_, args) =>
+        {
+            published.Add(args);
+            if (args.State.Status is ReviewCycleStatus.ReviewerCompleted or ReviewCycleStatus.ReviewerFailed)
+            {
+                completed.TrySetResult();
+            }
+        };
+        await coordinator.ObserveEventAsync(reviewEvent);
+        AgentExecutionSession session = new(TimeProvider.System);
+        await coordinator.MarkReviewerStartedAsync(
+            reviewEvent,
+            new ReviewStartLaunch(session, null!, null!, null!),
+            "claude");
+
+        session.Complete(
+            success ? AgentExecutionOutcome.Succeeded : AgentExecutionOutcome.Failed,
+            new LauncherResult { Success = success, ExitCode = exitCode });
+        await completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        published
+            .Where(static args => args.State.Status is not (ReviewCycleStatus.ReviewerCompleted or ReviewCycleStatus.ReviewerFailed))
+            .Should().OnlyContain(static args => args.ExitCode == null);
+        published
+            .Single(static args => args.State.Status is ReviewCycleStatus.ReviewerCompleted or ReviewCycleStatus.ReviewerFailed)
+            .ExitCode.Should().Be(exitCode);
+    }
+
+    [Theory]
+    [InlineData("Busy")]
+    [InlineData("CiPending")]
+    [InlineData("AutoPause")]
+    public void ObserveHold_ShouldRaiseHoldObservedWithEventAndKind(string kind)
+    {
+        ReviewCycleCoordinator coordinator = CreateCoordinator();
+        ReviewEvent reviewEvent = CreateReviewEvent("opened");
+        List<ReviewHoldObservedEventArgs> observed = [];
+        coordinator.HoldObserved += (_, args) => observed.Add(args);
+
+        coordinator.ObserveHold(reviewEvent, Enum.Parse<ReviewHoldKind>(kind));
+
+        ReviewHoldObservedEventArgs args = observed.Should().ContainSingle().Subject;
+        args.ReviewEvent.Should().BeSameAs(reviewEvent);
+        args.Kind.Should().Be(Enum.Parse<ReviewHoldKind>(kind));
+    }
+
+    [Fact]
+    public async Task ObserveHold_ShouldLogAndNotThrow_WhenHandlerFails()
+    {
+        ReviewCycleCoordinator coordinator = CreateCoordinator();
+        coordinator.HoldObserved += (_, _) => throw new InvalidOperationException("boom");
+
+        Action observe = () => coordinator.ObserveHold(CreateReviewEvent("opened"), ReviewHoldKind.Busy);
+
+        observe.Should().NotThrow();
+        string logPath = Path.Combine(_testDirectory, "winui3.log");
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+        while (!File.Exists(logPath) || !(await ReadLogAsync(logPath)).Contains("の保留の通知に失敗しました: boom", StringComparison.Ordinal))
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), timeout.Token);
+        }
+    }
+
+    private static async Task<string> ReadLogAsync(string path)
+    {
+        try
+        {
+            return await File.ReadAllTextAsync(path);
+        }
+        catch (IOException)
+        {
+            return string.Empty;
+        }
+    }
+
     private ReviewCycleCoordinator CreateCoordinator(
         IReviewCycleStore? store = null,
         TimeProvider? timeProvider = null)

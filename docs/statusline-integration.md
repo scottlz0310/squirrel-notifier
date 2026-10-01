@@ -122,6 +122,8 @@ Claude Code の `Stop` / `SessionEnd` hook は、ヘッドレス実行後の sna
 
 ## 逆方向: レビュー・キュー状態のサマリ（#427）
 
+> 時刻・保留の理由・終了コード・鮮度（heartbeat）を含む詳細な公開状態は、別のファイル `review-status.json` にある（reviewed 側の待機などが読む。[docs/review-status-contract.md](review-status-contract.md)）。このサマリは、statusline が頻繁に読むため、小さく安定したまま保つ。
+
 squirrel-notifier は、reviewer 起動待ちの PR と実行中のレビューを statusline 側（agent-statusline 等）が読むためのサマリを書き出す。内部ストアの `review-cycles.json` は公開契約ではないため、statusline 側はこのサマリだけを読む。
 
 ```

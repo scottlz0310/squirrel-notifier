@@ -9,15 +9,33 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal sealed class ReviewCycleStateChangedEventArgs : EventArgs
 {
-    public ReviewCycleStateChangedEventArgs(ReviewEvent reviewEvent, ReviewCycleState state)
+    public ReviewCycleStateChangedEventArgs(ReviewEvent reviewEvent, ReviewCycleState state, int? exitCode = null)
     {
         ReviewEvent = reviewEvent ?? throw new ArgumentNullException(nameof(reviewEvent));
         State = state ?? throw new ArgumentNullException(nameof(state));
+        ExitCode = exitCode;
     }
 
     public ReviewEvent ReviewEvent { get; }
 
     public ReviewCycleState State { get; }
+
+    /// <summary>Gets reviewer プロセスの終了コード。終了を表す状態のときだけ設定され、取得できない場合は <see langword="null"/>（#462）.</summary>
+    public int? ExitCode { get; }
+}
+
+/// <summary>reviewer の起動を見送って保留したことの観測（#462）.</summary>
+internal sealed class ReviewHoldObservedEventArgs : EventArgs
+{
+    public ReviewHoldObservedEventArgs(ReviewEvent reviewEvent, ReviewHoldKind kind)
+    {
+        ReviewEvent = reviewEvent ?? throw new ArgumentNullException(nameof(reviewEvent));
+        Kind = kind;
+    }
+
+    public ReviewEvent ReviewEvent { get; }
+
+    public ReviewHoldKind Kind { get; }
 }
 
 /// <summary>
@@ -46,6 +64,12 @@ internal sealed class ReviewCycleCoordinator
     }
 
     public event EventHandler<ReviewCycleStateChangedEventArgs>? StateChanged;
+
+    /// <summary>
+    /// reviewer の起動を見送って保留したときに発生する（#462）。保留の理由は永続化せず、公開状態
+    /// （review-status.json）が「なぜ待っているか」を出すためだけに使う.
+    /// </summary>
+    public event EventHandler<ReviewHoldObservedEventArgs>? HoldObserved;
 
     /// <summary>
     /// reviewer 用イベントをサイクルへ取り込む。同じ event ID は再処理せず、
@@ -175,6 +199,24 @@ internal sealed class ReviewCycleCoordinator
         _ = ObserveCompletionAsync(reviewEvent, state.Round, reviewEvent.EventId, launch.Session);
     }
 
+    /// <summary>reviewer の起動を見送って保留したことを通知する（#462）.</summary>
+    /// <param name="reviewEvent">保留したレビューイベント.</param>
+    /// <param name="kind">保留の理由.</param>
+    public void ObserveHold(ReviewEvent reviewEvent, ReviewHoldKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(reviewEvent);
+
+        try
+        {
+            HoldObserved?.Invoke(this, new ReviewHoldObservedEventArgs(reviewEvent, kind));
+        }
+        catch (Exception ex)
+        {
+            _ = _loggingService.WriteAsync(
+                $"[Cycle] {reviewEvent.PrCaption} の保留の通知に失敗しました: {ex.Message}");
+        }
+    }
+
     private async Task ObserveCompletionAsync(
         ReviewEvent reviewEvent,
         int round,
@@ -245,7 +287,7 @@ internal sealed class ReviewCycleCoordinator
                 return;
             }
 
-            PublishStateChanged(reviewEvent, stateToPublish);
+            PublishStateChanged(reviewEvent, stateToPublish, result.ExitCode);
             if (latestEventToPublish is not null && latestStateToPublish is not null)
             {
                 PublishStateChanged(latestEventToPublish, latestStateToPublish);
@@ -309,11 +351,11 @@ internal sealed class ReviewCycleCoordinator
         }
     }
 
-    private void PublishStateChanged(ReviewEvent reviewEvent, ReviewCycleState state)
+    private void PublishStateChanged(ReviewEvent reviewEvent, ReviewCycleState state, int? exitCode = null)
     {
         try
         {
-            StateChanged?.Invoke(this, new ReviewCycleStateChangedEventArgs(reviewEvent, state));
+            StateChanged?.Invoke(this, new ReviewCycleStateChangedEventArgs(reviewEvent, state, exitCode));
         }
         catch (Exception ex)
         {
