@@ -54,6 +54,10 @@ internal sealed class ReviewStatusService
     // その PR の状態を落とせるようにする
     private readonly Dictionary<string, HashSet<string>> _relatedEventIds = new(StringComparer.Ordinal);
 
+    // 保留した event ごとの理由。同じ PR の実行中に届いた次の event は、実行が終わって起動待ちになる時点で、
+    // 実行中に観測した保留の理由を引き継ぐ。保留を観測する時点では、その event の起動待ちの項目がまだ無いことがある
+    private readonly Dictionary<string, HoldObservation> _holds = new(StringComparer.Ordinal);
+
     // 終了済み PR のイベントを削除した後にも、実行中だった reviewer の終了通知が同じイベントの状態を
     // 発行する。削除済みイベントの状態で PR を再登録しないよう、削除した ID を保持する
     private readonly HashSet<string> _removedEventIds = new(StringComparer.Ordinal);
@@ -181,6 +185,11 @@ internal sealed class ReviewStatusService
         return UpdateAsync(() =>
         {
             _removedEventIds.UnionWith(eventIds);
+            foreach (string eventId in eventIds)
+            {
+                _holds.Remove(eventId);
+            }
+
             string[] keysToRemove = [.. _current
                 .Where(pair => eventIds.Contains(pair.Value.EventId)
                     || (_relatedEventIds.TryGetValue(pair.Key, out HashSet<string>? related) && related.Overlaps(eventIds)))
@@ -197,6 +206,8 @@ internal sealed class ReviewStatusService
     }
 
     private static DateTimeOffset ToUtc(DateTime time) => new DateTimeOffset(time).ToUniversalTime();
+
+    private readonly record struct HoldObservation(ReviewHoldKind Kind, DateTimeOffset Since);
 
     private bool ApplyState(ReviewEvent reviewEvent, ReviewCycleState state, int? exitCode)
     {
@@ -230,6 +241,19 @@ internal sealed class ReviewStatusService
             case ReviewCycleStatus.AwaitingReviewer:
                 // 同じ PR の保留中に新しい event が届いた場合、待ち順（保留し始めた時刻）は保つ
                 ReviewStatusEntry? previousWait = existing is { State: ReviewStatusState.Waiting } ? existing : null;
+                ReviewHoldKind? hold = previousWait?.Hold;
+                DateTimeOffset? holdSince = previousWait?.HoldSince;
+                if (_holds.TryGetValue(eventId, out HoldObservation observed))
+                {
+                    hold = observed.Kind;
+                    holdSince = observed.Since;
+                }
+
+                if (previousWait is not null && previousWait.EventId != eventId)
+                {
+                    _holds.Remove(previousWait.EventId);
+                }
+
                 _current[key] = new ReviewStatusEntry(
                     key,
                     state.Repository,
@@ -239,23 +263,32 @@ internal sealed class ReviewStatusService
                     state.LastReason,
                     ReviewStatusState.Waiting,
                     ToUtc(reviewEvent.ReceivedTime),
-                    Hold: previousWait?.Hold,
-                    HoldSince: previousWait?.HoldSince);
+                    Hold: hold,
+                    HoldSince: holdSince);
                 return true;
 
             case ReviewCycleStatus.ReviewerRunning:
+                // 実行中に同じ PR の次の event が届くと、実行中の状態（ActiveEventId）に、次の event の LastEventId・
+                // LastReason・受信時刻を載せて通知される。実行中の event の受信・開始時刻と reason は、上書きしない
+                if (existing is { State: ReviewStatusState.Running } && existing.EventId == eventId)
+                {
+                    return false;
+                }
+
                 ReviewStatusEntry? waited = existing is { State: ReviewStatusState.Waiting } && existing.EventId == eventId
                     ? existing
                     : null;
+                bool isActiveEvent = reviewEvent.EventId == eventId;
+                _holds.Remove(eventId);
                 _current[key] = new ReviewStatusEntry(
                     key,
                     state.Repository,
                     state.PrNumber,
                     state.ActiveRound ?? state.Round,
                     eventId,
-                    reviewEvent.Reason,
+                    isActiveEvent ? reviewEvent.Reason : state.LastReason,
                     ReviewStatusState.Running,
-                    waited?.ReceivedAt ?? ToUtc(reviewEvent.ReceivedTime),
+                    waited?.ReceivedAt ?? (isActiveEvent ? ToUtc(reviewEvent.ReceivedTime) : state.UpdatedAt),
                     StartedAt: state.UpdatedAt,
                     Agent: state.ActiveAgent);
                 return true;
@@ -269,6 +302,7 @@ internal sealed class ReviewStatusService
                     _current.Remove(key);
                 }
 
+                _holds.Remove(eventId);
                 _finished.RemoveAll(entry => entry.EventId == eventId);
                 _finished.Add(new ReviewStatusEntry(
                     key,
@@ -306,17 +340,42 @@ internal sealed class ReviewStatusService
 
     private bool ApplyHold(ReviewEvent reviewEvent, ReviewHoldKind kind)
     {
+        if (_removedEventIds.Contains(reviewEvent.EventId))
+        {
+            return false;
+        }
+
+        DateTimeOffset now = _timeProvider.GetUtcNow();
+        PruneHolds(now);
+
+        // 保留し始めた時刻は、理由が変わっても保つ（待ち順は、保留し始めた順）
+        DateTimeOffset since = _holds.TryGetValue(reviewEvent.EventId, out HoldObservation previous) ? previous.Since : now;
+        _holds[reviewEvent.EventId] = new HoldObservation(kind, since);
+
+        // 起動待ちの項目に反映するのは、その event の項目だけ。実行中の PR の次の event の保留は、実行が終わって
+        // 起動待ちになる時点（ApplyState）で反映する。古い event の遅れた通知で、新しい event の項目を書き換えない
         string key = ReviewStatusDocumentBuilder.CreateKey(reviewEvent.Repository, reviewEvent.PrNumber);
-        if (_removedEventIds.Contains(reviewEvent.EventId)
-            || !_current.TryGetValue(key, out ReviewStatusEntry? entry)
+        if (!_current.TryGetValue(key, out ReviewStatusEntry? entry)
             || entry.State != ReviewStatusState.Waiting
+            || entry.EventId != reviewEvent.EventId
             || entry.Hold == kind)
         {
             return false;
         }
 
-        _current[key] = entry with { Hold = kind, HoldSince = entry.HoldSince ?? _timeProvider.GetUtcNow() };
+        _current[key] = entry with { Hold = kind, HoldSince = entry.HoldSince ?? since };
         return true;
+    }
+
+    // 起動待ちにも実行にもならなかった event の保留を、いつまでも持たない
+    private void PruneHolds(DateTimeOffset now)
+    {
+        DateTimeOffset cutoff = now - ReviewStatusDocumentBuilder.RecentRetention;
+        string[] expired = [.. _holds.Where(pair => pair.Value.Since < cutoff).Select(static pair => pair.Key)];
+        foreach (string eventId in expired)
+        {
+            _holds.Remove(eventId);
+        }
     }
 
     private string DescribeSubscription()

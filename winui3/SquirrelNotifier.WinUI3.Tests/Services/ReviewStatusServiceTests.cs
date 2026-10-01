@@ -268,6 +268,171 @@ public sealed class ReviewStatusServiceTests : IDisposable
         item["holdSince"]!.GetValue<string>().Should().Be("2026-10-01T01:01:00Z");
     }
 
+    // 実行中（event A）に、同じ PR の次の event（B）が届くと、実行中の状態（ActiveEventId = A）に、
+    // B の LastEventId・LastReason・受信時刻を載せて通知される。実行中の A の情報を、B で上書きしない
+    [Fact]
+    public async Task ApplyStateAsync_ShouldKeepRunningEventMetadata_WhenNextEventArrivesDuringExecution()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent eventA = CreateReviewEvent("event-a", reason: "opened", receivedAt: _initialTime.AddMinutes(-5));
+        await service.ApplyStateAsync(
+            eventA,
+            CreateState(
+                status: ReviewCycleStatus.ReviewerRunning,
+                lastEventId: "event-a",
+                activeEventId: "event-a",
+                activeAgent: "codex",
+                updatedAt: _initialTime));
+
+        _timeProvider.UtcNow = _initialTime.AddMinutes(4);
+        ReviewEvent eventB = CreateReviewEvent("event-b", reason: "re-review-requested", receivedAt: _timeProvider.UtcNow);
+        await service.ApplyStateAsync(
+            eventB,
+            CreateState(
+                status: ReviewCycleStatus.ReviewerRunning,
+                reason: "re-review-requested",
+                round: 2,
+                lastEventId: "event-b",
+                activeEventId: "event-a",
+                activeAgent: "codex",
+                updatedAt: _timeProvider.UtcNow));
+
+        JsonNode running = (await ReadStatusAsync())["items"]![0]!;
+        running["eventId"]!.GetValue<string>().Should().Be("event-a");
+        running["reason"]!.GetValue<string>().Should().Be("opened");
+        running["round"]!.GetValue<int>().Should().Be(1);
+        running["receivedAt"]!.GetValue<string>().Should().Be("2026-10-01T00:55:00Z");
+        running["startedAt"]!.GetValue<string>().Should().Be("2026-10-01T01:00:00Z");
+        running["agent"]!.GetValue<string>().Should().Be("codex");
+
+        _timeProvider.UtcNow = _initialTime.AddMinutes(10);
+        await service.ApplyStateAsync(
+            eventA,
+            CreateState(
+                status: ReviewCycleStatus.ReviewerCompleted,
+                lastEventId: "event-a",
+                updatedAt: _timeProvider.UtcNow),
+            exitCode: 0);
+
+        JsonNode finished = (await ReadStatusAsync())["recent"]![0]!;
+        finished["eventId"]!.GetValue<string>().Should().Be("event-a");
+        finished["reason"]!.GetValue<string>().Should().Be("opened");
+        finished["receivedAt"]!.GetValue<string>().Should().Be("2026-10-01T00:55:00Z");
+        finished["startedAt"]!.GetValue<string>().Should().Be("2026-10-01T01:00:00Z");
+        finished["finishedAt"]!.GetValue<string>().Should().Be("2026-10-01T01:10:00Z");
+        finished["agent"]!.GetValue<string>().Should().Be("codex");
+    }
+
+    [Fact]
+    public async Task ApplyStateAsync_ShouldNotResetStartedAt_WhenSameRunningStateIsPublishedAgain()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent eventA = CreateReviewEvent("event-a");
+        await service.ApplyStateAsync(
+            eventA,
+            CreateState(status: ReviewCycleStatus.ReviewerRunning, lastEventId: "event-a", activeEventId: "event-a", updatedAt: _initialTime));
+
+        // 重複した event の受信で、既存の状態が再通知される
+        await service.ApplyStateAsync(
+            eventA,
+            CreateState(status: ReviewCycleStatus.ReviewerRunning, lastEventId: "event-a", activeEventId: "event-a", updatedAt: _initialTime.AddMinutes(3)));
+
+        (await ReadStatusAsync())["items"]![0]!["startedAt"]!.GetValue<string>().Should().Be("2026-10-01T01:00:00Z");
+    }
+
+    // A の実行中に、次の event（B）が busy で保留されると、その時点では B の起動待ちの項目が無い。
+    // A の終了後に B が起動待ちになるとき、実行中に観測した保留の理由と待ち順を引き継ぐ
+    [Fact]
+    public async Task ApplyHoldAsync_ShouldCarryHoldOfNextEventToWaitingStateAfterRunningCompletes()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent eventA = CreateReviewEvent("event-a", reason: "opened");
+        await service.ApplyStateAsync(
+            eventA,
+            CreateState(
+                status: ReviewCycleStatus.ReviewerRunning,
+                lastEventId: "event-a",
+                activeEventId: "event-a",
+                activeAgent: "codex",
+                updatedAt: _initialTime));
+        _timeProvider.UtcNow = _initialTime.AddMinutes(4);
+        ReviewEvent eventB = CreateReviewEvent("event-b", reason: "re-review-requested", receivedAt: _timeProvider.UtcNow);
+        await service.ApplyStateAsync(
+            eventB,
+            CreateState(
+                status: ReviewCycleStatus.ReviewerRunning,
+                reason: "re-review-requested",
+                round: 2,
+                lastEventId: "event-b",
+                activeEventId: "event-a",
+                activeAgent: "codex",
+                updatedAt: _timeProvider.UtcNow));
+        _timeProvider.UtcNow = _initialTime.AddMinutes(5);
+        await service.ApplyHoldAsync(eventB, ReviewHoldKind.Busy);
+        (await ReadStatusAsync())["items"]!.AsArray().Should().ContainSingle().Which!["state"]!.GetValue<string>().Should().Be("running");
+
+        _timeProvider.UtcNow = _initialTime.AddMinutes(10);
+        await service.ApplyStateAsync(
+            eventA,
+            CreateState(status: ReviewCycleStatus.ReviewerCompleted, lastEventId: "event-b", updatedAt: _timeProvider.UtcNow),
+            exitCode: 0);
+        _timeProvider.UtcNow = _initialTime.AddMinutes(10).AddSeconds(1);
+        await service.ApplyStateAsync(
+            eventB,
+            CreateState(
+                status: ReviewCycleStatus.AwaitingReviewer,
+                reason: "re-review-requested",
+                round: 2,
+                lastEventId: "event-b",
+                updatedAt: _timeProvider.UtcNow));
+
+        JsonNode status = await ReadStatusAsync();
+        JsonNode waiting = status["items"]![0]!;
+        waiting["state"]!.GetValue<string>().Should().Be("waiting");
+        waiting["eventId"]!.GetValue<string>().Should().Be("event-b");
+        waiting["round"]!.GetValue<int>().Should().Be(2);
+        waiting["holdReason"]!.GetValue<string>().Should().Be("busy");
+        waiting["holdSince"]!.GetValue<string>().Should().Be("2026-10-01T01:05:00Z");
+        waiting["queuePosition"]!.GetValue<int>().Should().Be(1);
+        status["recent"]![0]!["eventId"]!.GetValue<string>().Should().Be("event-a");
+    }
+
+    [Fact]
+    public async Task ApplyHoldAsync_ShouldApplyHoldObservedBeforeTheWaitingStateIsPublished()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent reviewEvent = CreateReviewEvent("event-opened");
+        _timeProvider.UtcNow = _initialTime.AddMinutes(1);
+        await service.ApplyHoldAsync(reviewEvent, ReviewHoldKind.CiPending);
+
+        await service.ApplyStateAsync(
+            reviewEvent,
+            CreateState(lastEventId: "event-opened", updatedAt: _initialTime.AddMinutes(2)));
+
+        JsonNode item = (await ReadStatusAsync())["items"]![0]!;
+        item["holdReason"]!.GetValue<string>().Should().Be("ciPending");
+        item["holdSince"]!.GetValue<string>().Should().Be("2026-10-01T01:01:00Z");
+    }
+
+    [Fact]
+    public async Task ApplyHoldAsync_ShouldNotRewriteNewerWaitingEntry_WhenHoldOfOlderEventArrivesLate()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent older = CreateReviewEvent("event-old");
+        await service.ApplyStateAsync(older, CreateState(lastEventId: "event-old"));
+        await service.ApplyHoldAsync(older, ReviewHoldKind.Busy);
+        ReviewEvent newer = CreateReviewEvent("event-new", reason: "re-review-requested");
+        await service.ApplyStateAsync(
+            newer,
+            CreateState(reason: "re-review-requested", round: 2, lastEventId: "event-new", updatedAt: _initialTime.AddMinutes(1)));
+
+        await service.ApplyHoldAsync(older, ReviewHoldKind.CiPending);
+
+        JsonNode item = (await ReadStatusAsync())["items"]![0]!;
+        item["eventId"]!.GetValue<string>().Should().Be("event-new");
+        item["holdReason"]!.GetValue<string>().Should().Be("busy");
+    }
+
     [Fact]
     public async Task ApplyHoldAsync_ShouldIgnoreHoldWithoutWaitingEntry()
     {

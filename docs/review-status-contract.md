@@ -95,6 +95,8 @@ Squirrel Notifier は、reviewer の**起動待ち・実行中・終了**の状�
 
 `items[]` は、実行中、起動待ち（保留し始めた順）の並び。`recent[]` は、終了の新しい順で、**直近 24 時間かつ最大 50 件**。同じ PR が `items[]` と `recent[]` の両方に現れてよい（前のラウンドが終了し、次のラウンドが待っている場合など）。
 
+**同じ PR の実行中に、次の event（再レビューの依頼など）が届いた場合**、`items[]` の実行中の項目は変わらない（`eventId`・`reason`・`receivedAt`・`startedAt` は、実行中の event のまま）。その実行が終わると、実行中の項目が `recent[]` へ移り、次の event が `waiting` の項目として現れる。実行中に保留（`busy`）を観測していれば、その `holdReason`・`holdSince`・`queuePosition` を引き継ぐ。
+
 | フィールド | 説明 |
 |---|---|
 | `key` | **小文字**の `owner/repo#N`。thread-owl の `review://status/<owner>/<repo>/<pr>` の URI と同じ表記で、照合に使う。`repository` は元の大文字小文字のまま（表示用） |
