@@ -30,6 +30,7 @@ public partial class App : Application
     private readonly RateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitFileService _rateLimitFileService;
     private readonly StatuslineSummaryService _statuslineSummaryService;
+    private readonly ReviewStatusService _reviewStatusService;
 
     public App()
     {
@@ -66,6 +67,16 @@ public partial class App : Application
             _reviewCycleCoordinator,
             _reviewEventCleanupCoordinator,
             _loggingService);
+        _reviewStatusService = new ReviewStatusService(
+            _settingsService.SettingsDirectory,
+            _reviewCycleCoordinator,
+            _reviewEventCleanupCoordinator,
+            _loggingService,
+            typeof(App).Assembly.GetName().Version?.ToString(3) ?? "unknown",
+            () => _settingsService.Settings.AutoReviewStartEnabled,
+            () => _subscriptionService.State,
+            () => _subscriptionService.IsAuthenticationRequired);
+        _subscriptionService.StateChanged += (_, _) => _ = _reviewStatusService.NotifySubscriptionChangedAsync();
         var enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
         _reviewRegistrationService = new ReviewRegistrationService(_subscriptionService, enqueueReviewService);
         _rateLimitReminderService = new RateLimitReminderService(_notificationService);
@@ -91,6 +102,7 @@ public partial class App : Application
         Program.Reactivated += OnReactivated;
 
         _ = _statuslineSummaryService.StartAsync();
+        _ = _reviewStatusService.StartAsync();
         _subscriptionService.Start();
     }
 
@@ -98,6 +110,7 @@ public partial class App : Application
     {
         Program.Reactivated -= OnReactivated;
         await _statuslineSummaryService.ShutdownAsync().ConfigureAwait(false);
+        await _reviewStatusService.ShutdownAsync().ConfigureAwait(false);
         await _subscriptionService.DisposeAsync().ConfigureAwait(false);
         await _reviewEventCleanupCoordinator.DisposeAsync().ConfigureAwait(false);
         await _workspaceCleanupService.DisposeAsync().ConfigureAwait(false);

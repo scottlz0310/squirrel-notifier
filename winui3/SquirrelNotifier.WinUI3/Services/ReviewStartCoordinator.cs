@@ -232,7 +232,7 @@ internal sealed class ReviewStartCoordinator
 
             if (ciDecision.Action == CiSettleGateAction.Hold)
             {
-                await HoldAsync(reviewEvent, ciDecision.HoldReasonText!);
+                await HoldAsync(reviewEvent, ReviewHoldKind.CiPending, ciDecision.HoldReasonText!);
                 return ReviewStartResult.Held(ReviewStartStatus.SkippedCiPending, ReviewAutoStartPolicy.CiSettleHoldLabel);
             }
 
@@ -441,17 +441,25 @@ internal sealed class ReviewStartCoordinator
     }
 
     private Task HoldForBusyAsync(ReviewEvent reviewEvent)
-        => HoldAsync(reviewEvent, $"{ReviewAutoStartPolicy.BusyReasonText}。実行終了後に自動起動します");
+        => HoldAsync(reviewEvent, ReviewHoldKind.Busy, $"{ReviewAutoStartPolicy.BusyReasonText}。実行終了後に自動起動します");
 
     // Auto-Pause は解除しても gate を再評価する契機が無いため、リセット時刻へ再評価を予約する（#340）
     private Task HoldForAutoPauseAsync(ReviewEvent reviewEvent, AutoPausedLimit pausedLimit)
     {
         _autoPauseResumeScheduler.Schedule(pausedLimit.ResetAt);
-        return HoldAsync(reviewEvent, $"Auto-Pause 中のため（{pausedLimit.BuildReasonText()}）。解除後に自動起動します");
+        return HoldAsync(
+            reviewEvent,
+            ReviewHoldKind.AutoPause,
+            $"Auto-Pause 中のため（{pausedLimit.BuildReasonText()}）。解除後に自動起動します");
     }
 
-    private Task HoldAsync(ReviewEvent reviewEvent, string reasonText)
-        => _pendingQueue.AddOrReplace(reviewEvent) switch
+    private Task HoldAsync(ReviewEvent reviewEvent, ReviewHoldKind kind, string reasonText)
+    {
+        PendingReviewStartChange change = _pendingQueue.AddOrReplace(reviewEvent);
+
+        // 保留の理由は、再評価で同じ理由に戻る（Ignored）場合も含めて、公開状態へ伝える（#462）
+        _reviewCycleCoordinator?.ObserveHold(reviewEvent, kind);
+        return change switch
         {
             PendingReviewStartChange.Added => _loggingService.WriteAsync(
                 $"[Auto] {reviewEvent.PrCaption} のレビューを保留しました: {reasonText}（reason: {reviewEvent.Reason}）。"),
@@ -459,6 +467,7 @@ internal sealed class ReviewStartCoordinator
                 $"[Auto] 保留中の {reviewEvent.PrCaption} を新しいイベントで更新しました（reason: {reviewEvent.Reason}）。"),
             _ => Task.CompletedTask,
         };
+    }
 
     private Task LogAutoStartSkipAsync(ReviewEvent reviewEvent, string reason)
         => _loggingService.WriteAsync($"[Auto] {reviewEvent.PrCaption} のレビューを自動起動しませんでした: {reason}");

@@ -555,6 +555,76 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             line.Contains("[Auto] owner/repo #42 のレビューを自動起動します（reason: opened）。", StringComparison.Ordinal));
     }
 
+    // 保留の理由は、公開状態（review-status.json）が「なぜ待っているか」を出せるよう、保留のたびに通知する（#462）
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldObserveBusyHold_EvenWhenQueueKeepsTheSameEvent()
+    {
+        FakeLauncherService launcher = new() { IsRunning = true };
+        ReviewCycleCoordinator cycle = CreateCycleCoordinator();
+        List<ReviewHoldObservedEventArgs> holds = CaptureHolds(cycle);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, CreateAutoStartSettings(), reviewCycleCoordinator: cycle);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+
+        await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+        await coordinator.TryStartAutomaticallyAsync(reviewEvent);
+
+        holds.Should().HaveCount(2);
+        holds.Should().OnlyContain(hold => hold.Kind == ReviewHoldKind.Busy && ReferenceEquals(hold.ReviewEvent, reviewEvent));
+        _pendingQueue.Count.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldObserveAutoPauseHold_WhenAutomaticAndAgentIsPaused()
+    {
+        await WriteSnapshotAsync(_pausedAgentId, usedPercentage: 96);
+        ReviewCycleCoordinator cycle = CreateCycleCoordinator();
+        List<ReviewHoldObservedEventArgs> holds = CaptureHolds(cycle);
+        ReviewStartCoordinator coordinator = CreateCoordinator(new FakeLauncherService(), reviewCycleCoordinator: cycle);
+        ReviewEvent reviewEvent = CreateReviewEvent();
+
+        await coordinator.StartAsync(
+            reviewEvent,
+            LauncherRole.Reviewer,
+            ReviewStartTrigger.Automatic,
+            _ => Task.FromResult(true));
+
+        holds.Should().ContainSingle().Which.Kind.Should().Be(ReviewHoldKind.AutoPause);
+    }
+
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldObserveCiPendingHold_WhenCiIsPending()
+    {
+        _ciSource.Add(ScriptedCiSettleSource.Snapshot("Pending"));
+        ReviewCycleCoordinator cycle = CreateCycleCoordinator();
+        List<ReviewHoldObservedEventArgs> holds = CaptureHolds(cycle);
+        using ReviewCiSettleGate gate = CreateCiSettleGate();
+        ReviewStartCoordinator coordinator = CreateCoordinator(
+            new FakeLauncherService(),
+            CreateAutoStartSettings(),
+            ciSettleGate: gate,
+            reviewCycleCoordinator: cycle);
+
+        await coordinator.TryStartAutomaticallyAsync(CreateReviewEvent());
+
+        holds.Should().ContainSingle().Which.Kind.Should().Be(ReviewHoldKind.CiPending);
+    }
+
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldNotObserveHold_WhenReviewerStarts()
+    {
+        ReviewCycleCoordinator cycle = CreateCycleCoordinator();
+        List<ReviewHoldObservedEventArgs> holds = CaptureHolds(cycle);
+        ReviewStartCoordinator coordinator = CreateCoordinator(
+            new FakeLauncherService(),
+            CreateAutoStartSettings(),
+            reviewCycleCoordinator: cycle);
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(CreateReviewEvent());
+
+        result.Status.Should().Be(ReviewStartStatus.Started);
+        holds.Should().BeEmpty();
+    }
+
     // --- CI の確定待ち（暫定、#456） ---
 
     [Fact]
@@ -906,7 +976,8 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         IReviewLauncherService launcherService,
         SettingsService? settingsService = null,
         Action<string>? onLogAppended = null,
-        ReviewCiSettleGate? ciSettleGate = null)
+        ReviewCiSettleGate? ciSettleGate = null,
+        ReviewCycleCoordinator? reviewCycleCoordinator = null)
     {
         LoggingService loggingService = new(_workingDirectory);
         loggingService.LogAppended += (_, line) =>
@@ -922,8 +993,18 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             _pendingQueue,
             _autoPauseResumeScheduler,
             loggingService,
-            reviewCycleCoordinator: null,
+            reviewCycleCoordinator,
             ciSettleGate);
+    }
+
+    private ReviewCycleCoordinator CreateCycleCoordinator()
+        => new(new ReviewCycleStore(Path.Combine(_workingDirectory, "cycles")), new LoggingService(_workingDirectory));
+
+    private static List<ReviewHoldObservedEventArgs> CaptureHolds(ReviewCycleCoordinator cycle)
+    {
+        List<ReviewHoldObservedEventArgs> holds = [];
+        cycle.HoldObserved += (_, args) => holds.Add(args);
+        return holds;
     }
 
     private async Task WriteSnapshotAsync(string agentId, double usedPercentage)
