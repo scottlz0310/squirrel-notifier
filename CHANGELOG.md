@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-01
+
+reviewer の起動待ち・実行中・終了の状態と、時刻・保留の理由を、公開契約 `review-status.json` として書き出すようにし（#462）、reviewer の自動起動を、PR の required checks が確定してから行うようにした（#456）。
+
 ### Added
 
 - reviewer の起動待ち・実行中・終了の状態と、時刻・保留の理由・終了コードを、公開契約 `%LOCALAPPDATA%\SquirrelNotifier\review-status.json`（`schemaVersion: 1`）へ書き出すようにした（#462）。reviewed 側の待機を、時間ではなく状態で打ち切れるようにするための契約で、`statusline-summary.json`（#427）は変えない。各項目は、小文字の `key`（`owner/repo#N`。thread-owl の `review://status` の URI と同じ表記）、`state`（`waiting` / `running` / `finished`）、`receivedAt` / `startedAt` / `finishedAt`、`eventId`、`agent`、`holdReason`（`busy` / `ciPending` / `autoPause` / `manual`）と `holdSince`、保留の待ち順 `queuePosition`、プロセスの終了結果 `outcome` / `exitCode`（Verdict ではない）を持つ。終了した PR は `recent[]`（直近 24 時間、最大 50 件）に残るため、「終了した」と「受信していない」を区別できる。`updatedAt` は状態が変わらなくても 60 秒ごとに更新する（アプリの異常終了で残った古いファイルを、消費者が判定できる）。全体の状態として、同時実行の件数（`concurrency`。現在は最大 1）と購読の状態（`subscription`。認証切れを含む）も出す。起動時は空の文書を書き出し、終了時は削除する（ファイル不在 = 未起動）。項目は N 件を前提にしており、並列実行（D8）でも契約は変わらない。パス・コマンドライン・トークン・ログ本文は含まない。スキーマと消費者の判定の例は `docs/review-status-contract.md` に記載した。保留の理由を観測するため、`ReviewStartCoordinator` が保留のたびに `ReviewCycleCoordinator.ObserveHold` で通知し、reviewer の終了コードを `ReviewCycleCoordinator.StateChanged` の通知に添えるようにした（内部の変更。永続化はしない）。
@@ -551,7 +555,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.0...v0.13.1
