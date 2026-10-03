@@ -206,6 +206,7 @@ internal sealed partial class MainWindow : Window
         LogList.ItemsSource = _logEntryCoordinator.Entries;
         LogList.Loaded += OnLogListLoaded;
         LogList.LayoutUpdated += OnLogLayoutUpdated;
+        LogList.SizeChanged += OnLogSizeChanged;
         LogList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnLogPointerWheelChanged), true);
         LogList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnLogPointerPressed), true);
         LogList.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnLogPointerReleased), true);
@@ -488,7 +489,9 @@ internal sealed partial class MainWindow : Window
         ScrollLogTail();
     }
 
-    private void OnLogLayoutUpdated(object? sender, object e) => ScrollLogTail();
+    private void OnLogLayoutUpdated(object? sender, object e) => _ = DispatcherQueue.TryEnqueue(ScrollLogTail);
+
+    private void OnLogSizeChanged(object sender, SizeChangedEventArgs e) => LogTail.OnLayoutChanged();
 
     private void ScrollLogTail()
     {
@@ -496,13 +499,13 @@ internal sealed partial class MainWindow : Window
         {
             LogDisplayEntry? target = LogTail.GetScrollTarget(
                 _logEntryCoordinator.Entries,
-                _logListScrollViewer.VerticalOffset,
-                _logListScrollViewer.ScrollableHeight,
                 _logListScrollViewer.ViewportHeight);
             if (target is not null)
             {
                 LogList.ScrollIntoView(target);
-                _ = _logListScrollViewer.ChangeView(null, _logListScrollViewer.ScrollableHeight, null, true);
+                _ = DispatcherQueue.TryEnqueue(
+                    Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    () => LogTail.ScrollIfFollowing(() => _ = _logListScrollViewer.ChangeView(null, _logListScrollViewer.ScrollableHeight, null, true)));
             }
         }
     }

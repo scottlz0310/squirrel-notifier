@@ -2,6 +2,7 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
@@ -41,6 +42,19 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
         {
             NewEntryCount++;
             NotifyStateChanged();
+        }
+    }
+
+    internal void OnLayoutChanged()
+    {
+        _scrollPending = IsFollowing;
+    }
+
+    internal void ScrollIfFollowing(Action scroll)
+    {
+        if (IsFollowing)
+        {
+            scroll();
         }
     }
 
@@ -112,15 +126,14 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
         }
     }
 
-    internal LogDisplayEntry? GetScrollTarget(
-        IReadOnlyList<LogDisplayEntry> entries, double verticalOffset, double scrollableHeight, double viewportHeight)
+    internal LogDisplayEntry? GetScrollTarget(IReadOnlyList<LogDisplayEntry> entries, double viewportHeight)
     {
         if (!IsFollowing || entries.Count == 0 || viewportHeight <= 0)
         {
             return null;
         }
 
-        if (!_scrollPending && LogFollowPolicy.ShouldFollow(verticalOffset, scrollableHeight))
+        if (!_scrollPending)
         {
             return null;
         }

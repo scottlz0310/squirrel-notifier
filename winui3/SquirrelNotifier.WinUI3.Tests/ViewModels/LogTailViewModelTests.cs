@@ -12,16 +12,13 @@ namespace SquirrelNotifier.WinUI3.Tests.ViewModels;
 
 public class LogTailViewModelTests
 {
-    [Theory]
-    [InlineData(0, 400, 200)]
-    [InlineData(400, 400, 200)]
-    [InlineData(0, 0, 200)]
-    public void GetScrollTarget_InitialDisplay_ShouldSelectLastEntry(double offset, double extent, double viewport)
+    [Fact]
+    public void GetScrollTarget_InitialDisplay_ShouldSelectLastEntry()
     {
         LogTailViewModel model = new();
         LogDisplayEntry[] entries = [new("first"), new("last")];
 
-        model.GetScrollTarget(entries, offset, extent, viewport).Should().BeSameAs(entries[^1]);
+        model.GetScrollTarget(entries, 200).Should().BeSameAs(entries[^1]);
         model.IsFollowing.Should().BeTrue();
         model.ResumeVisibility.Should().Be(Visibility.Collapsed);
     }
@@ -34,14 +31,14 @@ public class LogTailViewModelTests
         LogTailViewModel model = new();
         LogDisplayEntry[] entries = [new("last")];
 
-        model.GetScrollTarget(entries, 0, 400, viewport).Should().BeNull();
-        model.GetScrollTarget(entries, 0, 400, 200).Should().BeSameAs(entries[^1]);
+        model.GetScrollTarget(entries, viewport).Should().BeNull();
+        model.GetScrollTarget(entries, 200).Should().BeSameAs(entries[^1]);
     }
 
     [Fact]
     public void GetScrollTarget_EmptyDisplay_ShouldNotSelectEntry()
     {
-        new LogTailViewModel().GetScrollTarget([], 0, 0, 200).Should().BeNull();
+        new LogTailViewModel().GetScrollTarget([], 200).Should().BeNull();
     }
 
     [Fact]
@@ -49,12 +46,13 @@ public class LogTailViewModelTests
     {
         LogTailViewModel model = new();
         LogDisplayEntry[] entries = [new("last")];
-        model.GetScrollTarget(entries, 400, 400, 200).Should().NotBeNull();
-        model.GetScrollTarget(entries, 400, 400, 200).Should().BeNull();
+        model.GetScrollTarget(entries, 200).Should().NotBeNull();
+        model.GetScrollTarget(entries, 200).Should().BeNull();
 
         model.OnLogAdded();
-        model.GetScrollTarget(entries, 400, 400, 200).Should().NotBeNull();
-        model.GetScrollTarget(entries, 0, 400, 300).Should().NotBeNull();
+        model.GetScrollTarget(entries, 200).Should().NotBeNull();
+        model.OnLayoutChanged();
+        model.GetScrollTarget(entries, 300).Should().NotBeNull();
         model.NewEntryCount.Should().Be(0);
     }
 
@@ -69,7 +67,7 @@ public class LogTailViewModelTests
         model.OnLogAdded();
         model.OnLogAdded();
 
-        model.GetScrollTarget([new("last")], 0, 400, 200).Should().BeNull();
+        model.GetScrollTarget([new("last")], 200).Should().BeNull();
         model.NewEntryCount.Should().Be(2);
         model.NewEntryText.Should().Be("新着 2 件");
         model.ResumeVisibility.Should().Be(Visibility.Visible);
@@ -77,6 +75,8 @@ public class LogTailViewModelTests
         changed.Should().Contain(nameof(LogTailViewModel.ResumeVisibility));
 
         model.ObserveViewport(0, 0, 300, false);
+        model.OnLayoutChanged();
+        model.GetScrollTarget([new("last")], 200).Should().BeNull();
         model.IsFollowing.Should().BeFalse("サイズ変更だけでは過去ログを読む状態を解除しない");
     }
 
@@ -149,7 +149,7 @@ public class LogTailViewModelTests
         model.Resume();
 
         model.NewEntryCount.Should().Be(0);
-        model.GetScrollTarget([new("last")], 0, 400, 200).Should().NotBeNull();
+        model.GetScrollTarget([new("last")], 200).Should().NotBeNull();
         model.ObserveViewport(0, 400, 200, false);
         model.IsFollowing.Should().BeTrue();
     }
@@ -190,5 +190,16 @@ public class LogTailViewModelTests
         model.OnKeyInput(key);
         model.ObserveViewport(400, 400, 200, false);
         model.IsFollowing.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ScrollIfFollowing_UserInterruptsQueuedScroll_ShouldCancelMovement()
+    {
+        LogTailViewModel model = new();
+        int movements = 0;
+        model.ScrollIfFollowing(() => movements++);
+        model.Pause();
+        model.ScrollIfFollowing(() => movements++);
+        movements.Should().Be(1);
     }
 }
