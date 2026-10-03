@@ -97,6 +97,23 @@ public sealed class TrayNotificationCoordinatorTests
     }
 
     [Fact]
+    public void Show_ShouldLogAndContinueWhenNotificationDisplayFails()
+    {
+        NotificationRecorder recorder = new()
+        {
+            ThrowOnShow = true,
+        };
+        TrayNotificationCoordinator coordinator = recorder.CreateCoordinator();
+        TrayNotificationPresentation notification = CreateNotification("レート制限解除");
+
+        coordinator.Show(notification);
+
+        recorder.Notifications.Should().ContainSingle().Which.Should().Be(notification);
+        recorder.Logs.Should().ContainSingle()
+            .Which.Should().Be("[UI] Failed to show tray notification: notification unavailable");
+    }
+
+    [Fact]
     public void Apply_ShouldShowOnlyLatestPendingNotification()
     {
         NotificationRecorder recorder = new();
