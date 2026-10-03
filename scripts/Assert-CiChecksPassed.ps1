@@ -2,8 +2,8 @@
 .SYNOPSIS
   指定コミットに対する CI の必須ジョブ（GitHub Actions の check run）が成功していることを確認する。
 .DESCRIPTION
-  release.yml は tag push で起動するが、ci.yml は tag push では起動しない。そのため公開前に、
-  tag が指すコミットに対して ci.yml の必須ジョブが成功していることをここで確かめる（#429 / #426）。
+  公開前に、publish-release.yml が固定したリリースコミットに対して ci.yml の必須ジョブが成功していることを
+  ここで確かめる（#429 / #426）。
   - 判定対象は GitHub Actions が作成した check run だけ（他 App による同名 check run を採用しない）
   - 同名の再実行は id が最大の run を採用する
   - 未作成・実行中の間は待機し、TimeoutMinutes を超えたら失敗する

@@ -7,6 +7,15 @@ BeforeAll {
 }
 
 Describe 'MSI の同一バージョン MajorUpgrade 判定' {
+    It '公開対象の version が一致すれば通し、不一致なら拒否する' -ForEach @(
+        @{ Expected = '1.2.3'; Pass = $true }
+        @{ Expected = '1.2.4'; Pass = $false }
+    ) {
+        $assertion = { Assert-MsiMajorUpgrade -ProductVersion '1.2.3' -UpgradeRows @(New-UpgradeRow) -MsiPath 'app.msi' -ExpectedVersion $Expected }
+        if ($Pass) { $assertion | Should -Not -Throw }
+        else { $assertion | Should -Throw '*対象の version と一致しません*' }
+    }
+
     It '同一バージョンを含む上限なら通す' -ForEach @(
         @{ Attributes = 512 }
         @{ Attributes = 768 }

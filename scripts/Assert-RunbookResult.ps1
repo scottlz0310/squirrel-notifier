@@ -17,7 +17,8 @@ param(
     [Parameter(Mandatory)][string]$HeadSha,
     [Parameter(Mandatory)][string]$BaseSha,
     [string]$CsprojPath = 'winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj',
-    [string]$RunbookDirectory = 'tests/e2e/agent-runbooks'
+    [string]$RunbookDirectory = 'tests/e2e/agent-runbooks',
+    [switch]$FetchTestedCommit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -96,6 +97,10 @@ if ($failures.Count -gt 0) {
     throw "ランブックの結果が基準を満たしていません（$resultRelativePath）: $($failures -join ' / ')"
 }
 
+if ($FetchTestedCommit) {
+    # Squash merge と準備ブランチ削除の後は、testedCommit が main の履歴だけでは取得されない。
+    Invoke-Git fetch --no-tags origin $result.testedCommit | Out-Null
+}
 $changed = @(Invoke-Git diff --name-only $result.testedCommit $HeadSha | Where-Object { $_ })
 $outside = @($changed | Where-Object { -not $_.StartsWith("$RunbookDirectory/results/", [StringComparison]::Ordinal) })
 if ($outside.Count -gt 0) {

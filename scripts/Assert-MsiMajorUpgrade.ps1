@@ -2,11 +2,15 @@ function Assert-MsiMajorUpgrade {
     param(
         [AllowNull()][AllowEmptyString()][string]$ProductVersion,
         [AllowEmptyCollection()][object[]]$UpgradeRows,
-        [Parameter(Mandatory)][string]$MsiPath
+        [Parameter(Mandatory)][string]$MsiPath,
+        [string]$ExpectedVersion
     )
 
     if ([string]::IsNullOrWhiteSpace($ProductVersion)) {
         throw "MSI の ProductVersion を取得できません: $MsiPath"
+    }
+    if ($ExpectedVersion -and $ProductVersion -cne $ExpectedVersion) {
+        throw "MSI の ProductVersion が対象の version と一致しません: expected=$ExpectedVersion, actual=$ProductVersion"
     }
 
     $upgradeRow = $UpgradeRows | Where-Object { $_[6] -eq 'WIX_UPGRADE_DETECTED' } | Select-Object -First 1

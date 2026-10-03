@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    if: startsWith(github.event.head_commit.message, 'chore(release):')
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+      - name: タイトルと安定版の一致を確認
+        shell: pwsh
+        env:
+          RELEASE_MESSAGE: ${{ github.event.head_commit.message }}
+        run: ./scripts/Assert-ReleaseCommit.ps1 -Message $env:RELEASE_MESSAGE
+      - name: リリース公開の承認を確認
+        run: echo 'release Environment の承認後にタグ作成と公開を開始します。'
+
+  draft:
+    needs: authorize
+    uses: scottlz0310/release-automate/.github/workflows/reusable-publish-release.yml@fd3e676a431bbd6e189270e6911ec4c2307e9f2b # v2.0.0
+    permissions:
+      contents: write
+    with:
+      draft: true
+
+  build-package:
+    needs: draft
+    if: needs.draft.outputs.release_state == 'draft'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.draft.outputs.target_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: WiX 7 を用意
+        shell: pwsh
+        run: ./scripts/Ensure-Wix.ps1 -Version 7.0.0
+      - name: リリースパッケージを生成
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.draft.outputs.tag_name }}
+        run: ./scripts/Build-ReleasePackage.ps1 -Version $env:RELEASE_TAG.Substring(1) -OutputDirectory ./release-output
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-payload-x64
+          path: |
+            release-output/*.zip
+            release-output/*.msi
+            release-output/checksums-x64.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  verify-ci:
+    needs: draft
+    if: needs.draft.outputs.release_state == 'draft'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.draft.outputs.target_sha }}
+          fetch-depth: 0
+      - name: 対象 SHA の CI とランブック結果を確認
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_SHA: ${{ needs.draft.outputs.target_sha }}
+        run: |
+          ./scripts/Assert-CiChecksPassed.ps1 -Repository $env:RELEASE_REPOSITORY -Sha $env:RELEASE_SHA
+          ./scripts/Assert-RunbookResult.ps1 -HeadSha $env:RELEASE_SHA -BaseSha "$($env:RELEASE_SHA)^" -FetchTestedCommit
+
+  attach:
+    needs: [draft, build-package, verify-ci]
+    if: needs.draft.outputs.release_state == 'draft'
+    runs-on: windows-2025
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.draft.outputs.target_sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-payload-x64
+          path: release-output
+      - name: 日本語リリースノートを合成して成果物を添付
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.draft.outputs.tag_name }}
+          RELEASE_SHA: ${{ needs.draft.outputs.target_sha }}
+        run: |
+          ./scripts/extract-release-notes.ps1 -Version $env:RELEASE_TAG.Substring(1)
+          ./scripts/Manage-DraftReleaseAssets.ps1 -Action Attach -Repository $env:RELEASE_REPOSITORY -Version $env:RELEASE_TAG.Substring(1) -TargetSha $env:RELEASE_SHA -Directory ./release-output -NotesPath ./release-notes.md
+
+  verify-assets:
+    needs: [draft, attach]
+    if: needs.draft.outputs.release_state == 'draft'
+    runs-on: windows-2025
+    permissions:
+      # draft は push access を持つ資格情報で取得する必要がある。検証スクリプトは読み取りだけを行う。
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.draft.outputs.target_sha }}
+          fetch-depth: 0
+      - name: draft の成果物を再取得して検証
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.draft.outputs.tag_name }}
+          RELEASE_SHA: ${{ needs.draft.outputs.target_sha }}
+        run: |
+          ./scripts/extract-release-notes.ps1 -Version $env:RELEASE_TAG.Substring(1)
+          ./scripts/Manage-DraftReleaseAssets.ps1 -Action Verify -Repository $env:RELEASE_REPOSITORY -Version $env:RELEASE_TAG.Substring(1) -TargetSha $env:RELEASE_SHA -Directory ./verified-assets -NotesPath ./release-notes.md
+
+  finalize:
+    needs: [draft, verify-assets]
+    if: needs.draft.outputs.release_state == 'draft' && needs.verify-assets.result == 'success'
+    uses: scottlz0310/release-automate/.github/workflows/reusable-finalize-release.yml@fd3e676a431bbd6e189270e6911ec4c2307e9f2b # v2.0.0
+    permissions:
+      contents: write
+    with:
+      tag_name: ${{ needs.draft.outputs.tag_name }}
+      target_sha: ${{ needs.draft.outputs.target_sha }}

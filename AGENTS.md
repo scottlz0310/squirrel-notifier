@@ -77,7 +77,7 @@ xUnit と FluentAssertions を用いて `winui3/SquirrelNotifier.WinUI3.Tests` �
 コミットメッセージは既存の Conventional Commit（例: `feat:`, `chore:`, `fix:`, `docs:`） に従ってください。各コミットは論理的なスコープにまとめ、フックが通ることを確認してください。`--no-verify` は PR 内で正当化できる場合のみ使用してください。PR には次を含めてください: 明確な概要、関連する GitHub issue や議論へのリンク、UX 変更の場合はスクリーンショットや GIF、そしてテスト（`dotnet test`、手動のトレイ動作確認など）の説明。CI がグリーンであることを確認し、機密修正は `SECURITY.md` に従っているか確認した上でレビューを依頼してください。
 
 ### リリースノート運用
-リリースページの本文は `CHANGELOG.md` を単一の原稿源として機械生成します（`scripts/extract-release-notes.ps1`）。`release.yml` がタグ push 時に該当バージョン節を抽出し、`.github/RELEASE_TEMPLATE.md`（インストール手順・前提条件）と合成して適用します。
+リリースページの本文は `CHANGELOG.md` を単一の原稿源として機械生成します（`scripts/extract-release-notes.ps1`）。`prepare-release.yml` が release-automate で準備 PR を作成し、`publish-release.yml` が main へのリリースコミットを受け、`release` Environment の公開承認後にタグ・draft を作成します。該当バージョン節と `.github/RELEASE_TEMPLATE.md`（インストール手順・前提条件）を合成し、成果物の添付と再取得による検証が成功した場合だけ finalize します。手順は `docs/release-automation.md` を参照してください。マージ許可と公開許可は別です。
 
 - リリース準備 PR では `CHANGELOG.md` に該当バージョン節（`## [x.y.z] - 日付`）を追加し、csproj の `<Version>` と一致させてください（`changelog-guard` ワークフローが PR で検証します）。末尾の比較リンク（`[Unreleased]` を `vx.y.z...HEAD` に、`[x.y.z]` を前バージョンとの比較に）も更新してください。
 - リリース準備 PR では、実装したセッションとは別のセッションで実デスクトップのランブック（`tests/e2e/agent-runbooks/`）を実行し、結果 `results/vx.y.z.json` だけを追加コミットしてください（`runbook-guard` ワークフローが、必須シナリオの合否と、テストしたコミット以降の変更が結果だけであることを検証します）。ランブックの実行後に結果以外を直すと再実行が必要になるため、CHANGELOG・version・比較リンクを含むリリース準備の変更は、実行前にすべて済ませてください。

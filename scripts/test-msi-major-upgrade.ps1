@@ -6,7 +6,9 @@
 param(
     [Parameter(Mandatory)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
-    [string]$MsiPath
+    [string]$MsiPath,
+
+    [string]$ExpectedVersion
 )
 
 Set-StrictMode -Version Latest
@@ -95,7 +97,7 @@ try {
     }
 
     $upgradeRows = @(Get-MsiRows -Database $database -Query 'SELECT * FROM `Upgrade`')
-    Assert-MsiMajorUpgrade -ProductVersion $properties['ProductVersion'] -UpgradeRows $upgradeRows -MsiPath $resolvedMsiPath
+    Assert-MsiMajorUpgrade -ProductVersion $properties['ProductVersion'] -UpgradeRows $upgradeRows -MsiPath $resolvedMsiPath -ExpectedVersion $ExpectedVersion
 }
 finally {
     if ($null -ne $database) {
