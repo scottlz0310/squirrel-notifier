@@ -27,6 +27,7 @@ internal sealed class TrayIconService : IDisposable
         _iconChangedCallbackToken = _taskbarIcon.RegisterPropertyChangedCallback(
             TaskbarIcon.IconProperty,
             OnIconChanged);
+        _taskbarIcon.TrayIcon.Created += OnTrayIconCreated;
         _notificationCoordinator = new TrayNotificationCoordinator(
             notification => _taskbarIcon.ShowNotification(
                 notification.Title,
@@ -70,7 +71,7 @@ internal sealed class TrayIconService : IDisposable
         string message,
         H.NotifyIcon.Core.NotificationIcon icon = H.NotifyIcon.Core.NotificationIcon.None)
     {
-        _taskbarIcon.ShowNotification(title, message, icon, sound: true, respectQuietTime: true);
+        _notificationCoordinator.Show(new TrayNotificationPresentation(title, message, icon));
     }
 
     public void ShowReviewPopup()
@@ -87,12 +88,17 @@ internal sealed class TrayIconService : IDisposable
     public void Dispose()
     {
         _taskbarIcon.UnregisterPropertyChangedCallback(TaskbarIcon.IconProperty, _iconChangedCallbackToken);
+        _taskbarIcon.TrayIcon.Created -= OnTrayIconCreated;
         _taskbarIcon.Dispose();
     }
 
     private void OnIconChanged(DependencyObject sender, DependencyProperty property)
     {
         EnsureCreated();
+    }
+
+    private void OnTrayIconCreated(object? sender, EventArgs args)
+    {
         MarkReady();
     }
 
