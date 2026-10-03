@@ -13,18 +13,18 @@ internal sealed class LogEntryCollectionCoordinator
 {
     public const int MaxEntries = 200;
 
-    private readonly ObservableCollection<string> _entries = new();
+    private readonly ObservableCollection<LogDisplayEntry> _entries = new();
 
     public LogEntryCollectionCoordinator()
     {
-        Entries = new ReadOnlyObservableCollection<string>(_entries);
+        Entries = new ReadOnlyObservableCollection<LogDisplayEntry>(_entries);
     }
 
-    public ReadOnlyObservableCollection<string> Entries { get; }
+    public ReadOnlyObservableCollection<LogDisplayEntry> Entries { get; }
 
     public void Add(string line)
     {
-        _entries.Add(line);
+        _entries.Add(new LogDisplayEntry(line));
         if (_entries.Count > MaxEntries)
         {
             _entries.RemoveAt(0);

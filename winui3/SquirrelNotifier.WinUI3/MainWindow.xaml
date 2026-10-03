@@ -408,7 +408,7 @@
                                   SelectionMode="None">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding}"
+                                    <TextBlock Text="{Binding Text}"
                                                TextWrapping="Wrap"/>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
