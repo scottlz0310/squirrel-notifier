@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-03
+
 ### Added
 
 - Recent activity に「最新へ戻る」と、過去ログを読む間の「新着 N 件」を追加した。手動で末尾から離れたときは表示位置を維持し、ボタンまたは末尾へのスクロールで自動追従を再開する。24px以内の小さな往復でも、末尾を離れた検出と復帰判定を分けて再開できる。通常は初回表示・サイズ変更・トレイからの再表示でも最終行へ追従する（#452）。
@@ -570,7 +572,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.13.1...v0.14.0
