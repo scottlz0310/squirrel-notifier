@@ -59,6 +59,20 @@ internal sealed class TrayNotificationCoordinator
         TryShowPendingNotification();
     }
 
+    public void Show(TrayNotificationPresentation notification)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+
+        try
+        {
+            _showNotification(notification);
+        }
+        catch (Exception ex)
+        {
+            _ = _writeLogAsync($"[UI] Failed to show tray notification: {ex.Message}");
+        }
+    }
+
     private void TryShowPendingNotification()
     {
         if (!_isReady || _pendingNotification is null)
@@ -74,14 +88,7 @@ internal sealed class TrayNotificationCoordinator
             _ = _writeLogAsync(pendingNotification.LogMessage);
         }
 
-        try
-        {
-            _showNotification(pendingNotification.Notification);
-        }
-        catch (Exception ex)
-        {
-            _ = _writeLogAsync($"[UI] Failed to show tray notification: {ex.Message}");
-        }
+        Show(pendingNotification.Notification);
     }
 
     private sealed record PendingNotification(

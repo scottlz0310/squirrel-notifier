@@ -114,6 +114,51 @@ public sealed class ReviewNotificationCoordinatorTests
             .Which.Should().Be((reviewEvent, false, null));
     }
 
+    [Fact]
+    public void Show_ShouldLogWhenPopupAndFallbackBothFailWithoutThrowing()
+    {
+        NotificationRecorder recorder = new()
+        {
+            ThrowOnPopup = true,
+            ThrowOnBalloon = true,
+        };
+        ReviewNotificationCoordinator coordinator = recorder.CreateCoordinator();
+        coordinator.AttachPopup(() => recorder.Attached = true);
+
+        Action act = () => coordinator.Show(CreateReviewEvent(), isAutoStarted: false);
+
+        act.Should().NotThrow();
+        recorder.Logs.Should().HaveCount(2);
+        recorder.Logs[0].Should().Contain("Failed to show review popup: popup unavailable");
+        recorder.Logs[1].Should().Contain("Failed to show fallback review notification: balloon unavailable");
+    }
+
+    [Fact]
+    public void Show_ShouldLogWhenFallbackFailsBeforePopupIsAttachedWithoutThrowing()
+    {
+        NotificationRecorder recorder = new() { ThrowOnBalloon = true };
+        ReviewNotificationCoordinator coordinator = recorder.CreateCoordinator();
+
+        Action act = () => coordinator.Show(CreateReviewEvent(), isAutoStarted: false);
+
+        act.Should().NotThrow();
+        recorder.Logs.Should().ContainSingle()
+            .Which.Should().Contain("Failed to show fallback review notification: balloon unavailable");
+    }
+
+    [Fact]
+    public void ShowFallback_ShouldLogWhenBalloonFailsWithoutThrowing()
+    {
+        NotificationRecorder recorder = new() { ThrowOnBalloon = true };
+        ReviewNotificationCoordinator coordinator = recorder.CreateCoordinator();
+
+        Action act = () => coordinator.ShowFallback(CreateReviewEvent(), isAutoStarted: false);
+
+        act.Should().NotThrow();
+        recorder.Logs.Should().ContainSingle()
+            .Which.Should().Contain("Failed to show fallback review notification: balloon unavailable");
+    }
+
     private static ReviewEvent CreateReviewEvent()
         => new()
         {
@@ -127,6 +172,8 @@ public sealed class ReviewNotificationCoordinatorTests
         public bool Attached { get; set; }
 
         public bool ThrowOnPopup { get; init; }
+
+        public bool ThrowOnBalloon { get; init; }
 
         public List<(ReviewEvent ReviewEvent, bool IsAutoStarted, string? HoldReason)> PopupEvents { get; } = [];
 
@@ -144,7 +191,14 @@ public sealed class ReviewNotificationCoordinatorTests
                         throw new InvalidOperationException("popup unavailable");
                     }
                 },
-                (reviewEvent, isAutoStarted, holdReason) => BalloonEvents.Add((reviewEvent, isAutoStarted, holdReason)),
+                (reviewEvent, isAutoStarted, holdReason) =>
+                {
+                    BalloonEvents.Add((reviewEvent, isAutoStarted, holdReason));
+                    if (ThrowOnBalloon)
+                    {
+                        throw new InvalidOperationException("balloon unavailable");
+                    }
+                },
                 message =>
                 {
                     Logs.Add(message);
