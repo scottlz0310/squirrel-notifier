@@ -40,7 +40,9 @@ GitHub 側の設定も維持する。
 2. reusable publish が main のトリガー SHA に固定したタグと **draft** を作成する。
 3. 同じ SHA を checkout して既存の `Build-ReleasePackage.ps1` で ZIP / MSI / checksum を生成する。
    同時に同じ SHA の `build-and-test` / `headless-e2e` / `distribution-e2e` / `lint` の成功を待ち、
-   直前の main を base としてランブックの結果を再検証する。
+   直前の main を base としてランブックの結果を再検証する。Squash merge 後は main の履歴に
+   testedCommit が含まれないため、記録した SHA を origin から明示 fetch して比較する。
+   取得できなければ公開を停止する。準備ブランチはマージ後に削除してよい。
 4. `extract-release-notes.ps1` が CHANGELOG と RELEASE_TEMPLATE を合成する。
    固定 SHA の draft であることを確認し、配布物と日本語ノートを添付する。
 5. draft から配布物をダウンロードし、ノート一致、ZIP / MSI の SHA256、ZIP の必須ファイル、

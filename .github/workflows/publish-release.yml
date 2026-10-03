@@ -81,7 +81,7 @@ jobs:
           RELEASE_SHA: ${{ needs.draft.outputs.target_sha }}
         run: |
           ./scripts/Assert-CiChecksPassed.ps1 -Repository $env:RELEASE_REPOSITORY -Sha $env:RELEASE_SHA
-          ./scripts/Assert-RunbookResult.ps1 -HeadSha $env:RELEASE_SHA -BaseSha "$($env:RELEASE_SHA)^"
+          ./scripts/Assert-RunbookResult.ps1 -HeadSha $env:RELEASE_SHA -BaseSha "$($env:RELEASE_SHA)^" -FetchTestedCommit
 
   attach:
     needs: [draft, build-package, verify-ci]

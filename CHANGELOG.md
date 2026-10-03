@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- リリース準備・タグと draft の作成・最終公開を `scottlz0310/release-automate` v2.0.0 の同一 SHA に固定して移行した。マージ後も `release` Environment の承認を待ち、日本語ノート、同一 SHA の CI、別セッションのランブック、添付後の ZIP/MSI/checksum と version/SHA の検証が成功した場合だけ公開する（#443）。
+- リリース準備・タグと draft の作成・最終公開を `scottlz0310/release-automate` v2.0.0 の同一 SHA に固定して移行した。マージ後も `release` Environment の承認を待ち、日本語ノート、同一 SHA の CI、別セッションのランブック、添付後の ZIP/MSI/checksum と version/SHA の検証が成功した場合だけ公開する。Squash merge と準備ブランチ削除の後も、ランブックの testedCommit を明示取得して比較する（#443）。
 - 配布パッケージ生成、code-behind の行数上限検出、MSI の同一バージョン MajorUpgrade 判定の Pester テストを追加した（#448）。行数検出と MSI table の判定を関数へ切り出し、CI の Ubuntu runner でも境界条件・失敗伝播・成果物の整合性を検証する。PowerShell 全体のゲート化は、未テストの OS 操作スクリプトも残るため見送り、Codecov の `powershell` flag は informational を維持する。
 - `review-status.json` の、受信 → 起動待ち → 保留 → 起動 → 終了の流れを、実際のコーディネーター（`ReviewEventProcessingCoordinator`・`ReviewStartCoordinator`・`ReviewCycleCoordinator`・`ReviewStatusService`）をつないだテスト（`ReviewStatusPipelineTests`）で固定した（#462）。保留の理由（`manual` / `busy` / `autoPause` / `ciPending`）と待ち順（`queuePosition`）、起動時の空の文書と終了時の削除、実行中から終了（`recent[]` の `completed` / `failed`）までの遷移を、公開ファイルの内容で検証する。各部品の単体テストでは固定できなかった、保留の観測が公開ファイルへ届くことを確かめる。実機では再現しにくい保留（`manual` は自動起動の off、`autoPause` は Auto-Pause、`ciPending` は required checks の未確定）も、決定的に確認できる。製品の挙動の変更はない（テストのみ）。
 
