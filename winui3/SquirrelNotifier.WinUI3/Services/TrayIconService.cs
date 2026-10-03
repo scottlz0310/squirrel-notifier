@@ -4,6 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using H.NotifyIcon;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -14,12 +15,18 @@ internal sealed class TrayIconService : IDisposable
 {
     private readonly TaskbarIcon _taskbarIcon;
     private readonly TrayNotificationCoordinator _notificationCoordinator;
+    private readonly long _iconChangedCallbackToken;
+    private readonly Func<string, Task> _writeLogAsync;
 
     public TrayIconService(TaskbarIcon taskbarIcon, Func<string, Task> writeLogAsync)
     {
         _taskbarIcon = taskbarIcon ?? throw new ArgumentNullException(nameof(taskbarIcon));
         ArgumentNullException.ThrowIfNull(writeLogAsync);
+        _writeLogAsync = writeLogAsync;
         _taskbarIcon.PopupPlacement = PlacementMode.Bottom;
+        _iconChangedCallbackToken = _taskbarIcon.RegisterPropertyChangedCallback(
+            TaskbarIcon.IconProperty,
+            OnIconChanged);
         _notificationCoordinator = new TrayNotificationCoordinator(
             notification => _taskbarIcon.ShowNotification(
                 notification.Title,
@@ -28,6 +35,7 @@ internal sealed class TrayIconService : IDisposable
                 sound: true,
                 respectQuietTime: true),
             writeLogAsync);
+        EnsureCreated();
     }
 
     public void UpdateIcon(string iconFileName)
@@ -75,6 +83,29 @@ internal sealed class TrayIconService : IDisposable
 
     public void Dispose()
     {
+        _taskbarIcon.UnregisterPropertyChangedCallback(TaskbarIcon.IconProperty, _iconChangedCallbackToken);
         _taskbarIcon.Dispose();
+    }
+
+    private void OnIconChanged(DependencyObject sender, DependencyProperty property)
+    {
+        EnsureCreated();
+    }
+
+    private void EnsureCreated()
+    {
+        if (_taskbarIcon.Icon is null || _taskbarIcon.IsCreated)
+        {
+            return;
+        }
+
+        try
+        {
+            _taskbarIcon.ForceCreate(enablesEfficiencyMode: false);
+        }
+        catch (Exception ex)
+        {
+            _ = _writeLogAsync($"[UI] Failed to create tray icon: {ex.Message}");
+        }
     }
 }

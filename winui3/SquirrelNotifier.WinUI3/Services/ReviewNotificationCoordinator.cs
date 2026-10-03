@@ -50,7 +50,7 @@ internal sealed class ReviewNotificationCoordinator
     {
         if (!_isPopupAvailable)
         {
-            ShowFallback(reviewEvent, isAutoStarted, statusNote);
+            TryShowFallback(reviewEvent, isAutoStarted, statusNote);
             return;
         }
 
@@ -62,10 +62,22 @@ internal sealed class ReviewNotificationCoordinator
         {
             _ = _writeLogAsync(
                 $"[UI] Failed to show review popup: {ex.Message}");
-            ShowFallback(reviewEvent, isAutoStarted, statusNote);
+            TryShowFallback(reviewEvent, isAutoStarted, statusNote);
         }
     }
 
     public void ShowFallback(ReviewEvent reviewEvent, bool isAutoStarted, string? statusNote = null)
-        => _showBalloon(reviewEvent, isAutoStarted, statusNote);
+        => TryShowFallback(reviewEvent, isAutoStarted, statusNote);
+
+    private void TryShowFallback(ReviewEvent reviewEvent, bool isAutoStarted, string? statusNote)
+    {
+        try
+        {
+            _showBalloon(reviewEvent, isAutoStarted, statusNote);
+        }
+        catch (Exception ex)
+        {
+            _ = _writeLogAsync($"[UI] Failed to show fallback review notification: {ex.Message}");
+        }
+    }
 }
