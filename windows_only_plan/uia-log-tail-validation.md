@@ -47,3 +47,7 @@ MainWindow の行数上限は1473から1503へ更新した（実測1502）。追
 証跡は `%LocalAppData%\SquirrelNotifier\investigations\2026-10-03` に保存。`investigation-report.md`、`matrix-results.json`、`evidence-sha256.json`、各試験の画像・UI tree・process-samples・dump・終了検査を参照する。末尾操作の証跡は `log-tail-implementation` 配下。dump と実環境のログはリポジトリへ追加しない。
 
 元の #452 にある InvokePattern-only の reviewer 起動 → ライブログ終了 → 購読停止は未検証。Windows MCP のマウス操作をその合格証拠に代用しない。トレイからの再表示もこの実画面検証では未実施。この検証はリリースランブックの合格結果ではなく、#452 の自動クローズもしない。
+
+## 独立レビュー後の境界条件修正
+
+PR #470 の指摘4172321772を受け、末尾から24px以内でも実際に末尾を離れたことを検出するよう修正。下向き入力による復帰時だけ24pxの許容幅を使い、上向き移動後の通知だけで早期再開しない。ホイールの小移動・スクロール可能高さ24px以下・スクロールバー・Down/PageDown/Endの往復を含む10ケースを追加し、追従ViewModelの全37ケースが成功した。この追加境界条件は状態遷移テストでの検証であり、上記の実画面検証SHAと区別する。

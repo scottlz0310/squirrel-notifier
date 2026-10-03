@@ -21,6 +21,7 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
     private bool _scrollPending = true;
     private bool _userScrollPending;
     private bool _hasLeftTail;
+    private bool _isReturningToTail;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -63,6 +64,7 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
         IsFollowing = false;
         _scrollPending = false;
         _userScrollPending = true;
+        _isReturningToTail = false;
         NotifyStateChanged();
     }
 
@@ -73,6 +75,7 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
         _scrollPending = true;
         _userScrollPending = false;
         _hasLeftTail = false;
+        _isReturningToTail = false;
         NotifyStateChanged();
     }
 
@@ -82,6 +85,7 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
             (!IsFollowing && key is VirtualKey.Down or VirtualKey.PageDown or VirtualKey.End))
         {
             Pause();
+            _isReturningToTail = key is VirtualKey.Down or VirtualKey.PageDown or VirtualKey.End;
         }
     }
 
@@ -90,6 +94,7 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
         if (delta > 0 || (!IsFollowing && delta < 0))
         {
             Pause();
+            _isReturningToTail = delta < 0;
         }
     }
 
@@ -115,12 +120,18 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
             return;
         }
 
-        if (!LogFollowPolicy.ShouldFollow(verticalOffset, scrollableHeight))
+        // 実際に末尾を離れたかは24pxの再開閾値と分ける。古い末尾通知では再開しない。
+        if (!LogFollowPolicy.ShouldFollow(verticalOffset, scrollableHeight, 0))
         {
             _hasLeftTail = true;
-            _userScrollPending = _pointerScrolling || isIntermediate;
+            if (!_isReturningToTail || !LogFollowPolicy.ShouldFollow(verticalOffset, scrollableHeight))
+            {
+                _userScrollPending = _pointerScrolling || isIntermediate;
+                return;
+            }
         }
-        else if (_hasLeftTail && !_pointerScrolling && !isIntermediate)
+
+        if (_hasLeftTail && !_pointerScrolling && !isIntermediate)
         {
             Resume();
         }

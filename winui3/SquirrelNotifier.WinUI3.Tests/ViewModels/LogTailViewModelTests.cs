@@ -89,7 +89,7 @@ public class LogTailViewModelTests
         LogTailViewModel model = new();
         model.Pause();
         model.ObserveViewport(0, 400, 200, false);
-        model.Pause();
+        model.OnWheelInput(-120);
         model.OnLogAdded();
         model.ObserveViewport(offset, extent, 200, false);
 
@@ -201,5 +201,63 @@ public class LogTailViewModelTests
         model.Pause();
         model.ScrollIfFollowing(() => movements++);
         movements.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(390, 400)]
+    [InlineData(399, 400)]
+    [InlineData(399.75, 400)]
+    [InlineData(0, 24)]
+    [InlineData(0, 10)]
+    public void ObserveViewport_SmallWheelRoundTrip_ShouldResumeOnlyOnReturn(double offset, double extent)
+    {
+        LogTailViewModel model = new();
+        model.OnWheelInput(120);
+        model.ObserveViewport(extent, extent, 200, false);
+        model.IsFollowing.Should().BeFalse("入力直後の古い末尾通知では再開しない");
+        model.ObserveViewport(offset, extent, 200, true);
+        model.ObserveViewport(offset, extent, 200, false);
+        model.IsFollowing.Should().BeFalse("24px以内でも上向き移動では停止を維持する");
+        model.OnLogAdded();
+
+        model.OnWheelInput(-120);
+        model.ObserveViewport(extent, extent, 200, false);
+        model.IsFollowing.Should().BeTrue();
+        model.NewEntryCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(390, 400)]
+    [InlineData(0, 10)]
+    public void ObserveViewport_SmallPointerRoundTrip_ShouldResumeAfterRelease(double offset, double extent)
+    {
+        LogTailViewModel model = new();
+        model.BeginPointerScroll(true);
+        model.ObserveViewport(offset, extent, 200, false);
+        model.EndPointerScroll();
+        model.ObserveViewport(offset, extent, 200, false);
+        model.IsFollowing.Should().BeFalse();
+
+        model.BeginPointerScroll(true);
+        model.ObserveViewport(extent, extent, 200, false);
+        model.IsFollowing.Should().BeFalse();
+        model.EndPointerScroll();
+        model.ObserveViewport(extent, extent, 200, false);
+        model.IsFollowing.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(VirtualKey.Down)]
+    [InlineData(VirtualKey.PageDown)]
+    [InlineData(VirtualKey.End)]
+    public void OnKeyInput_SmallMovementThenReturn_ShouldResume(VirtualKey key)
+    {
+        LogTailViewModel model = new();
+        model.OnKeyInput(VirtualKey.Up);
+        model.ObserveViewport(390, 400, 200, false);
+        model.IsFollowing.Should().BeFalse();
+        model.OnKeyInput(key);
+        model.ObserveViewport(400, 400, 200, false);
+        model.IsFollowing.Should().BeTrue();
     }
 }
