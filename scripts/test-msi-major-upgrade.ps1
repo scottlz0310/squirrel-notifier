@@ -6,7 +6,9 @@
 param(
     [Parameter(Mandatory)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
-    [string]$MsiPath
+    [string]$MsiPath,
+
+    [string]$ExpectedVersion
 )
 
 Set-StrictMode -Version Latest
@@ -93,6 +95,9 @@ try {
     }
 
     $productVersion = $properties['ProductVersion']
+    if ($ExpectedVersion -and $productVersion -cne $ExpectedVersion) {
+        throw "MSI の ProductVersion が対象の version と一致しません: expected=$ExpectedVersion, actual=$productVersion"
+    }
     if ([string]::IsNullOrWhiteSpace($productVersion)) {
         throw "MSI の ProductVersion を取得できません: $resolvedMsiPath"
     }

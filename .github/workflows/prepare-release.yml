@@ -1,0 +1,49 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_version:
+        description: 'リリースする安定版（例: 0.17.0）'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: 安定版の形式を確認
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.target_version }}
+        run: ./scripts/Assert-ReleaseVersion.ps1 -Version $env:RELEASE_VERSION
+
+  prepare:
+    needs: validate
+    uses: scottlz0310/release-automate/.github/workflows/reusable-prepare-release.yml@fd3e676a431bbd6e189270e6911ec4c2307e9f2b # v2.0.0
+    secrets:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+    with:
+      target_version: ${{ inputs.target_version }}
+      bump_strategy: dotnet
+      version_file: winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj
+
+  describe:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: 準備 PR の本文を実際の公開手順に合わせる
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BRANCH: release/v${{ inputs.target_version }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: gh pr edit "$RELEASE_BRANCH" --repo "$RELEASE_REPOSITORY" --body-file .github/RELEASE_PREPARATION_TEMPLATE.md

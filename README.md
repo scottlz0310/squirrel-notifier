@@ -3,7 +3,7 @@
 <img src="assets/squirrel-notifier.png" width="128" alt="Squirrel Notifier" />
 
 [![CI](https://github.com/YOUR_USERNAME/squirrel-notifier/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/squirrel-notifier/actions/workflows/ci.yml)
-[![Release](https://github.com/YOUR_USERNAME/squirrel-notifier/actions/workflows/release.yml/badge.svg)](https://github.com/YOUR_USERNAME/squirrel-notifier/actions/workflows/release.yml)
+[![Release](https://github.com/scottlz0310/squirrel-notifier/actions/workflows/publish-release.yml/badge.svg)](https://github.com/scottlz0310/squirrel-notifier/actions/workflows/publish-release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![codecov](https://codecov.io/gh/YOUR_USERNAME/squirrel-notifier/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USERNAME/squirrel-notifier)
 
@@ -307,7 +307,7 @@ GitHub Actionsを使用した自動ビルド・テスト・リリースを実装
   - ユニットテスト（80%カバレッジ必須）
   - Lint（dotnet format）
   - セキュリティスキャン（CodeQL + SecurityCodeScan）
-- **Release**: タグプッシュ時に自動リリース（x64, ARM64）
+- **Release**: release-automate で準備 PR を作成し、マージ後の公開承認を経て x64 のタグ・draft・成果物検証・公開を実行（[運用手順](docs/release-automation.md)）
 - **Renovate**: 依存関係の自動更新（週次）
 
 ## ライセンス
