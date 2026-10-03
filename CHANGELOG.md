@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `ReviewStatusPipelineTests` の保留待機が、状態の非同期書き出しより先に初期文書の空の `items` を読み、配列の範囲外アクセスで失敗する不安定要因を修正した。項目の公開を確認してから保留理由を読み、空の初期文書から待機を始める回帰テストを追加した。製品の挙動の変更はない。
+
 ### Changed
 
 - `review-status.json` の、受信 → 起動待ち → 保留 → 起動 → 終了の流れを、実際のコーディネーター（`ReviewEventProcessingCoordinator`・`ReviewStartCoordinator`・`ReviewCycleCoordinator`・`ReviewStatusService`）をつないだテスト（`ReviewStatusPipelineTests`）で固定した（#462）。保留の理由（`manual` / `busy` / `autoPause` / `ciPending`）と待ち順（`queuePosition`）、起動時の空の文書と終了時の削除、実行中から終了（`recent[]` の `completed` / `failed`）までの遷移を、公開ファイルの内容で検証する。各部品の単体テストでは固定できなかった、保留の観測が公開ファイルへ届くことを確かめる。実機では再現しにくい保留（`manual` は自動起動の off、`autoPause` は Auto-Pause、`ciPending` は required checks の未確定）も、決定的に確認できる。製品の挙動の変更はない（テストのみ）。
