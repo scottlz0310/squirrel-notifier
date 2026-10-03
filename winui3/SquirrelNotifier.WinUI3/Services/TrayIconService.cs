@@ -59,7 +59,10 @@ internal sealed class TrayIconService : IDisposable
 
     public void MarkReady()
     {
-        _notificationCoordinator.MarkReady();
+        if (_taskbarIcon.IsCreated)
+        {
+            _notificationCoordinator.MarkReady();
+        }
     }
 
     public void ShowNotification(
@@ -90,6 +93,7 @@ internal sealed class TrayIconService : IDisposable
     private void OnIconChanged(DependencyObject sender, DependencyProperty property)
     {
         EnsureCreated();
+        MarkReady();
     }
 
     private void EnsureCreated()
