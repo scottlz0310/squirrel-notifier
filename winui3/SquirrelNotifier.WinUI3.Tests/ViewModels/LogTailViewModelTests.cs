@@ -88,6 +88,8 @@ public class LogTailViewModelTests
     {
         LogTailViewModel model = new();
         model.Pause();
+        model.ObserveViewport(0, 400, 200, false);
+        model.Pause();
         model.OnLogAdded();
         model.ObserveViewport(offset, extent, 200, false);
 
@@ -100,9 +102,12 @@ public class LogTailViewModelTests
     {
         LogTailViewModel model = new();
         model.BeginPointerScroll(true);
+        model.ObserveViewport(0, 400, 200, false);
         model.ObserveViewport(400, 400, 200, false);
         model.IsFollowing.Should().BeFalse();
         model.EndPointerScroll();
+        model.ObserveViewport(0, 400, 200, false);
+        model.Pause();
         model.ObserveViewport(400, 400, 200, true);
         model.IsFollowing.Should().BeFalse();
         model.ObserveViewport(400, 400, 0, false);
@@ -121,11 +126,11 @@ public class LogTailViewModelTests
 
     [Theory]
     [InlineData(VirtualKey.Up, false)]
-    [InlineData(VirtualKey.Down, false)]
+    [InlineData(VirtualKey.Down, true)]
     [InlineData(VirtualKey.PageUp, false)]
-    [InlineData(VirtualKey.PageDown, false)]
+    [InlineData(VirtualKey.PageDown, true)]
     [InlineData(VirtualKey.Home, false)]
-    [InlineData(VirtualKey.End, false)]
+    [InlineData(VirtualKey.End, true)]
     [InlineData(VirtualKey.A, true)]
     public void OnKeyInput_ShouldPauseOnlyForScrollKeys(VirtualKey key, bool following)
     {
@@ -146,6 +151,44 @@ public class LogTailViewModelTests
         model.NewEntryCount.Should().Be(0);
         model.GetScrollTarget([new("last")], 0, 400, 200).Should().NotBeNull();
         model.ObserveViewport(0, 400, 200, false);
+        model.IsFollowing.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ObserveViewport_LayoutAtTailBeforeWheelMovement_ShouldNotResume()
+    {
+        LogTailViewModel model = new();
+        model.Pause();
+        model.ObserveViewport(400, 400, 200, false);
+        model.IsFollowing.Should().BeFalse();
+        model.ObserveViewport(100, 400, 200, false);
+        model.Pause();
+        model.ObserveViewport(400, 400, 200, false);
+        model.IsFollowing.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(120, false)]
+    [InlineData(-120, true)]
+    [InlineData(0, true)]
+    public void OnWheelInput_FollowingTail_ShouldPauseOnlyForUpwardMovement(int delta, bool following)
+    {
+        LogTailViewModel model = new();
+        model.OnWheelInput(delta);
+        model.IsFollowing.Should().Be(following);
+    }
+
+    [Theory]
+    [InlineData(VirtualKey.Down)]
+    [InlineData(VirtualKey.PageDown)]
+    [InlineData(VirtualKey.End)]
+    public void OnKeyInput_ReturningToTail_ShouldResume(VirtualKey key)
+    {
+        LogTailViewModel model = new();
+        model.Pause();
+        model.ObserveViewport(0, 400, 200, false);
+        model.OnKeyInput(key);
+        model.ObserveViewport(400, 400, 200, false);
         model.IsFollowing.Should().BeTrue();
     }
 }

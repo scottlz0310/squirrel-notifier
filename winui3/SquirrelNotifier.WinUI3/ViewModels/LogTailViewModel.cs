@@ -19,6 +19,7 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
     private bool _pointerScrolling;
     private bool _scrollPending = true;
     private bool _userScrollPending;
+    private bool _hasLeftTail;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -57,12 +58,22 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
         NewEntryCount = 0;
         _scrollPending = true;
         _userScrollPending = false;
+        _hasLeftTail = false;
         NotifyStateChanged();
     }
 
     internal void OnKeyInput(VirtualKey key)
     {
-        if (key is VirtualKey.Up or VirtualKey.Down or VirtualKey.PageUp or VirtualKey.PageDown or VirtualKey.Home or VirtualKey.End)
+        if (key is VirtualKey.Up or VirtualKey.PageUp or VirtualKey.Home ||
+            (!IsFollowing && key is VirtualKey.Down or VirtualKey.PageDown or VirtualKey.End))
+        {
+            Pause();
+        }
+    }
+
+    internal void OnWheelInput(int delta)
+    {
+        if (delta > 0 || (!IsFollowing && delta < 0))
         {
             Pause();
         }
@@ -85,13 +96,17 @@ public sealed class LogTailViewModel : INotifyPropertyChanged
     internal void ObserveViewport(double verticalOffset, double scrollableHeight, double viewportHeight, bool isIntermediate)
     {
         // 非表示・レイアウト変更だけでは、過去ログを読む状態を解除しない。
-        if (!_userScrollPending || _pointerScrolling || isIntermediate || viewportHeight <= 0)
+        if (!_userScrollPending || viewportHeight <= 0)
         {
             return;
         }
 
-        _userScrollPending = false;
-        if (LogFollowPolicy.ShouldFollow(verticalOffset, scrollableHeight))
+        if (!LogFollowPolicy.ShouldFollow(verticalOffset, scrollableHeight))
+        {
+            _hasLeftTail = true;
+            _userScrollPending = _pointerScrolling || isIntermediate;
+        }
+        else if (_hasLeftTail && !_pointerScrolling && !isIntermediate)
         {
             Resume();
         }

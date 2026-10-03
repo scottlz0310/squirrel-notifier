@@ -523,7 +523,7 @@ internal sealed partial class MainWindow : Window
 
     private void OnLogPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
-        LogTail.Pause();
+        LogTail.OnWheelInput(e.GetCurrentPoint(LogList).Properties.MouseWheelDelta);
         _ = DispatcherQueue.TryEnqueue(() => ObserveLogViewport(false));
     }
 
