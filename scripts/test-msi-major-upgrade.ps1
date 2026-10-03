@@ -14,6 +14,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'Assert-MsiMajorUpgrade.ps1')
+
 function Invoke-ComMethod {
     param(
         [Parameter(Mandatory)]
@@ -94,31 +96,8 @@ try {
         $properties[$row[0]] = $row[1]
     }
 
-    $productVersion = $properties['ProductVersion']
-    if ($ExpectedVersion -and $productVersion -cne $ExpectedVersion) {
-        throw "MSI の ProductVersion が対象の version と一致しません: expected=$ExpectedVersion, actual=$productVersion"
-    }
-    if ([string]::IsNullOrWhiteSpace($productVersion)) {
-        throw "MSI の ProductVersion を取得できません: $resolvedMsiPath"
-    }
-
-    $upgradeRow = Get-MsiRows -Database $database -Query 'SELECT * FROM `Upgrade`' |
-        Where-Object { $_[6] -eq 'WIX_UPGRADE_DETECTED' } |
-        Select-Object -First 1
-
-    if ($null -eq $upgradeRow) {
-        throw "MSI に WIX_UPGRADE_DETECTED の Upgrade table 行がありません: $resolvedMsiPath"
-    }
-
-    $versionMax = $upgradeRow[2]
-    $attributes = [int]$upgradeRow[4]
-    $versionMaxInclusive = 0x200
-
-    if ($versionMax -ne $productVersion -or ($attributes -band $versionMaxInclusive) -eq 0) {
-        throw "同一バージョンの MajorUpgrade が有効ではありません: ProductVersion=$productVersion, VersionMax=$versionMax, Attributes=$attributes"
-    }
-
-    Write-Host "MSI MajorUpgrade 検証に成功しました: ProductVersion=$productVersion, Attributes=$attributes"
+    $upgradeRows = @(Get-MsiRows -Database $database -Query 'SELECT * FROM `Upgrade`')
+    Assert-MsiMajorUpgrade -ProductVersion $properties['ProductVersion'] -UpgradeRows $upgradeRows -MsiPath $resolvedMsiPath -ExpectedVersion $ExpectedVersion
 }
 finally {
     if ($null -ne $database) {

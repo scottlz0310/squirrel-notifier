@@ -99,9 +99,7 @@ public sealed class ReviewStatusPipelineTests : IDisposable
 
         await processing.ProcessAsync(reviewEvent);
 
-        JsonNode status = await WaitForStatusAsync(
-            document => document["items"]!.AsArray().Count == 1
-                && document["items"]![0]!["holdReason"] is not null);
+        JsonNode status = await WaitForHeldReviewAsync();
         JsonNode item = status["items"]![0]!;
         item["key"]!.GetValue<string>().Should().Be("owner/repo#42");
         item["repository"]!.GetValue<string>().Should().Be("owner/Repo", "repository は元の表記のまま出す");
@@ -187,7 +185,7 @@ public sealed class ReviewStatusPipelineTests : IDisposable
         await _statusService.StartAsync();
         ReviewEventProcessingCoordinator processing = await ArrangeAsync("busy");
         await processing.ProcessAsync(CreateReviewEvent("owner/Repo", 42));
-        await WaitForStatusAsync(document => document["items"]![0]!["holdReason"] is not null);
+        await WaitForHeldReviewAsync();
 
         _launcher.IsRunning = false;
         await processing.ProcessPendingAsync();
@@ -200,6 +198,25 @@ public sealed class ReviewStatusPipelineTests : IDisposable
         item["queuePosition"].Should().BeNull();
         status["concurrency"]!["active"]!.GetValue<int>().Should().Be(1);
     }
+
+    [Fact]
+    public async Task WaitForHeldReviewAsync_ShouldWait_WhenInitialDocumentHasNoItems()
+    {
+        await _statusService.StartAsync();
+        ReviewEventProcessingCoordinator processing = await ArrangeAsync("busy");
+
+        Task<JsonNode> held = WaitForHeldReviewAsync();
+        held.IsCompleted.Should().BeFalse("初期文書の items は空なので、イベントが公開されるまで待つ必要がある");
+
+        await processing.ProcessAsync(CreateReviewEvent("owner/Repo", 42));
+        JsonNode status = await held;
+        status["items"]![0]!["holdReason"]!.GetValue<string>().Should().Be("busy");
+    }
+
+    private Task<JsonNode> WaitForHeldReviewAsync()
+        => WaitForStatusAsync(
+            document => document["items"]!.AsArray().Count == 1
+                && document["items"]![0]!["holdReason"] is not null);
 
     // シナリオに合わせて、設定・起動中の状態・Auto-Pause・CI を整え、受信イベントを処理するコーディネーターを返す
     private async Task<ReviewEventProcessingCoordinator> ArrangeAsync(string scenario)

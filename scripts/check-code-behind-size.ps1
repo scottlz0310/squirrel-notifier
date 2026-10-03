@@ -45,40 +45,13 @@ $limits = [ordered]@{
     "winui3/SquirrelNotifier.WinUI3/ReviewNotificationPopup.xaml.cs" = 83
 }
 
-$violations = New-Object System.Collections.Generic.List[string]
-$missing = New-Object System.Collections.Generic.List[string]
-
-# 上限が未登録の *.xaml.cs を検出する。新しい code-behind を追加したまま
-# チェック対象から漏れることを防ぐ
-$tracked = $limits.Keys | ForEach-Object { $_.ToLowerInvariant() }
-$found = Get-ChildItem -Path (Join-Path $RepositoryRoot "winui3") -Filter "*.xaml.cs" -Recurse -File |
-    Where-Object { $_.FullName -notmatch "[\\/](obj|bin)[\\/]" }
-
-foreach ($file in $found) {
-    $relative = [System.IO.Path]::GetRelativePath($RepositoryRoot, $file.FullName).Replace("\", "/")
-    if (-not ($tracked -contains $relative.ToLowerInvariant())) {
-        $missing.Add($relative)
-    }
-}
-
-foreach ($entry in $limits.GetEnumerator()) {
-    $relative = $entry.Key
-    $limit = $entry.Value
-    $path = Join-Path $RepositoryRoot $relative
-    if (-not (Test-Path -LiteralPath $path)) {
-        $violations.Add("$relative : 上限が登録されているファイルが存在しません（削除したなら limits からも消してください）")
-        continue
-    }
-
-    # 空行を含む物理行数で数える。Measure-Object -Line は空行を数えないため、
-    # エディタや wc -l が示す行数と食い違い、上限の意味が分かりにくくなる
-    $actual = @(Get-Content -LiteralPath $path).Count
-    $status = if ($actual -gt $limit) { "NG" } else { "ok" }
-    Write-Host ("{0,-4} {1,6} / {2,-6} {3}" -f $status, $actual, $limit, $relative)
-
-    if ($actual -gt $limit) {
-        $violations.Add("$relative : $actual 行（上限 $limit 行、超過 $($actual - $limit) 行）")
-    }
+. (Join-Path $PSScriptRoot 'Get-CodeBehindSizeFindings.ps1')
+$findings = Get-CodeBehindSizeFindings -RepositoryRoot $RepositoryRoot -Limits $limits
+$violations = $findings.Violations
+$missing = $findings.Missing
+foreach ($measurement in $findings.Measurements) {
+    $status = if ($measurement.Actual -gt $measurement.Limit) { "NG" } else { "ok" }
+    Write-Host ("{0,-4} {1,6} / {2,-6} {3}" -f $status, $measurement.Actual, $measurement.Limit, $measurement.Path)
 }
 
 if ($missing.Count -gt 0) {
