@@ -9,13 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Recent activity に「最新へ戻る」と、過去ログを読む間の「新着 N 件」を追加した。手動で末尾から離れたときは表示位置を維持し、ボタンまたは末尾へのスクロールで自動追従を再開する。通常は初回表示・サイズ変更・トレイからの再表示でも最終行へ追従する（#452）。
+
 ### Fixed
 
+- 同じログ文字列を持つ行も別参照の表示項目として保持し、Recent activity の UIA 走査が停止する再現経路を修正した。ログ文言と重複行は維持する（#452）。
 - `ReviewStatusPipelineTests` の保留待機が、状態の非同期書き出しより先に初期文書の空の `items` を読み、配列の範囲外アクセスで失敗する不安定要因を修正した。項目の公開を確認してから保留理由を読み、空の初期文書から待機を始める回帰テストを追加した。製品の挙動の変更はない。
 
 ### Changed
-
-- #452 の原因調査用に、ログ文字列と重複行を維持しつつ表示項目の参照同一性を分ける比較実験を追加した（未確定の調査 branch）。
 
 - リリース準備・タグと draft の作成・最終公開を `scottlz0310/release-automate` v2.0.0 の同一 SHA に固定して移行した。マージ後も `release` Environment の承認を待ち、日本語ノート、同一 SHA の CI、別セッションのランブック、添付後の ZIP/MSI/checksum と version/SHA の検証が成功した場合だけ公開する。Squash merge と準備ブランチ削除の後も、ランブックの testedCommit を明示取得して比較する（#443）。
 - 配布パッケージ生成、code-behind の行数上限検出、MSI の同一バージョン MajorUpgrade 判定の Pester テストを追加した（#448）。行数検出と MSI table の判定を関数へ切り出し、CI の Ubuntu runner でも境界条件・失敗伝播・成果物の整合性を検証する。PowerShell 全体のゲート化は、未テストの OS 操作スクリプトも残るため見送り、Codecov の `powershell` flag は informational を維持する。

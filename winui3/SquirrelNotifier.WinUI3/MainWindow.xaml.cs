@@ -13,6 +13,7 @@ using Microsoft.UI.Xaml.Media;
 using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
+using SquirrelNotifier.WinUI3.ViewModels;
 using Windows.Foundation;
 using Windows.Graphics;
 using WinRT;
@@ -65,6 +66,8 @@ internal sealed partial class MainWindow : Window
     private readonly ObservableCollection<Models.RateLimitInfo> _rateLimits = new();
     private readonly ObservableCollection<Models.RateLimitAgentOption> _rateLimitAgentOptions = new();
     private ScrollViewer? _logListScrollViewer;
+
+    private LogTailViewModel LogTail => (LogTailViewModel)MainWindowRoot.Resources["LogTail"];
 
     // トレイポップアップのコンテンツ。XAML ではなくコードで生成し TaskbarIcon へ後から代入する（#229）
     private readonly ReviewNotificationPopup _reviewNotificationContent;
@@ -201,6 +204,13 @@ internal sealed partial class MainWindow : Window
         _reviewNotificationContent.OpenAppRequested += OnTrayPopupOpenAppRequested;
         _reviewNotificationContent.DismissRequested += OnTrayPopupDismissRequested;
         LogList.ItemsSource = _logEntryCoordinator.Entries;
+        LogList.Loaded += OnLogListLoaded;
+        LogList.LayoutUpdated += OnLogLayoutUpdated;
+        LogList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnLogPointerWheelChanged), true);
+        LogList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnLogPointerPressed), true);
+        LogList.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnLogPointerReleased), true);
+        LogList.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(OnLogPointerReleased), true);
+        LogList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnLogKeyDown), true);
         ReviewEventList.ItemsSource = _reviewEventCollectionCoordinator.Events;
         RateLimitList.ItemsSource = _rateLimits;
         RateLimitAgentList.ItemsSource = _rateLimitAgentOptions;
@@ -307,6 +317,7 @@ internal sealed partial class MainWindow : Window
     {
         ShowWindow(_hwnd, _swShow);
         Activate();
+        _ = DispatcherQueue.TryEnqueue(ScrollLogTail);
         _ = _reviewEventCleanupCoordinator.RefreshAsync();
     }
 
@@ -459,67 +470,82 @@ internal sealed partial class MainWindow : Window
     {
         _ = DispatcherQueue.TryEnqueue(() =>
         {
-            // 追加前のスクロール位置で判定する。追加後は scrollableHeight が伸びて
-            // 「末尾にいた」状態が末尾付近でなくなるため（#232）
-            bool shouldFollow = ShouldFollowLogTail();
-
             _logEntryCoordinator.Add(line);
-
-            if (shouldFollow && _logEntryCoordinator.Entries.Count > 0)
-            {
-                LogList.ScrollIntoView(_logEntryCoordinator.Entries[^1]);
-            }
+            LogTail.OnLogAdded();
+            _ = DispatcherQueue.TryEnqueue(ScrollLogTail);
         });
     }
 
-    /// <summary>
-    /// Recent activity が新しい行へ自動追従してよいかを判定する。ユーザーが過去ログを読むため
-    /// 上へスクロールしている間は追従せず、末尾付近（End キーやスクロールで戻る）に居るときだけ
-    /// 追従する（#232）.
-    /// </summary>
-    private bool ShouldFollowLogTail()
+    private void OnLogListLoaded(object sender, RoutedEventArgs e)
     {
-        ScrollViewer? scrollViewer = ResolveLogListScrollViewer();
-        if (scrollViewer is null)
+        _logListScrollViewer = LogScrollInput.FindScrollViewer(LogList);
+        if (_logListScrollViewer is not null)
         {
-            // ScrollViewer をまだ辿れない（初回レイアウト前）。この時点では全行が
-            // 表示に収まっているため追従して問題ない
-            return true;
+            _logListScrollViewer.ViewChanged -= OnLogViewChanged;
+            _logListScrollViewer.ViewChanged += OnLogViewChanged;
         }
 
-        return LogFollowPolicy.ShouldFollow(scrollViewer.VerticalOffset, scrollViewer.ScrollableHeight);
+        ScrollLogTail();
     }
 
-    private ScrollViewer? ResolveLogListScrollViewer()
+    private void OnLogLayoutUpdated(object? sender, object e) => ScrollLogTail();
+
+    private void ScrollLogTail()
     {
         if (_logListScrollViewer is not null)
         {
-            return _logListScrollViewer;
+            LogDisplayEntry? target = LogTail.GetScrollTarget(
+                _logEntryCoordinator.Entries,
+                _logListScrollViewer.VerticalOffset,
+                _logListScrollViewer.ScrollableHeight,
+                _logListScrollViewer.ViewportHeight);
+            if (target is not null)
+            {
+                LogList.ScrollIntoView(target);
+                _ = _logListScrollViewer.ChangeView(null, _logListScrollViewer.ScrollableHeight, null, true);
+            }
         }
-
-        _logListScrollViewer = FindDescendantScrollViewer(LogList);
-        return _logListScrollViewer;
     }
 
-    private static ScrollViewer? FindDescendantScrollViewer(DependencyObject root)
+    private void OnLogViewChanged(object? sender, ScrollViewerViewChangedEventArgs e) => ObserveLogViewport(e.IsIntermediate);
+
+    private void ObserveLogViewport(bool isIntermediate)
     {
-        int childCount = VisualTreeHelper.GetChildrenCount(root);
-        for (int index = 0; index < childCount; index++)
+        if (_logListScrollViewer is not null)
         {
-            DependencyObject child = VisualTreeHelper.GetChild(root, index);
-            if (child is ScrollViewer scrollViewer)
-            {
-                return scrollViewer;
-            }
-
-            ScrollViewer? found = FindDescendantScrollViewer(child);
-            if (found is not null)
-            {
-                return found;
-            }
+            LogTail.ObserveViewport(
+                _logListScrollViewer.VerticalOffset,
+                _logListScrollViewer.ScrollableHeight,
+                _logListScrollViewer.ViewportHeight,
+                isIntermediate);
         }
+    }
 
-        return null;
+    private void OnLogPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        LogTail.Pause();
+        _ = DispatcherQueue.TryEnqueue(() => ObserveLogViewport(false));
+    }
+
+    private void OnLogPointerPressed(object sender, PointerRoutedEventArgs e)
+        => LogTail.BeginPointerScroll(LogScrollInput.IsScrollBarSource(e.OriginalSource));
+
+    private void OnLogPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        LogTail.EndPointerScroll();
+        _ = DispatcherQueue.TryEnqueue(() => ObserveLogViewport(false));
+    }
+
+    private void OnLogKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        LogTail.OnKeyInput(e.Key);
+        _ = DispatcherQueue.TryEnqueue(() => ObserveLogViewport(false));
+    }
+
+    private void OnResumeLogTailClick(object sender, RoutedEventArgs e)
+    {
+        LogTail.Resume();
+        ScrollLogTail();
     }
 
     private void OnOpenLogFolder(object sender, RoutedEventArgs e)
