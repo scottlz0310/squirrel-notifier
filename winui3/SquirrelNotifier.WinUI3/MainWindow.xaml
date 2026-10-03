@@ -20,6 +20,7 @@
             <XamlUICommand x:Key="TrayRightClickCommand" ExecuteRequested="OnTrayRightClickCommandExecuteRequested"/>
             <!-- Recent review events の DataTemplate からは x:Bind でページ側へ届かないため、行アクションの表示状態は共有リソースで渡す（#256） -->
             <vm:ReviewEventActionsViewModel x:Key="ReviewEventActions"/>
+            <vm:LogTailViewModel x:Key="LogTail"/>
         </Grid.Resources>
         <!--
             右クリックメニューは ContextFlyout ではなく Win32 のポップアップメニューで表示する。
@@ -401,14 +402,21 @@
                 <Border Grid.Row="6" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="8">
                     <Grid RowDefinitions="Auto,*">
-                        <TextBlock Text="Recent activity"
-                                   FontWeight="SemiBold"
-                                   Margin="0,0,0,4"/>
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,4">
+                            <TextBlock Text="Recent activity" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" x:Name="NewLogCountText" AutomationProperties.AutomationId="NewLogCountText"
+                                       Text="{Binding Source={StaticResource LogTail}, Path=NewEntryText}"
+                                       Visibility="{Binding Source={StaticResource LogTail}, Path=ResumeVisibility}"
+                                       VerticalAlignment="Center"/>
+                            <Button Grid.Column="2" x:Name="ResumeLogTailButton" AutomationProperties.AutomationId="ResumeLogTailButton"
+                                    Content="最新へ戻る" Click="OnResumeLogTailClick"
+                                    Visibility="{Binding Source={StaticResource LogTail}, Path=ResumeVisibility}"/>
+                        </Grid>
                         <ListView Grid.Row="1" x:Name="LogList" AutomationProperties.AutomationId="LogList"
                                   SelectionMode="None">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding}"
+                                    <TextBlock Text="{Binding Text}"
                                                TextWrapping="Wrap"/>
                                 </DataTemplate>
                             </ListView.ItemTemplate>

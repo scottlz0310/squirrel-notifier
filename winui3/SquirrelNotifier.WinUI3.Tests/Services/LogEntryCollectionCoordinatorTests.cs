@@ -9,6 +9,21 @@ namespace SquirrelNotifier.WinUI3.Tests.Services;
 
 public sealed class LogEntryCollectionCoordinatorTests
 {
+    [Theory]
+    [InlineData("同じログ行")]
+    [InlineData("")]
+    public void Add_WhenTextIsEqual_ShouldPreserveDistinctItems(string text)
+    {
+        LogEntryCollectionCoordinator coordinator = new();
+
+        coordinator.Add(text);
+        coordinator.Add(text);
+
+        coordinator.Entries.Select(entry => entry.Text).Should().Equal(text, text);
+        coordinator.Entries[0].Should().NotBeSameAs(coordinator.Entries[1]);
+        coordinator.Entries[0].Equals(coordinator.Entries[1]).Should().BeFalse();
+    }
+
     [Fact]
     public void Add_ShouldKeepEntriesInArrivalOrder()
     {
@@ -17,7 +32,7 @@ public sealed class LogEntryCollectionCoordinatorTests
         coordinator.Add("最初の行");
         coordinator.Add("次の行");
 
-        coordinator.Entries.Should().Equal("最初の行", "次の行");
+        coordinator.Entries.Select(entry => entry.Text).Should().Equal("最初の行", "次の行");
     }
 
     [Fact]
@@ -30,7 +45,7 @@ public sealed class LogEntryCollectionCoordinatorTests
         }
 
         coordinator.Entries.Should().HaveCount(LogEntryCollectionCoordinator.MaxEntries);
-        coordinator.Entries[0].Should().Be("ログ 1");
-        coordinator.Entries[^1].Should().Be($"ログ {LogEntryCollectionCoordinator.MaxEntries}");
+        coordinator.Entries[0].Text.Should().Be("ログ 1");
+        coordinator.Entries[^1].Text.Should().Be($"ログ {LogEntryCollectionCoordinator.MaxEntries}");
     }
 }
