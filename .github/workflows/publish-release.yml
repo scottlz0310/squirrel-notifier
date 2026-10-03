@@ -41,7 +41,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.401'
       - name: WiX 7 を用意
         shell: pwsh
         run: ./scripts/Ensure-Wix.ps1 -Version 7.0.0
