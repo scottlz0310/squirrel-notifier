@@ -4,6 +4,8 @@ name: PowerShell Tests
 # - extract-release-notes.ps1: 公開 release 本文を生成する主要経路のため、版系列境界・前版選択を固定する。
 # - Assert-CiChecksPassed.ps1: release の publish 前ゲート。必須ジョブの成否判定・再実行・他 App の除外を固定する（#429）。
 # - Assert-ReleaseVersion.ps1 / Assert-ChangelogHasVersion.ps1: reapply-release-notes.yml と changelog-guard.yml の判定。workflow の inline では検証されないため切り出した（#384）。
+# - Build-ReleasePackage.ps1: 外部 CLI の失敗伝播と、ZIP・MSI・checksum・manifest の整合性を固定する（#448）。
+# - Get-CodeBehindSizeFindings.ps1 / Assert-MsiMajorUpgrade.ps1: 行数上限の検出と MSI table の判定を、Windows 固有の呼び出しから分離して検証する（#448）。
 
 # カバレッジは Codecov の powershell flag に送る（#447）。main への push でも実行するのは、
 # scripts/ を変更しない PR が carryforward で引き継ぐ基準値を main 側に残すため。

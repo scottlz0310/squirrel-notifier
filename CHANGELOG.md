@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 配布パッケージ生成、code-behind の行数上限検出、MSI の同一バージョン MajorUpgrade 判定の Pester テストを追加した（#448）。行数検出と MSI table の判定を関数へ切り出し、CI の Ubuntu runner でも境界条件・失敗伝播・成果物の整合性を検証する。PowerShell 全体のゲート化は、未テストの OS 操作スクリプトも残るため見送り、Codecov の `powershell` flag は informational を維持する。
 - `review-status.json` の、受信 → 起動待ち → 保留 → 起動 → 終了の流れを、実際のコーディネーター（`ReviewEventProcessingCoordinator`・`ReviewStartCoordinator`・`ReviewCycleCoordinator`・`ReviewStatusService`）をつないだテスト（`ReviewStatusPipelineTests`）で固定した（#462）。保留の理由（`manual` / `busy` / `autoPause` / `ciPending`）と待ち順（`queuePosition`）、起動時の空の文書と終了時の削除、実行中から終了（`recent[]` の `completed` / `failed`）までの遷移を、公開ファイルの内容で検証する。各部品の単体テストでは固定できなかった、保留の観測が公開ファイルへ届くことを確かめる。実機では再現しにくい保留（`manual` は自動起動の off、`autoPause` は Auto-Pause、`ciPending` は required checks の未確定）も、決定的に確認できる。製品の挙動の変更はない（テストのみ）。
 
 ## [0.16.0] - 2026-10-01
