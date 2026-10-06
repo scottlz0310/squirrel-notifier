@@ -32,6 +32,9 @@ jobs:
         sample: ${{ fromJSON(inputs.samples || '[1,2,3]') }}
         packages: [cached, empty]
     name: compare-${{ matrix.sample }}-${{ matrix.packages }}
+    env:
+      EXPERIMENT_SAMPLE: ${{ matrix.sample }}
+      EXPERIMENT_MODE: ${{ matrix.packages }}
     steps:
       - name: Checkout fixed source
         uses: actions/checkout@v7
@@ -42,7 +45,7 @@ jobs:
         shell: pwsh
         run: |
           [datetimeoffset]::UtcNow.ToString('o') | Set-Content "$env:RUNNER_TEMP/experiment-start.txt"
-          if ('${{ matrix.packages }}' -eq 'empty') {
+          if ($env:EXPERIMENT_MODE -eq 'empty') {
             $packageRoot = Join-Path $env:RUNNER_TEMP 'experiment-empty-packages'
             New-Item -ItemType Directory -Path $packageRoot | Out-Null
             "NUGET_PACKAGES=$packageRoot" | Add-Content $env:GITHUB_ENV
@@ -128,8 +131,8 @@ jobs:
           })
           [ordered]@{
             sourceSha = $actualSha
-            mode = '${{ matrix.packages }}'
-            sample = ${{ matrix.sample }}
+            mode = $env:EXPERIMENT_MODE
+            sample = [int]$env:EXPERIMENT_SAMPLE
             sdkVersion = $sdkVersion
             runnerImage = $env:ImageOS
             runnerImageVersion = $env:ImageVersion
