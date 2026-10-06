@@ -195,7 +195,9 @@ internal sealed partial class AgentExecutionWindow : Window
                     _autoPauseGate.Evaluate(
                         _rateLimitSessionMonitor.ActiveAgentId,
                         update.Snapshots,
-                        _rateLimitSessionMonitor.FreshnessThreshold);
+                        _rateLimitSessionMonitor.FreshnessThreshold,
+                        _rateLimitSessionMonitor.Role,
+                        _rateLimitSessionMonitor.Model);
                     SyncAutoPauseInfoBar();
                 });
             }

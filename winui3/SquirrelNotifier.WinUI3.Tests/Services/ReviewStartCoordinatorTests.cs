@@ -978,6 +978,71 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         second.Launch!.ViewModel.InitiallyAlwaysOnTop.Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData("Reviewer", "gemini-flash", 20, 100, "Started")]
+    [InlineData("Reviewed", "claude-sonnet", 100, 20, "Started")]
+    [InlineData("Reviewer", "gemini-flash", 95, 20, "CancelledByUser")]
+    [InlineData("Reviewed", "claude-sonnet", 20, 95, "CancelledByUser")]
+    public async Task StartAsync_ShouldUseLaunchArgumentsForAgyQuotaAndEndContext(
+        string roleName, string model, int geminiUsage, int thirdPartyUsage, string expectedStatus)
+    {
+        SettingsService settings = CreateSettingsService();
+        settings.Settings.ReviewerLauncherPresetId = "agy";
+        settings.Settings.ReviewedLauncherPresetId = "agy";
+        FakeLauncherService launcher = new() { LaunchArguments = ["--model", model] };
+        string directory = Path.Combine(_workingDirectory, "ratelimit-status");
+        Directory.CreateDirectory(directory);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        await File.WriteAllTextAsync(Path.Combine(directory, "agy.json"), $$"""
+            {"schemaVersion":1,"agentId":"agy","observedAt":"{{now:O}}","limits":[
+            {"id":"gemini-5h","label":"Gemini","resetAt":"{{now.AddHours(5):O}}","usedPercentage":{{geminiUsage}}},
+            {"id":"3p-5h","label":"3P","resetAt":"{{now.AddHours(5):O}}","usedPercentage":{{thirdPartyUsage}}}]}
+            """);
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, settings);
+        LauncherRole role = Enum.Parse<LauncherRole>(roleName);
+
+        ReviewStartResult result = await coordinator.StartAsync(CreateReviewEvent(), role, ReviewStartTrigger.Manual, _ => Task.FromResult(false));
+
+        result.Status.Should().Be(Enum.Parse<ReviewStartStatus>(expectedStatus));
+        if (result.Launch is not null)
+        {
+            result.Launch.RateLimitSessionMonitor.Role.Should().Be(role);
+            result.Launch.RateLimitSessionMonitor.Model.Should().Be(model);
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"model\":\"Gemini 3.8 Flash (High)\"}", "Started")]
+    [InlineData("{}", "CancelledByUser")]
+    [InlineData("invalid-json", "CancelledByUser")]
+    public async Task StartAsync_ShouldUsePersistentAgyModelOrAllQuotasWhenUnavailable(string settingsJson, string expectedStatus)
+    {
+        SettingsService settings = CreateSettingsService();
+        settings.Settings.ReviewerLauncherPresetId = "agy";
+        string directory = Path.Combine(_workingDirectory, "ratelimit-status");
+        Directory.CreateDirectory(directory);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        await File.WriteAllTextAsync(Path.Combine(directory, "agy.json"), $$"""
+            {"schemaVersion":1,"agentId":"agy","observedAt":"{{now:O}}","limits":[
+            {"id":"gemini-5h","label":"Gemini","resetAt":"{{now.AddHours(5):O}}","usedPercentage":20},
+            {"id":"3p-5h","label":"3P","resetAt":"{{now.AddHours(5):O}}","usedPercentage":100}]}
+            """);
+        AgyModelSelectionService source = new(readSettings: (_, _) => Task.FromResult(settingsJson));
+        ReviewStartCoordinator coordinator = CreateCoordinator(new FakeLauncherService(), settings, agyModelSelectionService: source);
+
+        ReviewStartResult result = await coordinator.StartAsync(CreateReviewEvent(), LauncherRole.Reviewer, ReviewStartTrigger.Manual, _ => Task.FromResult(false));
+
+        result.Status.Should().Be(Enum.Parse<ReviewStartStatus>(expectedStatus));
+        if (result.Launch is not null)
+        {
+            result.Launch.RateLimitSessionMonitor.Model.Should().Be("Gemini 3.8 Flash (High)");
+        }
+        else
+        {
+            _logLines.Should().Contain(line => line.Contains("全枠", StringComparison.Ordinal));
+        }
+    }
+
     private SettingsService CreateSettingsService() => new(_workingDirectory, pnpmBinDir: string.Empty);
 
     private SettingsService CreateAutoStartSettings()
@@ -994,7 +1059,8 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         SettingsService? settingsService = null,
         Action<string>? onLogAppended = null,
         ReviewCiSettleGate? ciSettleGate = null,
-        ReviewCycleCoordinator? reviewCycleCoordinator = null)
+        ReviewCycleCoordinator? reviewCycleCoordinator = null,
+        AgyModelSelectionService? agyModelSelectionService = null)
     {
         LoggingService loggingService = new(_workingDirectory);
         loggingService.LogAppended += (_, line) =>
@@ -1011,7 +1077,8 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             _autoPauseResumeScheduler,
             loggingService,
             reviewCycleCoordinator,
-            ciSettleGate);
+            ciSettleGate,
+            agyModelSelectionService ?? new AgyModelSelectionService(readSettings: (_, _) => Task.FromResult("{\"model\":\"fixture-model\"}")));
     }
 
     private ReviewCycleCoordinator CreateCycleCoordinator()
@@ -1064,6 +1131,11 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             => throw new NotSupportedException();
 
         public void Cancel() => throw new NotSupportedException();
+
+        public IReadOnlyList<string> LaunchArguments { get; set; } = [];
+
+        public Task<IReadOnlyList<string>> GetLaunchArgumentsAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
+            => Task.FromResult(LaunchArguments);
 
         public Task<string> BuildCommandLineAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();

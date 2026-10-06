@@ -937,12 +937,14 @@ public class ReviewLauncherServiceTests : IDisposable
         var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
 
         string commandLine = await service.BuildCommandLineAsync(reviewEvent, LauncherRole.Reviewer);
+        IReadOnlyList<string> resolvedArguments = await service.GetLaunchArgumentsAsync(reviewEvent, LauncherRole.Reviewer);
         LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
 
         result.Success.Should().BeTrue();
         commandLine.Should().Contain($"--resume {sessionId:D}");
         capturedArguments.Should().NotBeNull();
         capturedArguments!.Should().ContainInOrder("--resume", sessionId.ToString("D"));
+        resolvedArguments.Should().Equal(capturedArguments);
         runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once);
     }
 

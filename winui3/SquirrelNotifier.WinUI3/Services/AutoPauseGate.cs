@@ -70,7 +70,7 @@ internal sealed class AutoPauseGate
     private const double _pauseThresholdPercentage = 95;
 
     private readonly TimeProvider _timeProvider;
-    private readonly Dictionary<string, AutoPausedLimit> _pausedByAgentId = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string AgentId, LauncherRole Role), AutoPausedLimit> _pausedByTarget = new();
 
     public AutoPauseGate(TimeProvider? timeProvider = null)
     {
@@ -88,7 +88,9 @@ internal sealed class AutoPauseGate
 
     // 現在 Paused な agent の根拠 limit 一覧（agentId 昇順）
     public IReadOnlyList<AutoPausedLimit> PausedLimits
-        => _pausedByAgentId.Values.OrderBy(paused => paused.AgentId, StringComparer.Ordinal).ToList();
+        => _pausedByTarget.Values.GroupBy(paused => paused.AgentId, StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(paused => paused.UsedPercentage).First())
+            .OrderBy(paused => paused.AgentId, StringComparer.Ordinal).ToList();
 
     /// <summary>
     /// 指定エージェントの起動可否を判定し、内部の Paused 状態を更新する。
@@ -97,8 +99,15 @@ internal sealed class AutoPauseGate
     /// <param name="agentId">起動する launcher スロットの rateLimitAgentId。取得手段が無い場合は null.</param>
     /// <param name="snapshots">直近に取得した snapshot 一覧.</param>
     /// <param name="freshnessThreshold">鮮度判定のしきい値.</param>
+    /// <param name="role">起動対象のスロット。agy の保留状態はスロットごとに保持する.</param>
+    /// <param name="model">agy の選択モデル。不明時は全枠を評価する.</param>
     /// <returns>判定結果.</returns>
-    public AutoPauseDecision Evaluate(string? agentId, IReadOnlyList<RateLimitSnapshot> snapshots, TimeSpan freshnessThreshold)
+    public AutoPauseDecision Evaluate(
+        string? agentId,
+        IReadOnlyList<RateLimitSnapshot> snapshots,
+        TimeSpan freshnessThreshold,
+        LauncherRole role = LauncherRole.Reviewer,
+        string? model = null)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(freshnessThreshold, TimeSpan.Zero);
@@ -108,30 +117,34 @@ internal sealed class AutoPauseGate
             return new AutoPauseDecision(AutoPauseStatus.NotApplicable, null);
         }
 
+        // agy はスロットごとに異なる枠を使える。他のエージェントは従来の共有状態を維持する。
+        (string AgentId, LauncherRole Role) target = (agentId, agentId == "agy" ? role : LauncherRole.Reviewer);
+
         RateLimitSnapshot? snapshot = snapshots.FirstOrDefault(candidate => candidate.AgentId == agentId);
         bool isFresh = snapshot is not null
             && RateLimitFreshnessPolicy.IsFresh(snapshot.ObservedAt, _timeProvider.GetUtcNow(), freshnessThreshold);
         if (!isFresh)
         {
-            return KeepCurrentState(agentId);
+            return KeepCurrentState(target);
         }
 
         RateLimitInfo? worst = snapshot!.Limits
             .Where(limit => limit.IsAutoPauseEligible && limit.UsedPercentage is not null)
+            .Where(limit => agentId != "agy" || AgyAutoPausePolicy.IncludesLimit(model, limit.Id))
             .OrderByDescending(limit => limit.UsedPercentage)
             .FirstOrDefault();
         if (worst?.UsedPercentage is not double usedPercentage)
         {
             // fresh でも判定対象の枠に usedPercentage が無い場合は「95% 未満」を確認できて
             // いないため、既存の Paused を解除しない
-            return KeepCurrentState(agentId);
+            return KeepCurrentState(target);
         }
 
         if (usedPercentage >= _pauseThresholdPercentage)
         {
             AutoPausedLimit paused = new(agentId, worst.Id, worst.Label, usedPercentage, worst.ResetAt, snapshot.ObservedAt);
-            bool changed = !_pausedByAgentId.TryGetValue(agentId, out AutoPausedLimit? current) || current != paused;
-            _pausedByAgentId[agentId] = paused;
+            bool changed = !_pausedByTarget.TryGetValue(target, out AutoPausedLimit? current) || current != paused;
+            _pausedByTarget[target] = paused;
             if (changed)
             {
                 StateChanged?.Invoke(this, EventArgs.Empty);
@@ -140,7 +153,7 @@ internal sealed class AutoPauseGate
             return new AutoPauseDecision(AutoPauseStatus.Paused, paused);
         }
 
-        if (_pausedByAgentId.Remove(agentId))
+        if (_pausedByTarget.Remove(target))
         {
             StateChanged?.Invoke(this, EventArgs.Empty);
             Released?.Invoke(this, EventArgs.Empty);
@@ -149,8 +162,8 @@ internal sealed class AutoPauseGate
         return new AutoPauseDecision(AutoPauseStatus.Allowed, null);
     }
 
-    private AutoPauseDecision KeepCurrentState(string agentId)
-        => _pausedByAgentId.TryGetValue(agentId, out AutoPausedLimit? existing)
+    private AutoPauseDecision KeepCurrentState((string AgentId, LauncherRole Role) target)
+        => _pausedByTarget.TryGetValue(target, out AutoPausedLimit? existing)
             ? new AutoPauseDecision(AutoPauseStatus.Paused, existing)
             : new AutoPauseDecision(AutoPauseStatus.Allowed, null);
 }
