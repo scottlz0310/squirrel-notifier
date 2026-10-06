@@ -80,6 +80,36 @@ a hash for the cache key.` となった。依存キャッシュを実際には�
 この 1 run は #226 の baseline 518 秒に対して 29.3% 短いが、#220 の「直近5回」達成判定には
 使用せず、引き続き CodeQL toolchain と runner 変動を含む複数 run の観測対象とする。
 
+## 再計測（2026-10-07 / #184）
+
+旧baselineの5件をattempt 1のjob時刻で再取得し、560 / 586 / 518 / 514 / 498秒、
+中央値518秒を再確認した。計測方法は上記と同じで、timing-reportを除く。
+直近5成功PR runの観測は次のとおり。#479の初回と再レビューを別runとして含むため、
+独立した5つのPRによる比較ではない。
+
+| PR | Run | 壁時計 | security-scan | headless-e2e | distribution-e2e |
+|---|---:|---:|---:|---:|---:|
+| #482 | [37521000288](https://github.com/scottlz0310/squirrel-notifier/actions/runs/37521000288) | 406秒 | 403秒 | 226秒 | 246秒 |
+| #481 | [37459988408](https://github.com/scottlz0310/squirrel-notifier/actions/runs/37459988408) | 387秒 | 385秒 | 214秒 | 259秒 |
+| #480 | [37456344151](https://github.com/scottlz0310/squirrel-notifier/actions/runs/37456344151) | 375秒 | 373秒 | 247秒 | 318秒 |
+| #479再レビュー | [37452453499](https://github.com/scottlz0310/squirrel-notifier/actions/runs/37452453499) | 376秒 | 373秒 | 307秒 | 361秒 |
+| #479初回 | [37450264530](https://github.com/scottlz0310/squirrel-notifier/actions/runs/37450264530) | 401秒 | 398秒 | 255秒 | 250秒 |
+
+中央値387秒、旧baselineとの参考差25.29%。30%短縮の目標362.6秒には届かない。
+旧代表runのSDK10.0.302 / CodeQL2.26.1と、現行SDK10.0.401 / CodeQL2.27.1は異なる。
+runner image revision、製品差分、依存、cache条件もそろっていないため、因果的な同条件の
+短縮率とは扱わない。既存3jobの360秒予算は全5件超過、全体420秒は全5件以内、
+E2E330秒はdistributionの1件が361秒で超過した。成功と時間予算の達成は区別する。
+
+workflow ID238484315の未フィルタ一覧の直近40件に含まれたPR24件は、すべてattempt 1で
+成功している。上表の5件は両E2Ejobの成功も確認した。残り19件のjob予算や全期間の
+安定性まで保証するものではない。
+
+最新runのSDKはpreinstalledだが、NuGet cache約2.84GB（圧縮後）を復元するため、
+ダウンロード約14秒・展開約56秒を要していた。cacheなしでrestoreする方が速いかは、
+[同一ソースの比較実験](nuget-cache-experiment.md)で検証する。通常CIの設定・解析範囲・
+時間予算は、結果を確認するまで維持する。
+
 ## 実施した削減
 
 | 施策 | 対象 | 根拠 |
