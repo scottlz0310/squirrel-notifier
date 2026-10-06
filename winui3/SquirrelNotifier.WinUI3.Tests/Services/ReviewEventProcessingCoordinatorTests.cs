@@ -286,7 +286,7 @@ public sealed class ReviewEventProcessingCoordinatorTests : IDisposable
         logLines.Should().ContainSingle().Which.Should().Contain("保留していた owner/repo #43 の自動起動を再評価します");
     }
 
-    // 未認証の GitHub API（60 req/h）を、30 秒ごとの再評価で使い切らない。PR の状態は判定の側が確認する
+    // 巡回予算（初期5回＋毎時25回補充）を、30 秒ごとの再評価で使い切らない。PR の状態は判定の側が確認する
     [Fact]
     public async Task ProcessPendingAsync_ShouldNotCheckPullRequestStatus_ForEventWaitingForCi()
     {

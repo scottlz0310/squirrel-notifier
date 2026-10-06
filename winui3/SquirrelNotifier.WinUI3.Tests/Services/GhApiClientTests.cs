@@ -174,6 +174,40 @@ public sealed class GhApiClientTests
     private static GhApiClient CreateClient(Mock<IProcessRunner> runner)
         => new(runner.Object, _ => _ghPath);
 
+    [Theory]
+    [InlineData(0, "", "\r\n")]
+    [InlineData(1, "gh: rate limit exceeded (HTTP 403)", "\n")]
+    public async Task GetAsync_ShouldExtractRateLimitHeadersWithoutReturningRawHeaders(int exitCode, string stderr, string newline)
+    {
+        string output = string.Join(newline, "HTTP/2.0 200 OK", "Retry-After: 60", "x-RATELIMIT-remaining: 0", "X-Ratelimit-Reset: 1789434000", "X-Unrelated: sensitive-header", string.Empty, "{\"state\":\"closed\"}");
+        ProcessStartInfo? captured = null;
+        Mock<IProcessRunner> runner = CreateRunner(CreateProcess(exitCode, output, stderr), psi => captured = psi);
+        GhApiClient client = new(runner.Object, _ => _ghPath, includeResponseHeaders: true);
+
+        GhApiResult result = await client.GetAsync("repos/o/r/pulls/1", "{state, merged_at}", paginate: false, CancellationToken.None);
+
+        captured!.ArgumentList.Should().Equal("api", "repos/o/r/pulls/1", "--include", "--jq", "{state, merged_at}");
+        result.IsSuccess.Should().Be(exitCode == 0);
+        result.Output.Should().Be(exitCode == 0 ? "{\"state\":\"closed\"}" : string.Empty);
+        result.HttpStatus.Should().Be(exitCode == 0 ? null : 403);
+        result.RateLimitHeaders.Should().Be(new GhApiRateLimitHeaders("60", "0", "1789434000"));
+        result.ToString().Should().NotContain("sensitive-header");
+    }
+
+    [Theory]
+    [InlineData("HTTP/2.0 200 OK\n\n{\"state\":\"open\"}", "{\"state\":\"open\"}")]
+    [InlineData("", "")]
+    public async Task GetAsync_ShouldHandleResponsesWithoutRateLimitHeaders(string stdout, string expectedOutput)
+    {
+        Mock<IProcessRunner> runner = CreateRunner(CreateProcess(0, stdout, string.Empty));
+        GhApiClient client = new(runner.Object, _ => _ghPath, includeResponseHeaders: true);
+
+        GhApiResult result = await client.GetAsync("repos/o/r/pulls/1", "{state, merged_at}", paginate: false, CancellationToken.None);
+
+        result.Output.Should().Be(expectedOutput);
+        result.RateLimitHeaders.Should().Be(new GhApiRateLimitHeaders(null, null, null));
+    }
+
     private static Mock<IProcessRunner> CreateRunner(Mock<IProcessInstance> process, Action<ProcessStartInfo>? capture = null)
     {
         Mock<IProcessRunner> runner = new();

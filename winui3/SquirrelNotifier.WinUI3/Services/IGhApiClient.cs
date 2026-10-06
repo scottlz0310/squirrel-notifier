@@ -11,10 +11,15 @@ namespace SquirrelNotifier.WinUI3.Services;
 /// <param name="Error">失敗時の原因。マスク・要約済みで、ログへそのまま出せる.</param>
 internal sealed record GhApiResult(bool IsSuccess, string Output, int? HttpStatus, string? Error)
 {
+    public GhApiRateLimitHeaders? RateLimitHeaders { get; init; }
+
     public static GhApiResult Success(string output) => new(true, output, null, null);
 
     public static GhApiResult Failure(int? httpStatus, string error) => new(false, string.Empty, httpStatus, error);
 }
+
+/// <summary>巡回の再開時刻を判断するための GitHub 応答ヘッダー.</summary>
+internal sealed record GhApiRateLimitHeaders(string? RetryAfter, string? Remaining, string? Reset);
 
 /// <summary>
 /// GitHub CLI（<c>gh api</c>）で GitHub REST API を読み取る（#456）。GET だけを行い、

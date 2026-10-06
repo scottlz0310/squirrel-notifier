@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- PR 状態の照会を認証済みの `gh api` に移し、private repository のマージ・クローズ済みレビューイベントも自動で片付けられるようにした。取得失敗時のイベント保持、レート制限ヘッダーに基づく待機、初期5回・毎時25回補充の巡回予算は維持する。アプリ起動ユーザーの `gh` の PATH とログイン状態を使う（#475）。
+
 ## [0.17.0] - 2026-10-03
 
 ### Added

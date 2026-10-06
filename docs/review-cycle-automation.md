@@ -79,7 +79,7 @@ Squirrel Notifier が自動化するのは **reviewer の起動だけ**である
 | ユーザー環境変数 `MCP_GATEWAY_PUBLIC_URL` | gateway の公開 URL | 待機側が `<URL>/mcp/thread-owl` を組み立てる |
 | reviewer スロットのプリセット | レートリミットを取得できる CLI | Auto-Pause の対象になる（[auto-pause.md](auto-pause.md)） |
 | Settings →「セッション resume」 | 任意 | 有効にすると同一 PR の 2 周目が前回の会話を引き継ぐ |
-| GitHub CLI（`gh`） | 任意。PATH に通り、`gh auth login` 済み | 自動起動の前に CI の確定を待つために使う（暫定、[CI の確定待ち](#ci-の確定待ち暫定)）。使えない場合は待たずに起動する |
+| GitHub CLI（`gh`） | PR 状態の自動片付けに必要。PATH に通り、アプリ起動ユーザーで `gh auth login` 済み | 認証済み PR 状態を読み、private repo のマージ・クローズ済みイベントも片付ける。取得失敗時はイベントを保持する。CI 確定待ちにも使う（暫定、[CI の確定待ち](#ci-の確定待ち暫定)）。CI 待機では使えない場合は待たずに起動する |
 
 `MCP_PROBE_URL` は設定しない。thread-owl の route を含む完全 URL で、subscriber の既定
 `--url` にもなるため、他の route を購読するときに邪魔になる。
@@ -169,7 +169,7 @@ PR の現在の head SHA に対する、required checks の確定状態を `gh a
 待っている間は「レビューを保留中（CI 完了待ち）」が通知に出る。保留の記録には未完了の check の名前が入る。
 
 30 秒ごとの再評価では、PR の状態（merge / close）を `gh` で毎回確認するため、Recent review events の
-終了確認（未認証の GitHub API。60 req/h）は行わない。枠を使い切って、巡回や更新チェックまで巻き込まないため。
+終了確認（認証済み `gh api`）は行わない。30 秒ごとの再評価で巡回予算（初期5回＋毎時25回補充）を使い切らないため。
 
 ### `gh` の前提
 

@@ -13,12 +13,6 @@ public sealed class ApplicationUserAgentTests : IDisposable
 {
     private readonly string _logDir = Path.Combine(Path.GetTempPath(), $"ApplicationUserAgentTests_{Guid.NewGuid()}");
 
-    public enum HttpClientOwner
-    {
-        GitHubPullRequestStatusClient,
-        AutoUpdateService,
-    }
-
     public void Dispose()
     {
         if (Directory.Exists(_logDir))
@@ -37,39 +31,26 @@ public sealed class ApplicationUserAgentTests : IDisposable
         userAgent.ToString().Should().Be(expected);
     }
 
-    [Theory]
-    [InlineData(HttpClientOwner.GitHubPullRequestStatusClient)]
-    [InlineData(HttpClientOwner.AutoUpdateService)]
-    public void Constructor_ShouldSetAssemblyVersionUserAgent_WhenUserAgentIsMissing(HttpClientOwner owner)
+    [Fact]
+    public void Constructor_ShouldSetAssemblyVersionUserAgent_WhenUserAgentIsMissing()
     {
         using var httpClient = new HttpClient();
         string expected = $"Squirrel-Notifier-WinUI3/{typeof(ApplicationUserAgent).Assembly.GetName().Version!.ToString(3)}";
 
-        using IDisposable client = CreateClient(owner, httpClient);
+        using AutoUpdateService client = new(new LoggingService(_logDir), httpClient);
 
         httpClient.DefaultRequestHeaders.UserAgent.ToString().Should().Be(expected);
     }
 
-    [Theory]
-    [InlineData(HttpClientOwner.GitHubPullRequestStatusClient)]
-    [InlineData(HttpClientOwner.AutoUpdateService)]
-    public void Constructor_ShouldKeepExistingUserAgent(HttpClientOwner owner)
+    [Fact]
+    public void Constructor_ShouldKeepExistingUserAgent()
     {
         using var httpClient = new HttpClient();
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CustomAgent/1.0");
 
-        using IDisposable client = CreateClient(owner, httpClient);
+        using AutoUpdateService client = new(new LoggingService(_logDir), httpClient);
 
         httpClient.DefaultRequestHeaders.UserAgent.ToString().Should().Be("CustomAgent/1.0");
     }
 
-    private IDisposable CreateClient(HttpClientOwner owner, HttpClient httpClient)
-    {
-        return owner switch
-        {
-            HttpClientOwner.GitHubPullRequestStatusClient => new GitHubPullRequestStatusClient(httpClient),
-            HttpClientOwner.AutoUpdateService => new AutoUpdateService(new LoggingService(_logDir), httpClient),
-            _ => throw new ArgumentOutOfRangeException(nameof(owner), owner, null),
-        };
-    }
 }

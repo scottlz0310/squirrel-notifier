@@ -30,6 +30,11 @@ MCP リソースの購読・イベント受信を担う外部 CLI ツールで�
 
 インストール後、アプリの「Settings」→「Command Path」にコマンド名（PATH に通っていれば `mcp-resource-subscriber`）またはフルパスを設定してください。
 
+### GitHub CLI（gh）
+
+PR 状態の確認とマージ・クローズ済みレビューイベントの自動片付けに使います。アプリを起動するユーザーで `gh auth login` を済ませ、`gh` を PATH に配置してください。private repository は、そのユーザーが参照できるものだけ照会できます。
+`gh` が使えない・認証や状態取得に失敗した場合はイベントを保持し、Recent activity に原因を記録します。巡回予算は初期5回・毎時25回補充を維持します。
+
 ### mcp-gateway
 
 MCP リソースイベントを配信するゲートウェイサーバーです。squirrel-notifier と同じ [reviewers forest](https://github.com/scottlz0310) エコシステムを構成する別プロセスとして、別途起動が必要です。

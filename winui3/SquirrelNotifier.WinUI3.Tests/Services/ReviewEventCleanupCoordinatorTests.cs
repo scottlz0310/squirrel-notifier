@@ -3,6 +3,7 @@
 // </copyright>
 
 using FluentAssertions;
+using Moq;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
@@ -43,6 +44,34 @@ public class ReviewEventCleanupCoordinatorTests : IDisposable
         coordinator.TrackedEventCount.Should().Be(0);
         removedIds.Should().ContainSingle().Which.Should().Be(reviewEvent.EventId);
         statusClient.Calls.Should().ContainSingle().Which.Should().Be(("owner/repo", 42));
+    }
+
+    [Theory]
+    [InlineData("{\"state\":\"open\",\"merged_at\":null}", null, false)]
+    [InlineData("{\"state\":\"closed\",\"merged_at\":null}", null, true)]
+    [InlineData("{\"state\":\"closed\",\"merged_at\":\"2026-10-06T00:00:00Z\"}", null, true)]
+    [InlineData("", 404, false)]
+    [InlineData("", 403, false)]
+    public async Task RefreshAsync_ShouldRemovePrivatePullRequestOnlyAfterAuthenticatedClosure(string content, int? httpStatus, bool expectedRemoval)
+    {
+        Mock<IGhApiClient> api = new();
+        GhApiResult result = httpStatus is null ? GhApiResult.Success(content) : GhApiResult.Failure(httpStatus, "状態取得に失敗しました");
+        api.Setup(a => a.GetAsync("repos/private-owner/private-repo/pulls/42", "{state, merged_at}", false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+        GitHubPullRequestStatusClient client = new(api.Object);
+        await using ReviewEventCleanupCoordinator coordinator = CreateCoordinator(client);
+        List<string> removedIds = new();
+        List<(string Repository, int PrNumber)> closed = new();
+        coordinator.EventsRemoved += (_, args) => removedIds.AddRange(args.EventIds);
+        coordinator.PullRequestClosed += (_, args) => closed.Add((args.Repository, args.PrNumber));
+        coordinator.Track(CreateReviewEvent(repository: "private-owner/private-repo"));
+
+        await coordinator.RefreshAsync();
+
+        coordinator.TrackedEventCount.Should().Be(expectedRemoval ? 0 : 1);
+        removedIds.Should().HaveCount(expectedRemoval ? 1 : 0);
+        closed.Should().HaveCount(expectedRemoval ? 1 : 0);
+        api.Verify(a => a.GetAsync("repos/private-owner/private-repo/pulls/42", "{state, merged_at}", false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // reviewer の作業領域の片付け（#403）は、巡回でマージ済み・クローズ済みと判明した PR ごとに 1 回通知を受ける

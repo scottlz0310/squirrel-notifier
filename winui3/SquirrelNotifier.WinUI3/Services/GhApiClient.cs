@@ -27,12 +27,14 @@ internal sealed class GhApiClient : IGhApiClient
     private readonly Func<string, string?> _resolveCommand;
     private readonly TimeSpan _timeout;
     private readonly SecretMasker _secretMasker;
+    private readonly bool _includeResponseHeaders;
 
     public GhApiClient(
         IProcessRunner? processRunner = null,
         Func<string, string?>? resolveCommand = null,
         TimeSpan? timeout = null,
-        SecretMasker? secretMasker = null)
+        SecretMasker? secretMasker = null,
+        bool includeResponseHeaders = false)
     {
         TimeSpan resolvedTimeout = timeout ?? _defaultTimeout;
         if (resolvedTimeout <= TimeSpan.Zero)
@@ -44,6 +46,7 @@ internal sealed class GhApiClient : IGhApiClient
         _resolveCommand = resolveCommand ?? (command => CommandPathResolver.Resolve(command));
         _timeout = resolvedTimeout;
         _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
+        _includeResponseHeaders = includeResponseHeaders;
     }
 
     public async Task<GhApiResult> GetAsync(string path, string jq, bool paginate, CancellationToken cancellationToken)
@@ -57,7 +60,7 @@ internal sealed class GhApiClient : IGhApiClient
             return GhApiResult.Failure(null, "gh コマンドが見つかりません。GitHub CLI をインストールし、PATH を確認してください。");
         }
 
-        ProcessStartInfo startInfo = BuildStartInfo(resolvedPath, path, jq, paginate);
+        ProcessStartInfo startInfo = BuildStartInfo(resolvedPath, path, jq, paginate, _includeResponseHeaders);
         using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(_timeout);
 
@@ -73,9 +76,16 @@ internal sealed class GhApiClient : IGhApiClient
             string stdout = await stdoutTask.ConfigureAwait(false);
             string stderr = await stderrTask.ConfigureAwait(false);
 
-            return process.ExitCode == 0
+            GhApiRateLimitHeaders? headers = null;
+            if (_includeResponseHeaders)
+            {
+                (stdout, headers) = ReadResponseHeaders(stdout);
+            }
+
+            GhApiResult result = process.ExitCode == 0
                 ? GhApiResult.Success(stdout)
                 : GhApiResult.Failure(ParseHttpStatus(stderr), DescribeFailure(process.ExitCode, stderr));
+            return result with { RateLimitHeaders = headers };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -98,7 +108,7 @@ internal sealed class GhApiClient : IGhApiClient
         }
     }
 
-    private static ProcessStartInfo BuildStartInfo(string resolvedPath, string path, string jq, bool paginate)
+    private static ProcessStartInfo BuildStartInfo(string resolvedPath, string path, string jq, bool paginate, bool includeResponseHeaders)
     {
         ProcessStartInfo startInfo = new()
         {
@@ -117,6 +127,11 @@ internal sealed class GhApiClient : IGhApiClient
 
         startInfo.ArgumentList.Add("api");
         startInfo.ArgumentList.Add(path);
+        if (includeResponseHeaders)
+        {
+            startInfo.ArgumentList.Add("--include");
+        }
+
         if (paginate)
         {
             startInfo.ArgumentList.Add("--paginate");
@@ -125,6 +140,40 @@ internal sealed class GhApiClient : IGhApiClient
         startInfo.ArgumentList.Add("--jq");
         startInfo.ArgumentList.Add(jq);
         return startInfo;
+    }
+
+    private static (string Output, GhApiRateLimitHeaders Headers) ReadResponseHeaders(string output)
+    {
+        using StringReader reader = new(output);
+        string? retryAfter = null;
+        string? remaining = null;
+        string? reset = null;
+        string? line;
+        while (!string.IsNullOrEmpty(line = reader.ReadLine()))
+        {
+            int separator = line.IndexOf(':', StringComparison.Ordinal);
+            if (separator < 0)
+            {
+                continue;
+            }
+
+            string name = line[..separator];
+            string value = line[(separator + 1)..].Trim();
+            if (name.Equals("retry-after", StringComparison.OrdinalIgnoreCase))
+            {
+                retryAfter = value;
+            }
+            else if (name.Equals("x-ratelimit-remaining", StringComparison.OrdinalIgnoreCase))
+            {
+                remaining = value;
+            }
+            else if (name.Equals("x-ratelimit-reset", StringComparison.OrdinalIgnoreCase))
+            {
+                reset = value;
+            }
+        }
+
+        return (reader.ReadToEnd(), new GhApiRateLimitHeaders(retryAfter, remaining, reset));
     }
 
     private static int? ParseHttpStatus(string stderr)
