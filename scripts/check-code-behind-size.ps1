@@ -37,8 +37,8 @@ $limits = [ordered]@{
     # #476 のライブログ最前面設定の読み込みとトグルイベントの配線を反映。
     "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1506
     # #305 の resume 失敗メッセージを既存 InfoBar に表示する配線を反映。
-    # #476 の初期ピン留め・個別切替と #477 の終了時モデル/スロット受け渡しの UI 配線を反映。
-    "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 326
+    # #476・#477 の UI 配線と #478 の起動設定テキスト・tooltipの4行の配線を反映。
+    "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 330
     # #276 の status client / Coordinator の生成と終了時破棄を反映。
     # #257 の ReviewCycleStore / Coordinator の composition root 配線を反映。
     # #427 の statusline サマリ書き出しの生成・起動時書き出し・終了時削除の配線を反映。

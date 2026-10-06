@@ -1045,6 +1045,23 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
 
     private SettingsService CreateSettingsService() => new(_workingDirectory, pnpmBinDir: string.Empty);
 
+    [Theory]
+    [InlineData("Reviewer")]
+    [InlineData("Reviewed")]
+    public async Task StartAsync_ShouldDisplayResolvedLaunchArgumentsForBothRoles(string roleName)
+    {
+        SettingsService settings = CreateSettingsService();
+        settings.Settings.ReviewerLauncherPresetId = "codex";
+        settings.Settings.ReviewedLauncherPresetId = "codex";
+        FakeLauncherService launcher = new() { LaunchArguments = ["exec", "-m", "chosen-model", "-c", "model_reasoning_effort=high"] };
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, settings);
+
+        ReviewStartResult result = await coordinator.StartAsync(CreateReviewEvent(), Enum.Parse<LauncherRole>(roleName), ReviewStartTrigger.Manual, _ => Task.FromResult(true));
+
+        result.Launch!.ViewModel.ModelText.Should().Be("Model: chosen-model（引数）");
+        result.Launch.ViewModel.EffortText.Should().Be("Effort: high（引数）");
+    }
+
     private SettingsService CreateAutoStartSettings()
     {
         SettingsService settingsService = CreateSettingsService();
@@ -1078,7 +1095,8 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             loggingService,
             reviewCycleCoordinator,
             ciSettleGate,
-            agyModelSelectionService ?? new AgyModelSelectionService(readSettings: (_, _) => Task.FromResult("{\"model\":\"fixture-model\"}")));
+            agyModelSelectionService ?? new AgyModelSelectionService(readSettings: (_, _) => Task.FromResult("{\"model\":\"fixture-model\"}")),
+            new LauncherExecutionSettingsService(getEnvironment: _ => null, readFile: (_, _) => Task.FromResult<string?>(null)));
     }
 
     private ReviewCycleCoordinator CreateCycleCoordinator()
@@ -1134,8 +1152,8 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
 
         public IReadOnlyList<string> LaunchArguments { get; set; } = [];
 
-        public Task<IReadOnlyList<string>> GetLaunchArgumentsAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
-            => Task.FromResult(LaunchArguments);
+        public Task<LauncherLaunchInfo> GetLaunchInfoAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
+            => Task.FromResult(new LauncherLaunchInfo(LaunchArguments, Path.GetTempPath()));
 
         public Task<string> BuildCommandLineAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();

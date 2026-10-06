@@ -120,6 +120,7 @@ internal sealed class ReviewStartCoordinator
     private readonly ReviewCycleCoordinator? _reviewCycleCoordinator;
     private readonly ReviewCiSettleGate? _ciSettleGate;
     private readonly AgyModelSelectionService _agyModelSelectionService;
+    private readonly LauncherExecutionSettingsService _executionSettingsService;
 
     // PR ごとの reviewer 起動の世代。await をまたぐ自動評価が、その間の別経路の起動を検出するために使う
     private readonly Dictionary<string, int> _reviewerStartGenerations = new(StringComparer.OrdinalIgnoreCase);
@@ -138,7 +139,8 @@ internal sealed class ReviewStartCoordinator
         LoggingService loggingService,
         ReviewCycleCoordinator? reviewCycleCoordinator = null,
         ReviewCiSettleGate? ciSettleGate = null,
-        AgyModelSelectionService? agyModelSelectionService = null)
+        AgyModelSelectionService? agyModelSelectionService = null,
+        LauncherExecutionSettingsService? executionSettingsService = null)
     {
         ArgumentNullException.ThrowIfNull(launcherService);
         ArgumentNullException.ThrowIfNull(settingsService);
@@ -158,6 +160,7 @@ internal sealed class ReviewStartCoordinator
         _reviewCycleCoordinator = reviewCycleCoordinator;
         _ciSettleGate = ciSettleGate;
         _agyModelSelectionService = agyModelSelectionService ?? new AgyModelSelectionService();
+        _executionSettingsService = executionSettingsService ?? new LauncherExecutionSettingsService();
     }
 
     /// <summary>
@@ -329,24 +332,32 @@ internal sealed class ReviewStartCoordinator
         try
         {
             AppSettings settings = _settingsService.Settings;
-            AgentExecutionViewModel viewModel = new(
-                BuildSessionTitle(reviewEvent, role),
-                settings.LiveLogAutoCloseEnabled,
-                SecretMasker.CreateDefault(),
-                _settingsService.ResolveLauncherProgressEventSupport(role),
-                settings.LiveLogAlwaysOnTopEnabled);
-
             string? activeAgentId = _settingsService.ResolveLauncherRateLimitAgentId(role);
+            LauncherLaunchInfo launchInfo = await _launcherService.GetLaunchInfoAsync(reviewEvent, role, cancellationToken);
             AgyModelSelection modelSelection = new(null, null);
             if (activeAgentId == "agy")
             {
-                IReadOnlyList<string> arguments = await _launcherService.GetLaunchArgumentsAsync(reviewEvent, role, cancellationToken);
-                modelSelection = await _agyModelSelectionService.ResolveAsync(arguments, cancellationToken);
+                modelSelection = await _agyModelSelectionService.ResolveAsync(launchInfo.Arguments, cancellationToken);
                 if (modelSelection.Error is not null)
                 {
                     await _loggingService.WriteAsync(modelSelection.Error);
                 }
             }
+
+            LauncherExecutionSettings executionSettings = await _executionSettingsService.ResolveAsync(
+                activeAgentId, launchInfo.Arguments, launchInfo.WorkingDirectory, modelSelection.Model, cancellationToken);
+            foreach (string error in executionSettings.Errors)
+            {
+                await _loggingService.WriteAsync(error);
+            }
+
+            AgentExecutionViewModel viewModel = new(
+                BuildSessionTitle(reviewEvent, role),
+                settings.LiveLogAutoCloseEnabled,
+                SecretMasker.CreateDefault(),
+                _settingsService.ResolveLauncherProgressEventSupport(role),
+                settings.LiveLogAlwaysOnTopEnabled,
+                executionSettings);
 
             TimeSpan freshnessThreshold = TimeSpan.FromMinutes(settings.RateLimitFreshnessThresholdMinutes);
             RateLimitGaugeViewModel rateLimitGaugeViewModel = new(freshnessThreshold);

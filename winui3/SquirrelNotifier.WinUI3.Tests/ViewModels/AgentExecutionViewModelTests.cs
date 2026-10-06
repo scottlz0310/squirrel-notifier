@@ -17,6 +17,26 @@ public class AgentExecutionViewModelTests
 {
     private static readonly DateTimeOffset _now = new(2026, 7, 11, 12, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData(null, null, "Model: CLI既定", "Effort: CLI既定")]
+    [InlineData("gpt-6", "high", "Model: gpt-6（引数）", "Effort: high（設定）")]
+    [InlineData("", "", "Model: CLI既定", "Effort: CLI既定")]
+    public void Constructor_ShouldDisplayLaunchSelections(string? model, string? effort, string expectedModel, string expectedEffort)
+    {
+        AgentExecutionViewModel viewModel = new("title", false, SecretMasker.CreateDefault(), executionSettings: new LauncherExecutionSettings(model, effort, "引数", "設定", []));
+
+        viewModel.ModelText.Should().Be(expectedModel);
+        viewModel.EffortText.Should().Be(expectedEffort);
+    }
+
+    [Fact]
+    public void Constructor_ShouldMaskKnownSecretsInSelections()
+    {
+        AgentExecutionViewModel viewModel = new("title", false, new SecretMasker(["private-value"]), executionSettings: new LauncherExecutionSettings("private-value", "high", "設定", "引数", []));
+
+        viewModel.ModelText.Should().NotContain("private-value");
+    }
+
     private static AgentExecutionViewModel CreateViewModel(bool autoCloseEnabled = true, params string?[] knownSecrets)
         => new("owner/repo#1（レビューする）", autoCloseEnabled, new SecretMasker(knownSecrets));
 

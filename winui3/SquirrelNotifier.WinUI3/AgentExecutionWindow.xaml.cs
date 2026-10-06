@@ -73,6 +73,10 @@ internal sealed partial class AgentExecutionWindow : Window
         // 静的な初期値はここで設定し、動的な更新は FlushPendingEvents が一括で反映する
         Title = viewModel.Title;
         TitleText.Text = viewModel.Title;
+        ModelTextBlock.Text = viewModel.ModelText;
+        ToolTipService.SetToolTip(ModelTextBlock, viewModel.ModelText);
+        EffortTextBlock.Text = viewModel.EffortText;
+        ToolTipService.SetToolTip(EffortTextBlock, viewModel.EffortText);
         StatusTextBlock.Text = viewModel.StatusText;
         LogListView.ItemsSource = viewModel.LogLines;
         RateLimitSelector.ItemsSource = _rateLimitGaugeViewModel.Options;

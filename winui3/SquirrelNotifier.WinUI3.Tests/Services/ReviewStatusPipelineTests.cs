@@ -339,8 +339,8 @@ public sealed class ReviewStatusPipelineTests : IDisposable
 
         public void Cancel() => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<string>> GetLaunchArgumentsAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<LauncherLaunchInfo> GetLaunchInfoAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
+            => Task.FromResult(new LauncherLaunchInfo([], Path.GetTempPath()));
 
         public Task<string> BuildCommandLineAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();

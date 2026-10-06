@@ -42,6 +42,7 @@
     <PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" />
     <PackageReference Include="ModelContextProtocol.Core" />
     <PackageReference Include="System.Drawing.Common" />
+    <PackageReference Include="Tomlyn" />
 
     <!-- Code Analysis -->
     <PackageReference Include="StyleCop.Analyzers">
