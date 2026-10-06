@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 新しく開くライブログウィンドウの最前面ピン留めを、設定から初期状態で有効にできるようにした。既定は無効で、ウィンドウごとのピン留め切り替えは引き続き使える（#476）。
+
 ### Fixed
 
 - agy の Auto-Pause を、起動するモデルに対応する Gemini / 3P 枠だけで判定するようにした。実際の起動引数の `--model` を優先し、未指定時は agy の永続モデル設定を読む。取得不能・系列不明時は全枠で判定する。reviewer / reviewed の保留状態を分離し、更新時と実行終了時にも同じモデル・スロットで再評価する（#477）。

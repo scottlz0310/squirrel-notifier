@@ -150,6 +150,7 @@ uninstall.cmd -KeepSettings
 - **Checkout Mappings**: reviewed 側の「レビューに対応」で使う checkout を `owner/repo=C:\src\repo` 形式で1行に1件指定
 - **レビュー自動開始**: review event を受信した時点で reviewer 側エージェントを自動起動するか（既定は無効）
 - **「レビューに対応」の表示**: Recent review events の行に reviewed 側の起動ボタンを出すか（既定は非表示）
+- **ライブログ最前面の初期状態**: 新しく開くライブログウィンドウのピン留めを初期状態で有効にするか（既定は無効）。各ウィンドウのピン留めボタンで個別に切り替えられます。
 
 「レビュー自動開始」を有効にすると、`opened` / `synchronized` / `re-review-requested` のイベント受信時に「レビューする」を押したのと同じ経路でエージェントが起動します。無人で起動するため、[Auto-Pause](docs/auto-pause.md) が Paused のときは自動起動せず、理由をメイン画面の「Recent activity」に記録します（Auto-Pause の強行確認ダイアログは自動起動では表示しません）。自動起動を見送ったイベントはイベント一覧に残るため、「レビューする」から手動で起動できます。
 

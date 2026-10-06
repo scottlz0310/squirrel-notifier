@@ -84,6 +84,9 @@ internal sealed partial class AgentExecutionWindow : Window
         _appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
         ConfigurePlacement(hwnd, windowId);
 
+        PinToggle.IsChecked = viewModel.InitiallyAlwaysOnTop;
+        ApplyPinState();
+
         Closed += OnWindowClosed;
 
         _ = ConsumeEventsAsync();
@@ -283,6 +286,9 @@ internal sealed partial class AgentExecutionWindow : Window
     }
 
     private void OnPinToggleClick(object sender, RoutedEventArgs e)
+        => ApplyPinState();
+
+    private void ApplyPinState()
     {
         if (_appWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
         {

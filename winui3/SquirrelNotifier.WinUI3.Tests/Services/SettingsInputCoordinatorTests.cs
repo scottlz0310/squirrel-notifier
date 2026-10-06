@@ -64,19 +64,23 @@ public sealed class SettingsInputCoordinatorTests : IDisposable
         SettingsInputCoordinator coordinator = new(_settingsService, _settingsCoordinator);
 
         coordinator.UpdateLiveLogAutoCloseEnabled(false);
+        coordinator.UpdateLiveLogAlwaysOnTopEnabled(true);
         coordinator.UpdateAutoReviewStartEnabled(true);
         coordinator.UpdateReviewedActionVisible(true);
 
         _settingsService.Settings.LiveLogAutoCloseEnabled.Should().BeTrue();
+        _settingsService.Settings.LiveLogAlwaysOnTopEnabled.Should().BeFalse();
         _settingsService.Settings.AutoReviewStartEnabled.Should().BeFalse();
         _settingsService.Settings.ReviewedActionVisible.Should().BeFalse();
 
         coordinator.CompleteInitialization();
         coordinator.UpdateLiveLogAutoCloseEnabled(false);
+        coordinator.UpdateLiveLogAlwaysOnTopEnabled(true);
         coordinator.UpdateAutoReviewStartEnabled(true);
         coordinator.UpdateReviewedActionVisible(true);
 
         _settingsService.Settings.LiveLogAutoCloseEnabled.Should().BeFalse();
+        _settingsService.Settings.LiveLogAlwaysOnTopEnabled.Should().BeTrue();
         _settingsService.Settings.AutoReviewStartEnabled.Should().BeTrue();
         _settingsService.Settings.ReviewedActionVisible.Should().BeTrue();
     }

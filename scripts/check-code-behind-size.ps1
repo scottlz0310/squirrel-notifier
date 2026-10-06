@@ -34,10 +34,11 @@ $limits = [ordered]@{
     # #388 のトレイ通知初期化待ちを TrayNotificationCoordinator へ移し、code-behind の行数が減った。
     # #456 の CI 確定待ちのゲートの生成・再評価の契機の購読と破棄・通知への注記の受け渡しを反映。判断は Helpers / Services 側に配置している。
     # #452 のログ入力・レイアウト通知・末尾移動の UI 配線を反映。追従判断と件数は LogTailViewModel へ配置。
-    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1503
+    # #476 のライブログ最前面設定の読み込みとトグルイベントの配線を反映。
+    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1506
     # #305 の resume 失敗メッセージを既存 InfoBar に表示する配線を反映。
-    # #477 の終了時 Auto-Pause 判定へ、実行時モデルとスロットを受け渡す2行の配線を反映。
-    "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 320
+    # #476 の初期ピン留め・個別切替と #477 の終了時モデル/スロット受け渡しの UI 配線を反映。
+    "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 326
     # #276 の status client / Coordinator の生成と終了時破棄を反映。
     # #257 の ReviewCycleStore / Coordinator の composition root 配線を反映。
     # #427 の statusline サマリ書き出しの生成・起動時書き出し・終了時削除の配線を反映。

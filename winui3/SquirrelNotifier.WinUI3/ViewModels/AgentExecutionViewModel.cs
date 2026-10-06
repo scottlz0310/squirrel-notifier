@@ -39,12 +39,14 @@ internal sealed class AgentExecutionViewModel : INotifyPropertyChanged
         string title,
         bool autoCloseEnabled,
         SecretMasker masker,
-        ProgressEventSupport progressEventSupport = ProgressEventSupport.Structured)
+        ProgressEventSupport progressEventSupport = ProgressEventSupport.Structured,
+        bool initiallyAlwaysOnTop = false)
     {
         ArgumentNullException.ThrowIfNull(masker);
         Title = title ?? string.Empty;
         _autoCloseEnabled = autoCloseEnabled;
         _masker = masker;
+        InitiallyAlwaysOnTop = initiallyAlwaysOnTop;
 
         // 対応度はあくまで初期表示のヒント。None でも progress event を受信したら
         // ApplyProgress が phase 表示へ切り替える（カスタム構成の producer を妨げない #151）
@@ -58,6 +60,8 @@ internal sealed class AgentExecutionViewModel : INotifyPropertyChanged
 
     /// <summary>Gets ウィンドウタイトル（例: "owner/repo#123（レビューする）"）.</summary>
     public string Title { get; }
+
+    public bool InitiallyAlwaysOnTop { get; }
 
     /// <summary>Gets 表示用ログ行（サニタイズ・マスキング適用済み、rolling buffer 上限あり）.</summary>
     public ObservableCollection<AgentLogLine> LogLines { get; } = new();

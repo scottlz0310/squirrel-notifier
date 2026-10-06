@@ -57,6 +57,16 @@ internal sealed class SettingsInputCoordinator
         _settingsService.UpdateLiveLogAutoCloseEnabled(enabled);
     }
 
+    public void UpdateLiveLogAlwaysOnTopEnabled(bool enabled)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        _settingsService.UpdateLiveLogAlwaysOnTopEnabled(enabled);
+    }
+
     public void UpdateAutoReviewStartEnabled(bool enabled)
     {
         if (_isInitializing)
