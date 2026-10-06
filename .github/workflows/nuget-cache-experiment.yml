@@ -1,0 +1,142 @@
+name: NuGet cache experiment (#184)
+
+on:
+  push:
+    branches: [ci/184-cache-experiment]
+    paths: [.github/workflows/nuget-cache-experiment.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: fa5f43a1337fa56fdccd6239fe64a2e62acdd808
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  compare:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        sample: [1, 2, 3]
+        packages: [cached, empty]
+    name: compare-${{ matrix.sample }}-${{ matrix.packages }}
+    steps:
+      - name: Checkout fixed source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Begin measurement
+        shell: pwsh
+        run: |
+          [datetimeoffset]::UtcNow.ToString('o') | Set-Content "$env:RUNNER_TEMP/experiment-start.txt"
+          if ('${{ matrix.packages }}' -eq 'empty') {
+            $packageRoot = Join-Path $env:RUNNER_TEMP 'experiment-empty-packages'
+            New-Item -ItemType Directory -Path $packageRoot | Out-Null
+            "NUGET_PACKAGES=$packageRoot" | Add-Content $env:GITHUB_ENV
+          }
+
+      - name: Setup with existing cache
+        if: matrix.packages == 'cached'
+        uses: ./.github/actions/dotnet-setup
+
+      - name: Setup without package cache
+        if: matrix.packages == 'empty'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: csharp
+          build-mode: manual
+          db-location: ${{ runner.temp }}/experiment-codeql
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.1/codeql-bundle-win64.tar.gz
+
+      - name: Restore for CodeQL
+        run: dotnet restore winui3/SquirrelNotifier.WinUI3.sln
+
+      - name: Prepare WinRT generator output folders
+        shell: pwsh
+        run: |
+          $base = Join-Path 'winui3/SquirrelNotifier.WinUI3' 'obj/x64/Release/net10.0-windows10.0.26100.0/generated/WinRT.SourceGenerator/Generator.WinRTAotSourceGenerator'
+          New-Item -ItemType Directory -Force -Path $base | Out-Null
+
+      - name: Build for CodeQL
+        run: dotnet build winui3/SquirrelNotifier.WinUI3.sln --configuration Release --no-restore /p:Platform=x64 /p:IncludeWindowsSdkBuildTools=false
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          output: ${{ runner.temp }}/experiment-sarif
+          upload: never
+          upload-database: false
+
+      - name: End measurement and inventory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $finished = [datetimeoffset]::UtcNow
+          $started = [datetimeoffset]::Parse((Get-Content "$env:RUNNER_TEMP/experiment-start.txt" -Raw).Trim())
+          $output = Join-Path $env:RUNNER_TEMP 'experiment-results'
+          New-Item -ItemType Directory -Path $output | Out-Null
+          $sdkVersion = dotnet --version
+          if ($LASTEXITCODE -ne 0) { throw 'SDKバージョン取得失敗' }
+          $actualSha = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actualSha -ne $env:SOURCE_SHA) { throw '実験ソースSHA不一致' }
+          $packageRoot = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget/packages' }
+          $packageFiles = @(Get-ChildItem -LiteralPath $packageRoot -File -Recurse)
+          $inventory = [Collections.Generic.List[object]]::new()
+          $zip = [IO.Compression.ZipFile]::OpenRead("$env:RUNNER_TEMP/experiment-codeql/csharp/src.zip")
+          try {
+            foreach ($entry in $zip.Entries | Where-Object FullName -like '*.cs') {
+              $reader = [IO.StreamReader]::new($entry.Open())
+              try { $source = $reader.ReadToEnd() } finally { $reader.Dispose() }
+              $path = $entry.FullName.Replace('\', '/')
+              $workspacePath = $env:GITHUB_WORKSPACE.Replace('\', '/').TrimStart('/')
+              $packagePath = $packageRoot.Replace('\', '/').TrimStart('/')
+              $path = $path.Replace($workspacePath, 'workspace').Replace($packagePath, 'packages')
+              $kind = if ($path -match '/obj/') { 'generated' } elseif ($path -match 'workspace/') { 'repository' } else { 'dependency' }
+              $inventory.Add([ordered]@{
+                path = $path
+                kind = $kind
+                physicalLines = ($source -split "`n").Count
+                sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($source)))
+              })
+            }
+          } finally { $zip.Dispose() }
+          $sarifFiles = @(Get-ChildItem "$env:RUNNER_TEMP/experiment-sarif" -Filter '*.sarif' -File)
+          if ($sarifFiles.Count -eq 0 -or $inventory.Count -eq 0) { throw '解析証跡が空' }
+          $analysis = @($sarifFiles | ForEach-Object {
+            $sarif = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
+            foreach ($run in $sarif.runs) {
+              [ordered]@{ toolVersion = $run.tool.driver.version; rules = @($run.tool.driver.rules).Count; results = @($run.results).Count }
+            }
+          })
+          [ordered]@{
+            sourceSha = $actualSha
+            mode = '${{ matrix.packages }}'
+            sample = ${{ matrix.sample }}
+            sdkVersion = $sdkVersion
+            runnerImage = $env:ImageOS
+            runnerImageVersion = $env:ImageVersion
+            measuredSeconds = [math]::Round(($finished - $started).TotalSeconds, 3)
+            packageBytes = ($packageFiles | Measure-Object Length -Sum).Sum
+            packageFileCount = $packageFiles.Count
+            analysis = $analysis
+            sources = @($inventory | Sort-Object path)
+          } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $output 'measurement.json') -Encoding utf8
+
+      - name: Upload measurements
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-experiment-${{ matrix.sample }}-${{ matrix.packages }}
+          path: ${{ runner.temp }}/experiment-results/measurement.json
+          if-no-files-found: error
+          retention-days: 14
