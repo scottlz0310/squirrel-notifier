@@ -961,6 +961,23 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         Reason = reason,
     };
 
+    [Theory]
+    [InlineData("Reviewer")]
+    [InlineData("Reviewed")]
+    public async Task StartAsync_ShouldApplyPinDefaultToNewWindowWithoutChangingExistingWindow(string roleName)
+    {
+        SettingsService settings = CreateSettingsService();
+        ReviewStartCoordinator coordinator = CreateCoordinator(new FakeLauncherService(), settings);
+        LauncherRole role = Enum.Parse<LauncherRole>(roleName);
+        ReviewStartResult first = await coordinator.StartAsync(CreateReviewEvent(), role, ReviewStartTrigger.Manual, _ => Task.FromResult(true));
+        settings.UpdateLiveLogAlwaysOnTopEnabled(true);
+
+        ReviewStartResult second = await coordinator.StartAsync(CreateReviewEvent(), role, ReviewStartTrigger.Manual, _ => Task.FromResult(true));
+
+        first.Launch!.ViewModel.InitiallyAlwaysOnTop.Should().BeFalse();
+        second.Launch!.ViewModel.InitiallyAlwaysOnTop.Should().BeTrue();
+    }
+
     private SettingsService CreateSettingsService() => new(_workingDirectory, pnpmBinDir: string.Empty);
 
     private SettingsService CreateAutoStartSettings()

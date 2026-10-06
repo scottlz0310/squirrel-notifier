@@ -235,6 +235,7 @@ internal sealed partial class MainWindow : Window
         RepositoryCheckoutMappingsBox.Text = Helpers.RepositoryCheckoutMappingParser.Format(settings.RepositoryCheckoutMappings);
         LauncherTimeoutBox.Value = settings.LauncherTimeoutMs;
         LiveLogAutoCloseToggle.IsOn = settings.LiveLogAutoCloseEnabled;
+        LiveLogAlwaysOnTopToggle.IsOn = settings.LiveLogAlwaysOnTopEnabled;
         AutoReviewStartToggle.IsOn = settings.AutoReviewStartEnabled;
         SessionResumeToggle.IsOn = settings.SessionResumeEnabled;
         ReviewedActionVisibleToggle.IsOn = settings.ReviewedActionVisible;
@@ -560,6 +561,9 @@ internal sealed partial class MainWindow : Window
 
     private void OnLiveLogAutoCloseToggled(object sender, RoutedEventArgs e)
         => _settingsInputCoordinator.UpdateLiveLogAutoCloseEnabled(LiveLogAutoCloseToggle.IsOn);
+
+    private void OnLiveLogAlwaysOnTopToggled(object sender, RoutedEventArgs e)
+        => _settingsInputCoordinator.UpdateLiveLogAlwaysOnTopEnabled(LiveLogAlwaysOnTopToggle.IsOn);
 
     private void OnAutoReviewStartToggled(object sender, RoutedEventArgs e)
         => _settingsInputCoordinator.UpdateAutoReviewStartEnabled(AutoReviewStartToggle.IsOn);

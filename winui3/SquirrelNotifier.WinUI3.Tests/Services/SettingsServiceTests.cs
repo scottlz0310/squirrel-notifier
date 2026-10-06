@@ -1450,6 +1450,22 @@ public class SettingsServiceTests : IDisposable
         new AppSettings().LiveLogAutoCloseEnabled.Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UpdateLiveLogAlwaysOnTopEnabled_ShouldPersistAndReloadValue(bool enabled)
+    {
+        _settingsService.UpdateLiveLogAlwaysOnTopEnabled(enabled);
+
+        SettingsService reloaded = new(_settingsDirectory, pnpmBinDir: string.Empty);
+
+        reloaded.Settings.LiveLogAlwaysOnTopEnabled.Should().Be(enabled);
+    }
+
+    [Fact]
+    public void Settings_ShouldDefaultLiveLogAlwaysOnTopToDisabled()
+        => new AppSettings().LiveLogAlwaysOnTopEnabled.Should().BeFalse();
+
     [Fact]
     public void UpdateLiveLogAutoCloseEnabled_ShouldPersistValue()
     {

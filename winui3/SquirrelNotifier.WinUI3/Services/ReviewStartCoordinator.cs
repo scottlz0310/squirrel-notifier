@@ -330,7 +330,8 @@ internal sealed class ReviewStartCoordinator
                 BuildSessionTitle(reviewEvent, role),
                 settings.LiveLogAutoCloseEnabled,
                 SecretMasker.CreateDefault(),
-                _settingsService.ResolveLauncherProgressEventSupport(role));
+                _settingsService.ResolveLauncherProgressEventSupport(role),
+                settings.LiveLogAlwaysOnTopEnabled);
 
             string? activeAgentId = _settingsService.ResolveLauncherRateLimitAgentId(role);
             TimeSpan freshnessThreshold = TimeSpan.FromMinutes(settings.RateLimitFreshnessThresholdMinutes);

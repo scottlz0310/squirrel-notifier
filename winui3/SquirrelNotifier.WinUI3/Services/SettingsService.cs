@@ -452,6 +452,12 @@ internal sealed class SettingsService
         SaveSettings();
     }
 
+    public void UpdateLiveLogAlwaysOnTopEnabled(bool enabled)
+    {
+        _settings.LiveLogAlwaysOnTopEnabled = enabled;
+        SaveSettings();
+    }
+
     public void UpdateAutoReviewStartEnabled(bool enabled)
     {
         _settings.AutoReviewStartEnabled = enabled;
@@ -696,6 +702,8 @@ internal sealed class AppSettings
     // ライブログウィンドウ（#144）: 成功終了時に短い猶予の後で自動クローズするか。
     // 失敗・キャンセル・タイムアウト時は設定に関わらず診断のため保持する
     public bool LiveLogAutoCloseEnabled { get; set; } = true;
+
+    public bool LiveLogAlwaysOnTopEnabled { get; set; }
 
     // review event 受信時に reviewer スロットを自動起動するか（#254）。無人でエージェントを
     // 起動するため既定は off とし、on でも Auto-Pause（#147）と同時実行抑止を必ず経由する
