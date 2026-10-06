@@ -260,6 +260,55 @@ public class AutoPauseGateTests
 
     private static AutoPauseGate CreateGate() => new(new FixedTimeProvider(_now));
 
+    [Theory]
+    [InlineData("Gemini 3.8 Flash (High)", 20, 100, "Allowed")]
+    [InlineData("gemini-3.8-flash-high", 95, 20, "Paused")]
+    [InlineData("claude-sonnet-5-5-high", 100, 20, "Allowed")]
+    [InlineData("GPT-OSS 120B (Medium)", 20, 95, "Paused")]
+    [InlineData("unknown-model", 100, 20, "Paused")]
+    [InlineData(null, 20, 100, "Paused")]
+    public void Evaluate_ShouldUseSelectedAgyModelQuota(string? model, double geminiUsage, double thirdPartyUsage, string expected)
+    {
+        AutoPauseGate gate = CreateGate();
+        RateLimitSnapshot snapshot = new("agy", _now,
+            [CreateLimit("gemini-5h", "Gemini", geminiUsage), CreateLimit("3p-weekly", "3P", thirdPartyUsage)]);
+
+        AutoPauseDecision decision = gate.Evaluate("agy", [snapshot], _freshness, LauncherRole.Reviewer, model);
+
+        decision.Status.Should().Be(Enum.Parse<AutoPauseStatus>(expected));
+    }
+
+    [Fact]
+    public void Evaluate_ShouldKeepAgySlotsIndependentWhenModelsDiffer()
+    {
+        AutoPauseGate gate = CreateGate();
+        RateLimitSnapshot snapshot = new("agy", _now,
+            [CreateLimit("gemini-5h", "Gemini", 20), CreateLimit("3p-5h", "3P", 100)]);
+
+        gate.Evaluate("agy", [snapshot], _freshness, LauncherRole.Reviewed, "claude-sonnet").Status.Should().Be(AutoPauseStatus.Paused);
+        gate.Evaluate("agy", [snapshot], _freshness, LauncherRole.Reviewer, "gemini-flash").Status.Should().Be(AutoPauseStatus.Allowed);
+        gate.PausedLimits.Should().ContainSingle().Which.LimitId.Should().Be("3p-5h");
+        gate.Evaluate("agy", [], _freshness, LauncherRole.Reviewed, "claude-sonnet").Status.Should().Be(AutoPauseStatus.Paused);
+    }
+
+    [Fact]
+    public void Evaluate_ShouldReleaseSelectedSlotOnFreshModelSwitchWithoutReleasingOtherSlot()
+    {
+        AutoPauseGate gate = CreateGate();
+        RateLimitSnapshot snapshot = new("agy", _now,
+            [CreateLimit("gemini-5h", "Gemini", 20), CreateLimit("3p-5h", "3P", 100)]);
+        gate.Evaluate("agy", [snapshot], _freshness, LauncherRole.Reviewer, "claude-sonnet");
+        gate.Evaluate("agy", [snapshot], _freshness, LauncherRole.Reviewed, "claude-sonnet");
+        int released = 0;
+        gate.Released += (_, _) => released++;
+
+        gate.Evaluate("agy", [snapshot], _freshness, LauncherRole.Reviewer, "gemini-flash").Status.Should().Be(AutoPauseStatus.Allowed);
+
+        released.Should().Be(1);
+        gate.PausedLimits.Should().ContainSingle();
+        gate.Evaluate("agy", [], _freshness, LauncherRole.Reviewed, "gemini-flash").Status.Should().Be(AutoPauseStatus.Paused);
+    }
+
     private static RateLimitSnapshot CreateSnapshot(string agentId, DateTimeOffset observedAt, double usedPercentage)
         => new(agentId, observedAt, [CreateLimit("five-hour", "5時間枠", usedPercentage)]);
 

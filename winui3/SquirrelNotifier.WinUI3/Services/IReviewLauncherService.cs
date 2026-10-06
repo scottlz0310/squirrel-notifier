@@ -33,6 +33,11 @@ internal interface IReviewLauncherService
 
     void Cancel();
 
+    Task<IReadOnlyList<string>> GetLaunchArgumentsAsync(
+        ReviewEvent reviewEvent,
+        LauncherRole role,
+        CancellationToken cancellationToken = default);
+
     Task<string> BuildCommandLineAsync(
         ReviewEvent reviewEvent,
         LauncherRole role,

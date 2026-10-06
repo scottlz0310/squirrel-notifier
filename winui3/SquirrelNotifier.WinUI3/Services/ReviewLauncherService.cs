@@ -131,6 +131,16 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
     }
 
+    public async Task<IReadOnlyList<string>> GetLaunchArgumentsAsync(
+        ReviewEvent reviewEvent,
+        LauncherRole role,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reviewEvent);
+        LauncherLaunchPlan plan = await CreateLaunchPlanAsync(reviewEvent, role, cancellationToken).ConfigureAwait(false);
+        return LauncherArgumentBuilder.BuildArguments(plan.ArgumentsTemplate, reviewEvent, plan.SessionId?.ToString("D"));
+    }
+
     // 起動せずに、実際に LaunchAsync が実行するのと同じスロット選択・引数展開を適用した
     // コマンド文字列を組み立てる（クリップボードコピー用）。コマンドパスは
     // ResolveCommandPath で解決した絶対パスではなく、設定値そのもの（例: "claude"）を使う。

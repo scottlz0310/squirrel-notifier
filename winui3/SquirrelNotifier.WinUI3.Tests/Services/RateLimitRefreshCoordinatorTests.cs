@@ -441,11 +441,39 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
 
     private SettingsService CreateSettingsService() => new(_settingsDirectory, pnpmBinDir: string.Empty);
 
+    [Fact]
+    public async Task RefreshAsync_ShouldUseEachAgySlotModelAndReleaseOnlyRecoveredSlot()
+    {
+        SettingsService settings = CreateSettingsService();
+        settings.Settings.ReviewerLauncherPresetId = "agy";
+        settings.Settings.ReviewedLauncherPresetId = "agy";
+        settings.Settings.ReviewerLauncherArguments = "--model gemini-flash";
+        settings.Settings.ReviewedLauncherArguments = "--model claude-sonnet";
+        string directory = Path.Combine(_settingsDirectory, "ratelimit-status");
+        Directory.CreateDirectory(directory);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        await File.WriteAllTextAsync(Path.Combine(directory, "agy.json"), $$"""
+            {"schemaVersion":1,"agentId":"agy","observedAt":"{{now:O}}","limits":[
+            {"id":"gemini-5h","label":"Gemini","resetAt":"{{now.AddHours(5):O}}","usedPercentage":20},
+            {"id":"3p-5h","label":"3P","resetAt":"{{now.AddHours(5):O}}","usedPercentage":100}]}
+            """);
+        RateLimitRefreshCoordinator coordinator = CreateCoordinator(settings);
+
+        RateLimitRefreshResult result = await coordinator.RefreshAsync(CreateRequest(CreateAgent(_agy)));
+
+        result.Alerts.Should().BeEmpty();
+        _autoPauseGate.PausedLimits.Should().ContainSingle().Which.LimitId.Should().Be("3p-5h");
+        settings.Settings.ReviewedLauncherArguments = "--model gemini-flash";
+        await coordinator.RefreshAsync(CreateRequest(CreateAgent(_agy)));
+        _autoPauseGate.PausedLimits.Should().BeEmpty();
+    }
+
     private RateLimitRefreshCoordinator CreateCoordinator(
         SettingsService? settingsService = null,
         McpResourceTextReader? mcpResourceReader = null,
         IProcessRunner? processRunner = null,
-        Func<string, string?>? commandResolver = null)
+        Func<string, string?>? commandResolver = null,
+        AgyModelSelectionService? agyModelSelectionService = null)
     {
         RateLimitFileService fileService = new(_settingsDirectory);
         RateLimitSnapshotService snapshotService = new(
@@ -460,7 +488,8 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
             settingsService ?? CreateSettingsService(),
             _autoPauseGate,
             _reminderService.Object,
-            mcpResourceReader);
+            mcpResourceReader,
+            agyModelSelectionService ?? new AgyModelSelectionService(readSettings: (_, _) => Task.FromResult("{\"model\":\"fixture-model\"}")));
     }
 
     private async Task WriteSnapshotAsync(string agentId, double usedPercentage, DateTimeOffset? observedAt = null)

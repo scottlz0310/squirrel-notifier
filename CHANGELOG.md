@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- agy の Auto-Pause を、起動するモデルに対応する Gemini / 3P 枠だけで判定するようにした。実際の起動引数の `--model` を優先し、未指定時は agy の永続モデル設定を読む。取得不能・系列不明時は全枠で判定する。reviewer / reviewed の保留状態を分離し、更新時と実行終了時にも同じモデル・スロットで再評価する（#477）。
+
 - PR 状態の照会を認証済みの `gh api` に移し、private repository のマージ・クローズ済みレビューイベントも自動で片付けられるようにした。取得失敗時のイベント保持、レート制限ヘッダーに基づく待機、初期5回・毎時25回補充の巡回予算は維持する。アプリ起動ユーザーの `gh` の PATH とログイン状態を使う（#475）。
 
 ## [0.17.0] - 2026-10-03
