@@ -128,8 +128,8 @@ internal sealed class ReviewEventProcessingCoordinator
             }
 
             // CI の確定待ちは確認の間隔（30 秒）ごとに再評価される。
-            // - PR の状態は判定の側（gh）が毎回確認し、閉じていれば起動しない。未認証の GitHub API（60 req/h）を
-            //   消費する終了確認をここで重ねると、枠を使い切って巡回や更新チェックまで巻き込むため省く
+            // - PR の状態は判定の側（gh）が毎回確認し、閉じていれば起動しない。終了確認をここで重ねると、
+            //   巡回予算（初期5回＋毎時25回補充）を使い切るため省く
             // - 毎回残すと Recent activity が埋まるため、再評価の行も残さない。待機の開始・head の移動・終了は判定の側が残す
             bool isWaitingForCiSettle = _isWaitingForCiSettle(pendingEvent);
             if (!isWaitingForCiSettle)

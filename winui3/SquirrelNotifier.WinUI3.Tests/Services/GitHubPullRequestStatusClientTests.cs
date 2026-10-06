@@ -2,6 +2,7 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Moq;
@@ -126,6 +127,27 @@ public class GitHubPullRequestStatusClientTests
         Func<Task> act = () => client.GetStateAsync("owner/repo", 42, cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task GetStateAsync_ShouldPreserveRetryAfterThroughGhProcessResponse()
+    {
+        Mock<IProcessInstance> process = new();
+        process.SetupGet(p => p.ExitCode).Returns(1);
+        process.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(
+            "HTTP/2.0 403 Forbidden\r\nRetry-After: 60\r\n\r\n{\"message\":\"rate limit exceeded\"}"))));
+        process.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(
+            "gh: rate limit exceeded (HTTP 403)"))));
+        process.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        Mock<IProcessRunner> runner = new();
+        runner.Setup(r => r.Start(It.IsAny<System.Diagnostics.ProcessStartInfo>())).Returns(process.Object);
+        GhApiClient api = new(runner.Object, _ => @"C:\tools\gh.exe", includeResponseHeaders: true);
+        GitHubPullRequestStatusClient client = new(api, new FixedTimeProvider(_now));
+
+        Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<GitHubRateLimitException>()).Which.ResetAt.Should().Be(_now.AddSeconds(60));
+        runner.Verify(r => r.Start(It.Is<System.Diagnostics.ProcessStartInfo>(info => info.ArgumentList.Contains("--include"))), Times.Once);
     }
 
     private static GitHubPullRequestStatusClient CreateClient(GhApiResult result)
