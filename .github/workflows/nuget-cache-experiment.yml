@@ -9,6 +9,10 @@ on:
         default: '[1,2,3]'
         options: ['[1,2,3]', '[4]']
 
+concurrency:
+  group: nuget-cache-experiment
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -119,7 +123,7 @@ jobs:
           $analysis = @($sarifFiles | ForEach-Object {
             $sarif = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
             foreach ($run in $sarif.runs) {
-              [ordered]@{ tools = @(@($run.tool.driver) + @($run.tool.extensions) | ForEach-Object { [ordered]@{ name = $_.name; version = $_.version; semanticVersion = $_.semanticVersion; rules = @($_.rules).Count } }); results = @($run.results).Count }
+              [ordered]@{ tools = @(@($run.tool.driver) + @($run.tool.extensions) | ForEach-Object { [ordered]@{ name = $_.name; version = $_.version; semanticVersion = $_.semanticVersion; rules = @($_.rules | Where-Object { $null -ne $_ }).Count } }); results = @($run.results).Count }
             }
           })
           [ordered]@{
