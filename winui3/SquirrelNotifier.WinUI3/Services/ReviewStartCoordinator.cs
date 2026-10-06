@@ -119,6 +119,7 @@ internal sealed class ReviewStartCoordinator
     private readonly LoggingService _loggingService;
     private readonly ReviewCycleCoordinator? _reviewCycleCoordinator;
     private readonly ReviewCiSettleGate? _ciSettleGate;
+    private readonly AgyModelSelectionService _agyModelSelectionService;
 
     // PR ごとの reviewer 起動の世代。await をまたぐ自動評価が、その間の別経路の起動を検出するために使う
     private readonly Dictionary<string, int> _reviewerStartGenerations = new(StringComparer.OrdinalIgnoreCase);
@@ -136,7 +137,8 @@ internal sealed class ReviewStartCoordinator
         AutoPauseResumeScheduler autoPauseResumeScheduler,
         LoggingService loggingService,
         ReviewCycleCoordinator? reviewCycleCoordinator = null,
-        ReviewCiSettleGate? ciSettleGate = null)
+        ReviewCiSettleGate? ciSettleGate = null,
+        AgyModelSelectionService? agyModelSelectionService = null)
     {
         ArgumentNullException.ThrowIfNull(launcherService);
         ArgumentNullException.ThrowIfNull(settingsService);
@@ -155,6 +157,7 @@ internal sealed class ReviewStartCoordinator
         _loggingService = loggingService;
         _reviewCycleCoordinator = reviewCycleCoordinator;
         _ciSettleGate = ciSettleGate;
+        _agyModelSelectionService = agyModelSelectionService ?? new AgyModelSelectionService();
     }
 
     /// <summary>
@@ -333,6 +336,17 @@ internal sealed class ReviewStartCoordinator
                 _settingsService.ResolveLauncherProgressEventSupport(role));
 
             string? activeAgentId = _settingsService.ResolveLauncherRateLimitAgentId(role);
+            AgyModelSelection modelSelection = new(null, null);
+            if (activeAgentId == "agy")
+            {
+                IReadOnlyList<string> arguments = await _launcherService.GetLaunchArgumentsAsync(reviewEvent, role, cancellationToken);
+                modelSelection = await _agyModelSelectionService.ResolveAsync(arguments, cancellationToken);
+                if (modelSelection.Error is not null)
+                {
+                    await _loggingService.WriteAsync(modelSelection.Error);
+                }
+            }
+
             TimeSpan freshnessThreshold = TimeSpan.FromMinutes(settings.RateLimitFreshnessThresholdMinutes);
             RateLimitGaugeViewModel rateLimitGaugeViewModel = new(freshnessThreshold);
             RateLimitSessionMonitor rateLimitSessionMonitor = new(
@@ -340,13 +354,15 @@ internal sealed class ReviewStartCoordinator
                 new RateLimitDeltaCalculator(),
                 settings.RateLimitMonitoredAgentIds,
                 activeAgentId,
-                freshnessThreshold);
+                freshnessThreshold,
+                role: role,
+                model: modelSelection.Model);
             IReadOnlyList<RateLimitSnapshot> startSnapshots = await rateLimitSessionMonitor.CaptureStartAsync(cancellationToken);
             rateLimitGaugeViewModel.Update(settings.RateLimitMonitoredAgentIds, startSnapshots, activeAgentId, []);
 
             // Auto-Pause gate（#147）: 起動する launcher スロットの agent が危険水域なら
             // 新規起動を拒否する。実行中プロセス・MCP subscription・queue には作用しない
-            AutoPauseDecision autoPauseDecision = _autoPauseGate.Evaluate(activeAgentId, startSnapshots, freshnessThreshold);
+            AutoPauseDecision autoPauseDecision = _autoPauseGate.Evaluate(activeAgentId, startSnapshots, freshnessThreshold, role, modelSelection.Model);
             if (autoPauseDecision.Status == AutoPauseStatus.Paused)
             {
                 AutoPausedLimit pausedLimit = autoPauseDecision.PausedLimit!;

@@ -27,7 +27,9 @@ internal sealed class RateLimitSessionMonitor
         IReadOnlyList<string> monitoredAgentIds,
         string? activeAgentId,
         TimeSpan freshnessThreshold,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        LauncherRole role = LauncherRole.Reviewer,
+        string? model = null)
     {
         ArgumentNullException.ThrowIfNull(snapshotService);
         ArgumentNullException.ThrowIfNull(deltaCalculator);
@@ -40,6 +42,8 @@ internal sealed class RateLimitSessionMonitor
         _activeAgentId = activeAgentId;
         _freshnessThreshold = freshnessThreshold;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        Role = role;
+        Model = model;
     }
 
     public IReadOnlyList<string> MonitoredAgentIds => _monitoredAgentIds;
@@ -47,6 +51,10 @@ internal sealed class RateLimitSessionMonitor
     public string? ActiveAgentId => _activeAgentId;
 
     public TimeSpan FreshnessThreshold => _freshnessThreshold;
+
+    public LauncherRole Role { get; }
+
+    public string? Model { get; }
 
     public async Task<IReadOnlyList<RateLimitSnapshot>> CaptureStartAsync(CancellationToken cancellationToken)
     {

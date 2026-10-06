@@ -95,6 +95,7 @@ internal sealed class RateLimitRefreshCoordinator
     private readonly AutoPauseGate _autoPauseGate;
     private readonly IRateLimitReminderService _reminderService;
     private readonly McpResourceTextReader _mcpResourceReader;
+    private readonly AgyModelSelectionService _agyModelSelectionService;
 
     public RateLimitRefreshCoordinator(
         RateLimitFileService fileService,
@@ -103,7 +104,8 @@ internal sealed class RateLimitRefreshCoordinator
         SettingsService settingsService,
         AutoPauseGate autoPauseGate,
         IRateLimitReminderService reminderService,
-        McpResourceTextReader? mcpResourceReader = null)
+        McpResourceTextReader? mcpResourceReader = null,
+        AgyModelSelectionService? agyModelSelectionService = null)
     {
         ArgumentNullException.ThrowIfNull(fileService);
         ArgumentNullException.ThrowIfNull(snapshotService);
@@ -118,6 +120,7 @@ internal sealed class RateLimitRefreshCoordinator
         _settingsService = settingsService;
         _autoPauseGate = autoPauseGate;
         _reminderService = reminderService;
+        _agyModelSelectionService = agyModelSelectionService ?? new AgyModelSelectionService();
 
         McpResourceProbe probe = new();
         _mcpResourceReader = mcpResourceReader
@@ -192,7 +195,7 @@ internal sealed class RateLimitRefreshCoordinator
             info.IsReminderScheduled = _reminderService.IsScheduled(info.ReminderKey);
         }
 
-        await RefreshAutoPauseGateAsync(capturedSnapshots, cancellationToken);
+        await RefreshAutoPauseGateAsync(capturedSnapshots, alerts, cancellationToken);
 
         return new RateLimitRefreshResult(
             RateLimitRefreshStatus.Completed,
@@ -309,6 +312,7 @@ internal sealed class RateLimitRefreshCoordinator
     // RateLimitSnapshotResolver に委譲する（#167 レビュー対応）.
     private async Task RefreshAutoPauseGateAsync(
         IReadOnlyDictionary<string, RateLimitSnapshot> capturedSnapshots,
+        List<RateLimitRefreshAlert> alerts,
         CancellationToken cancellationToken)
     {
         AppSettings settings = _settingsService.Settings;
@@ -331,9 +335,20 @@ internal sealed class RateLimitRefreshCoordinator
         IReadOnlyList<RateLimitSnapshot> gateSnapshots = await _snapshotResolver
             .ResolveAsync(gateAgentIds, capturedSnapshots, cancellationToken);
 
-        foreach (string agentId in gateAgentIds)
+        foreach (LauncherRole role in new[] { LauncherRole.Reviewer, LauncherRole.Reviewed })
         {
-            _autoPauseGate.Evaluate(agentId, gateSnapshots, freshnessThreshold);
+            string? agentId = _settingsService.ResolveLauncherRateLimitAgentId(role);
+            AgyModelSelection selection = new(null, null);
+            if (agentId == "agy")
+            {
+                selection = await _agyModelSelectionService.ResolveConfiguredAsync(settings, role, cancellationToken);
+                if (selection.Error is not null)
+                {
+                    alerts.Add(new RateLimitRefreshAlert("モデル設定の確認", selection.Error));
+                }
+            }
+
+            _autoPauseGate.Evaluate(agentId, gateSnapshots, freshnessThreshold, role, selection.Model);
         }
     }
 }
