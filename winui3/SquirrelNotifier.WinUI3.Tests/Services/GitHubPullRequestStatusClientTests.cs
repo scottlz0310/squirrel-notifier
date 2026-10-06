@@ -2,10 +2,9 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
-using System.Net;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using FluentAssertions;
+using Moq;
 using SquirrelNotifier.WinUI3.Services;
 using Xunit;
 
@@ -15,90 +14,73 @@ public class GitHubPullRequestStatusClientTests
 {
     private static readonly DateTimeOffset _now = new(2026, 9, 15, 0, 0, 0, TimeSpan.Zero);
 
-    [Fact]
-    public async Task GetStateAsync_ShouldReturnOpenAndBuildSafeApiRequest()
+    [Theory]
+    [InlineData("{\"state\":\"open\",\"merged_at\":null}", "Open")]
+    [InlineData("{\"state\":\"closed\",\"merged_at\":null}", "Closed")]
+    [InlineData("{\"state\":\"closed\"}", "Closed")]
+    [InlineData("{\"state\":\"closed\",\"merged_at\":\"2026-09-11T00:00:00Z\"}", "Merged")]
+    public async Task GetStateAsync_ShouldReturnLifecycleStateThroughAuthenticatedClient(string content, string expected)
     {
-        using var handler = new RecordingHandler(_ => JsonResponse("{\"state\":\"open\",\"merged_at\":null}"));
-        using var httpClient = new HttpClient(handler);
-        using var client = new GitHubPullRequestStatusClient(httpClient);
+        Mock<IGhApiClient> api = CreateApi(GhApiResult.Success(content));
+        GitHubPullRequestStatusClient client = new(api.Object);
+        using CancellationTokenSource cts = new();
 
-        PullRequestLifecycleState result = await client.GetStateAsync("owner/repo", 42, CancellationToken.None);
+        PullRequestLifecycleState result = await client.GetStateAsync("private-owner/private-repo", 42, cts.Token);
 
-        result.Should().Be(PullRequestLifecycleState.Open);
-        handler.Request!.RequestUri!.ToString().Should().Be("https://api.github.com/repos/owner/repo/pulls/42");
-        handler.Request.Headers.UserAgent.Should().ContainSingle(value => value.Product != null && value.Product.Name == "Squirrel-Notifier-WinUI3");
-        handler.Request.Headers.Accept.Should().ContainSingle(value => value.MediaType == "application/vnd.github+json");
+        result.ToString().Should().Be(expected);
+        api.Verify(a => a.GetAsync("repos/private-owner/private-repo/pulls/42", "{state, merged_at}", false, cts.Token), Times.Once);
     }
 
-    [Fact]
-    public async Task GetStateAsync_ShouldDistinguishClosedAndMerged()
+    [Theory]
+    [InlineData(401, "認証が必要です")]
+    [InlineData(403, "権限がありません")]
+    [InlineData(404, "Not Found (HTTP 404)")]
+    [InlineData(null, "gh コマンドが見つかりません")]
+    [InlineData(null, "gh の実行がタイムアウトしました")]
+    public async Task GetStateAsync_ShouldThrowWithoutAssumingClosed_WhenLookupFails(int? status, string error)
     {
-        using GitHubPullRequestStatusClient closedClient = CreateClient("{\"state\":\"closed\",\"merged_at\":null}");
-        using GitHubPullRequestStatusClient mergedClient = CreateClient("{\"state\":\"closed\",\"merged_at\":\"2026-09-11T00:00:00Z\"}");
-        using GitHubPullRequestStatusClient closedWithoutMergeDateClient = CreateClient("{\"state\":\"closed\"}");
-
-        PullRequestLifecycleState closed = await closedClient.GetStateAsync("owner/repo", 1, CancellationToken.None);
-        PullRequestLifecycleState merged = await mergedClient.GetStateAsync("owner/repo", 2, CancellationToken.None);
-        PullRequestLifecycleState closedWithoutMergeDate = await closedWithoutMergeDateClient.GetStateAsync("owner/repo", 3, CancellationToken.None);
-
-        closed.Should().Be(PullRequestLifecycleState.Closed);
-        merged.Should().Be(PullRequestLifecycleState.Merged);
-        closedWithoutMergeDate.Should().Be(PullRequestLifecycleState.Closed);
-    }
-
-    [Fact]
-    public async Task GetStateAsync_ShouldThrow_WhenGitHubReturnsError()
-    {
-        using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
-        using var client = new GitHubPullRequestStatusClient(new HttpClient(handler));
+        GitHubPullRequestStatusClient client = CreateClient(GhApiResult.Failure(status, error));
 
         Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
 
-        await act.Should().ThrowAsync<HttpRequestException>().WithMessage("*HTTP 404*");
+        (await act.Should().ThrowAsync<HttpRequestException>().WithMessage($"*owner/repo#42*{error}*"))
+            .Which.Should().NotBeOfType<GitHubRateLimitException>();
     }
 
-    public static TheoryData<HttpStatusCode, string?, string?, string?, DateTimeOffset> RateLimitResponses => new()
+    public static TheoryData<int, string?, string?, string?, DateTimeOffset> RateLimitResponses => new()
     {
-        { HttpStatusCode.TooManyRequests, "60", null, null, _now.AddSeconds(60) },
-        { HttpStatusCode.Forbidden, "Tue, 15 Sep 2026 01:00:00 GMT", "0", "1789430400", new DateTimeOffset(2026, 9, 15, 1, 0, 0, TimeSpan.Zero) },
-        { HttpStatusCode.Forbidden, null, "0", "1789434000", DateTimeOffset.FromUnixTimeSeconds(1789434000) },
-        { HttpStatusCode.TooManyRequests, null, "0", "1789434000", DateTimeOffset.FromUnixTimeSeconds(1789434000) },
+        { 429, "60", null, null, _now.AddSeconds(60) },
+        { 403, "Tue, 15 Sep 2026 01:00:00 GMT", "0", "1789430400", new DateTimeOffset(2026, 9, 15, 1, 0, 0, TimeSpan.Zero) },
+        { 403, null, "0", "1789434000", DateTimeOffset.FromUnixTimeSeconds(1789434000) },
+        { 429, null, "0", "1789434000", DateTimeOffset.FromUnixTimeSeconds(1789434000) },
     };
 
     [Theory]
     [MemberData(nameof(RateLimitResponses))]
     public async Task GetStateAsync_ShouldThrowRateLimitException_WhenResetTimeIsProvided(
-        HttpStatusCode statusCode,
-        string? retryAfter,
-        string? remaining,
-        string? reset,
-        DateTimeOffset expectedResetAt)
+        int statusCode, string? retryAfter, string? remaining, string? reset, DateTimeOffset expectedResetAt)
     {
-        using GitHubPullRequestStatusClient client = CreateErrorClient(statusCode, retryAfter, remaining, reset);
+        GitHubPullRequestStatusClient client = CreateErrorClient(statusCode, retryAfter, remaining, reset);
 
         Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
 
-        (await act.Should().ThrowAsync<GitHubRateLimitException>())
-            .Which.ResetAt.Should().Be(expectedResetAt);
+        (await act.Should().ThrowAsync<GitHubRateLimitException>()).Which.ResetAt.Should().Be(expectedResetAt);
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.Forbidden, null, null, null)]
-    [InlineData(HttpStatusCode.Forbidden, null, "10", "1789434000")]
-    [InlineData(HttpStatusCode.TooManyRequests, null, "0", null)]
-    [InlineData(HttpStatusCode.ServiceUnavailable, "60", "0", "1789434000")]
+    [InlineData(403, null, null, null)]
+    [InlineData(403, null, "10", "1789434000")]
+    [InlineData(429, null, "0", null)]
+    [InlineData(429, "invalid", "0", "invalid")]
+    [InlineData(503, "60", "0", "1789434000")]
     public async Task GetStateAsync_ShouldThrowGeneralHttpError_WhenResetTimeIsUnavailable(
-        HttpStatusCode statusCode,
-        string? retryAfter,
-        string? remaining,
-        string? reset)
+        int statusCode, string? retryAfter, string? remaining, string? reset)
     {
-        using GitHubPullRequestStatusClient client = CreateErrorClient(statusCode, retryAfter, remaining, reset);
+        GitHubPullRequestStatusClient client = CreateErrorClient(statusCode, retryAfter, remaining, reset);
 
         Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
 
-        (await act.Should().ThrowAsync<HttpRequestException>())
-            .Which.Should().NotBeOfType<GitHubRateLimitException>();
+        (await act.Should().ThrowAsync<HttpRequestException>()).Which.Should().NotBeOfType<GitHubRateLimitException>();
     }
 
     [Theory]
@@ -109,7 +91,7 @@ public class GitHubPullRequestStatusClientTests
     [InlineData("not-json")]
     public async Task GetStateAsync_ShouldThrow_WhenResponseIsInvalid(string content)
     {
-        using GitHubPullRequestStatusClient client = CreateClient(content);
+        GitHubPullRequestStatusClient client = CreateClient(GhApiResult.Success(content));
 
         Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
 
@@ -121,105 +103,50 @@ public class GitHubPullRequestStatusClientTests
     [InlineData("owner/repo", 0)]
     [InlineData("owner/repo/other", 1)]
     [InlineData("owner/repo?token=secret", 1)]
-    public async Task GetStateAsync_ShouldThrow_WhenReferenceIsInvalid(string repository, int prNumber)
+    public async Task GetStateAsync_ShouldThrowWithoutCallingApi_WhenReferenceIsInvalid(string repository, int prNumber)
     {
-        using GitHubPullRequestStatusClient client = CreateClient("{\"state\":\"open\"}");
+        Mock<IGhApiClient> api = CreateApi(GhApiResult.Success("{\"state\":\"open\"}"));
+        GitHubPullRequestStatusClient client = new(api.Object);
 
         Func<Task> act = () => client.GetStateAsync(repository, prNumber, CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentException>();
+        api.Verify(a => a.GetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public void Constructor_ShouldThrow_WhenTimeoutIsNotPositive()
+    public async Task GetStateAsync_ShouldPropagateCallerCancellation()
     {
-        Action act = () => _ = new GitHubPullRequestStatusClient(requestTimeout: TimeSpan.Zero);
+        using CancellationTokenSource cts = new();
+        Mock<IGhApiClient> api = new();
+        api.Setup(a => a.GetAsync(It.IsAny<string>(), It.IsAny<string>(), false, cts.Token))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        GitHubPullRequestStatusClient client = new(api.Object);
 
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Func<Task> act = () => client.GetStateAsync("owner/repo", 42, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
-    [Fact]
-    public void Constructor_ShouldPreserveExistingRequestHeaders()
+    private static GitHubPullRequestStatusClient CreateClient(GhApiResult result)
+        => new(CreateApi(result).Object, new FixedTimeProvider(_now));
+
+    private static Mock<IGhApiClient> CreateApi(GhApiResult result)
     {
-        using var httpClient = new HttpClient(new RecordingHandler(_ => JsonResponse("{\"state\":\"open\"}")));
-        httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("existing-client", "1.0"));
-        httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/custom"));
-
-        using var client = new GitHubPullRequestStatusClient(httpClient);
-
-        httpClient.DefaultRequestHeaders.UserAgent.Should().ContainSingle(value => value.Product != null && value.Product.Name == "existing-client");
-        httpClient.DefaultRequestHeaders.Accept.Should().ContainSingle(value => value.MediaType == "application/custom");
+        Mock<IGhApiClient> api = new();
+        api.Setup(a => a.GetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+        return api;
     }
 
-    [Fact]
-    public async Task Dispose_ShouldDisposeOwnedHttpClient()
-    {
-        var client = new GitHubPullRequestStatusClient();
-        client.Dispose();
-
-        Func<Task> act = () => client.GetStateAsync("owner/repo", 42, CancellationToken.None);
-
-        await act.Should().ThrowAsync<ObjectDisposedException>();
-    }
-
-    private static GitHubPullRequestStatusClient CreateClient(string content)
-        => new(new HttpClient(new RecordingHandler(_ => JsonResponse(content))));
-
-    private static GitHubPullRequestStatusClient CreateErrorClient(
-        HttpStatusCode statusCode,
-        string? retryAfter,
-        string? remaining,
-        string? reset)
-    {
-        var handler = new RecordingHandler(_ =>
+    private static GitHubPullRequestStatusClient CreateErrorClient(int statusCode, string? retryAfter, string? remaining, string? reset)
+        => CreateClient(GhApiResult.Failure(statusCode, "GitHub API の照会に失敗しました") with
         {
-            var response = new HttpResponseMessage(statusCode);
-            AddHeaderIfPresent(response, "Retry-After", retryAfter);
-            AddHeaderIfPresent(response, "x-ratelimit-remaining", remaining);
-            AddHeaderIfPresent(response, "x-ratelimit-reset", reset);
-            return response;
+            RateLimitHeaders = new GhApiRateLimitHeaders(retryAfter, remaining, reset),
         });
-        return new GitHubPullRequestStatusClient(new HttpClient(handler), timeProvider: new FixedTimeProvider(_now));
-    }
-
-    private static void AddHeaderIfPresent(HttpResponseMessage response, string name, string? value)
-    {
-        if (value is not null)
-        {
-            response.Headers.TryAddWithoutValidation(name, value);
-        }
-    }
-
-    private static HttpResponseMessage JsonResponse(string content)
-    {
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(content),
-        };
-        response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        return response;
-    }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
-    }
-
-    private sealed class RecordingHandler : HttpMessageHandler
-    {
-        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responseFactory;
-
-        public RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
-        {
-            _responseFactory = responseFactory;
-        }
-
-        public HttpRequestMessage? Request { get; private set; }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Request = request;
-            return Task.FromResult(_responseFactory(request));
-        }
     }
 }

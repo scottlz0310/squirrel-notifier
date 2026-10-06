@@ -114,7 +114,6 @@ public partial class App : Application
         await _subscriptionService.DisposeAsync().ConfigureAwait(false);
         await _reviewEventCleanupCoordinator.DisposeAsync().ConfigureAwait(false);
         await _workspaceCleanupService.DisposeAsync().ConfigureAwait(false);
-        _pullRequestStatusClient.Dispose();
         _autoUpdateService.Dispose();
         _rateLimitReminderService.Dispose();
     }

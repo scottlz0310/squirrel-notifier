@@ -32,11 +32,11 @@ internal sealed class PullRequestClosedEventArgs : EventArgs
 
 /// <summary>
 /// Recent review events の PR 状態を確認し、マージ済み・クローズ済みのイベントを片付ける.
-/// 照会は PR 単位にまとめ、未認証 GitHub API のレート制限を消費し尽くさない予算内で行う.
+/// 照会は PR 単位にまとめ、認証済み GitHub API を巡回の予算内で利用する.
 /// </summary>
 internal sealed class ReviewEventCleanupCoordinator : IAsyncDisposable
 {
-    // 未認証 GitHub API（60 req/h / IP）の半分を上限にし、残りを更新チェック等に残す。
+    // 認証を他の gh 利用と共有するため、認証移行後も巡回の予算を維持する。
     // 巡回の照会数は任意の 1 時間で容量 5 + 補充 25 = 30 回を超えない。
     private const int _requestBurstCapacity = 5;
     private const int _requestRefillPerHour = 25;

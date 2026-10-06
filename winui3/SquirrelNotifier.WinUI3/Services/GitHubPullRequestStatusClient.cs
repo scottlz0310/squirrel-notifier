@@ -4,7 +4,6 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using SquirrelNotifier.WinUI3.Helpers;
@@ -44,36 +43,17 @@ internal sealed class GitHubRateLimitException : HttpRequestException
     public DateTimeOffset ResetAt { get; }
 }
 
-internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, IDisposable
+internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient
 {
-    private const string _apiBaseUrl = "https://api.github.com/";
-    private static readonly TimeSpan _defaultRequestTimeout = TimeSpan.FromSeconds(5);
-    private readonly HttpClient _httpClient;
-    private readonly bool _ownsHttpClient;
-    private readonly TimeSpan _requestTimeout;
+    private readonly IGhApiClient _ghApiClient;
     private readonly TimeProvider _timeProvider;
 
     public GitHubPullRequestStatusClient(
-        HttpClient? httpClient = null,
-        TimeSpan? requestTimeout = null,
+        IGhApiClient? ghApiClient = null,
         TimeProvider? timeProvider = null)
     {
-        TimeSpan timeout = requestTimeout ?? _defaultRequestTimeout;
-        if (timeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(requestTimeout), "GitHub API のタイムアウトは正の値である必要があります。");
-        }
-
-        _httpClient = httpClient ?? new HttpClient();
-        _ownsHttpClient = httpClient is null;
-        _requestTimeout = timeout;
+        _ghApiClient = ghApiClient ?? new GhApiClient(includeResponseHeaders: true);
         _timeProvider = timeProvider ?? TimeProvider.System;
-        ApplicationUserAgent.AddDefaultIfMissing(_httpClient);
-
-        if (_httpClient.DefaultRequestHeaders.Accept.Count == 0)
-        {
-            _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-        }
     }
 
     public async Task<PullRequestLifecycleState> GetStateAsync(
@@ -82,27 +62,26 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
         CancellationToken cancellationToken)
     {
         (string owner, string repo) = ParseRepository(repository, prNumber);
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(_requestTimeout);
-
         string requestPath = $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repo)}/pulls/{prNumber}";
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(_apiBaseUrl), requestPath));
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+        GhApiResult response = await _ghApiClient.GetAsync(
+            requestPath,
+            "{state, merged_at}",
+            paginate: false,
+            cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccess)
         {
             if (TryGetRateLimitResetTime(response, out DateTimeOffset resetAt))
             {
                 throw new GitHubRateLimitException(
-                    $"GitHub API rate limit exceeded for {repository}#{prNumber}: HTTP {(int)response.StatusCode} ({response.StatusCode}).",
+                    $"GitHub API のレート制限に達しました: {repository}#{prNumber}。{response.Error}",
                     resetAt);
             }
 
             throw new HttpRequestException(
-                $"GitHub PR status request failed for {repository}#{prNumber}: HTTP {(int)response.StatusCode} ({response.StatusCode}).");
+                $"GitHub PR 状態の取得に失敗しました: {repository}#{prNumber}。{response.Error}");
         }
 
-        string content = await response.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
-        using JsonDocument document = JsonDocument.Parse(content);
+        using JsonDocument document = JsonDocument.Parse(response.Output);
         JsonElement root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object
             || !root.TryGetProperty("state", out JsonElement stateElement)
@@ -128,25 +107,19 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
         throw new JsonException($"GitHub PR status response for {repository}#{prNumber} contained an unsupported state: {state}.");
     }
 
-    public void Dispose()
-    {
-        if (_ownsHttpClient)
-        {
-            _httpClient.Dispose();
-        }
-    }
-
     // GitHub の案内に従い retry-after を優先し、無ければ残数 0 のときの x-ratelimit-reset を使う。
     // 再開時刻を決められない 403 / 429 は権限エラー等と区別できないため、通常の失敗として扱う。
-    private bool TryGetRateLimitResetTime(HttpResponseMessage response, out DateTimeOffset resetAt)
+    private bool TryGetRateLimitResetTime(GhApiResult response, out DateTimeOffset resetAt)
     {
         resetAt = default;
-        if (response.StatusCode is not (HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests))
+        if (response.HttpStatus is not (403 or 429) || response.RateLimitHeaders is not GhApiRateLimitHeaders headers)
         {
             return false;
         }
 
-        RetryConditionHeaderValue? retryAfter = response.Headers.RetryAfter;
+        RetryConditionHeaderValue? retryAfter = RetryConditionHeaderValue.TryParse(headers.RetryAfter, out RetryConditionHeaderValue? parsedRetryAfter)
+            ? parsedRetryAfter
+            : null;
         if (retryAfter?.Delta is TimeSpan delta)
         {
             resetAt = _timeProvider.GetUtcNow() + delta;
@@ -159,9 +132,9 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
             return true;
         }
 
-        if (GetSingleHeaderValue(response, "x-ratelimit-remaining") == "0"
+        if (headers.Remaining == "0"
             && long.TryParse(
-                GetSingleHeaderValue(response, "x-ratelimit-reset"),
+                headers.Reset,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
                 out long resetEpochSeconds))
@@ -172,9 +145,6 @@ internal sealed class GitHubPullRequestStatusClient : IPullRequestStatusClient, 
 
         return false;
     }
-
-    private static string? GetSingleHeaderValue(HttpResponseMessage response, string name)
-        => response.Headers.TryGetValues(name, out IEnumerable<string>? values) ? values.FirstOrDefault() : null;
 
     private static (string Owner, string Repo) ParseRepository(string repository, int prNumber)
     {
