@@ -40,13 +40,16 @@ internal sealed class AgentExecutionViewModel : INotifyPropertyChanged
         bool autoCloseEnabled,
         SecretMasker masker,
         ProgressEventSupport progressEventSupport = ProgressEventSupport.Structured,
-        bool initiallyAlwaysOnTop = false)
+        bool initiallyAlwaysOnTop = false,
+        LauncherExecutionSettings? executionSettings = null)
     {
         ArgumentNullException.ThrowIfNull(masker);
         Title = title ?? string.Empty;
         _autoCloseEnabled = autoCloseEnabled;
         _masker = masker;
         InitiallyAlwaysOnTop = initiallyAlwaysOnTop;
+        ModelText = FormatSelection("Model", executionSettings?.Model, executionSettings?.ModelSource);
+        EffortText = FormatSelection("Effort", executionSettings?.Effort, executionSettings?.EffortSource);
 
         // 対応度はあくまで初期表示のヒント。None でも progress event を受信したら
         // ApplyProgress が phase 表示へ切り替える（カスタム構成の producer を妨げない #151）
@@ -62,6 +65,13 @@ internal sealed class AgentExecutionViewModel : INotifyPropertyChanged
     public string Title { get; }
 
     public bool InitiallyAlwaysOnTop { get; }
+
+    public string ModelText { get; }
+
+    public string EffortText { get; }
+
+    private string FormatSelection(string label, string? value, string? source)
+        => string.IsNullOrWhiteSpace(value) ? $"{label}: CLI既定" : $"{label}: {_masker.Mask(value.Replace('\r', ' ').Replace('\n', ' '))}（{source}）";
 
     /// <summary>Gets 表示用ログ行（サニタイズ・マスキング適用済み、rolling buffer 上限あり）.</summary>
     public ObservableCollection<AgentLogLine> LogLines { get; } = new();

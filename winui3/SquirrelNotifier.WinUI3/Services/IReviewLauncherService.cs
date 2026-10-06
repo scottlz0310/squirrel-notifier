@@ -8,6 +8,8 @@ using SquirrelNotifier.WinUI3.Models;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
+internal sealed record LauncherLaunchInfo(IReadOnlyList<string> Arguments, string WorkingDirectory);
+
 internal interface IReviewLauncherService
 {
     /// <summary>
@@ -33,7 +35,7 @@ internal interface IReviewLauncherService
 
     void Cancel();
 
-    Task<IReadOnlyList<string>> GetLaunchArgumentsAsync(
+    Task<LauncherLaunchInfo> GetLaunchInfoAsync(
         ReviewEvent reviewEvent,
         LauncherRole role,
         CancellationToken cancellationToken = default);

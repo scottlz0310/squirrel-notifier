@@ -131,14 +131,16 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
     }
 
-    public async Task<IReadOnlyList<string>> GetLaunchArgumentsAsync(
+    public async Task<LauncherLaunchInfo> GetLaunchInfoAsync(
         ReviewEvent reviewEvent,
         LauncherRole role,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
         LauncherLaunchPlan plan = await CreateLaunchPlanAsync(reviewEvent, role, cancellationToken).ConfigureAwait(false);
-        return LauncherArgumentBuilder.BuildArguments(plan.ArgumentsTemplate, reviewEvent, plan.SessionId?.ToString("D"));
+        return new LauncherLaunchInfo(
+            LauncherArgumentBuilder.BuildArguments(plan.ArgumentsTemplate, reviewEvent, plan.SessionId?.ToString("D")),
+            _workingDirectoryResolver.Resolve(reviewEvent, role));
     }
 
     // 起動せずに、実際に LaunchAsync が実行するのと同じスロット選択・引数展開を適用した
