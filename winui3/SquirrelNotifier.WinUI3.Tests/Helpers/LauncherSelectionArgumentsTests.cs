@@ -11,6 +11,16 @@ namespace SquirrelNotifier.WinUI3.Tests.Helpers;
 public class LauncherSelectionArgumentsTests
 {
     [Theory]
+    [InlineData("copilot", "copilot", "copilot")]
+    [InlineData("custom", "C:\\tools\\CODEX.exe", "codex")]
+    [InlineData("custom", "C:\\tools\\claude.cmd", "claude")]
+    [InlineData("custom", "unknown-wrapper", null)]
+    public void ResolveAgentId_ShouldIdentifySettingsWithoutDependingOnQuotaSupport(string preset, string command, string? expected)
+    {
+        LauncherSelectionArguments.ResolveAgentId(preset, command).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData("agy", "--model gemini-flash --effort high", "gemini-flash", "high")]
     [InlineData("claude", "--model=sonnet --effort=medium", "sonnet", "medium")]
     [InlineData("copilot", "--model gpt-6 --reasoning-effort high", "gpt-6", "high")]

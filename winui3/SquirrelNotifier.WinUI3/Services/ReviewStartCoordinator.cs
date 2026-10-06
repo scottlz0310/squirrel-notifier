@@ -333,9 +333,12 @@ internal sealed class ReviewStartCoordinator
         {
             AppSettings settings = _settingsService.Settings;
             string? activeAgentId = _settingsService.ResolveLauncherRateLimitAgentId(role);
+            string? executionAgentId = LauncherSelectionArguments.ResolveAgentId(
+                role == LauncherRole.Reviewer ? settings.ReviewerLauncherPresetId : settings.ReviewedLauncherPresetId,
+                role == LauncherRole.Reviewer ? settings.ReviewerLauncherCommandPath : settings.ReviewedLauncherCommandPath);
             LauncherLaunchInfo launchInfo = await _launcherService.GetLaunchInfoAsync(reviewEvent, role, cancellationToken);
             AgyModelSelection modelSelection = new(null, null);
-            if (activeAgentId == "agy")
+            if (executionAgentId == "agy")
             {
                 modelSelection = await _agyModelSelectionService.ResolveAsync(launchInfo.Arguments, cancellationToken);
                 if (modelSelection.Error is not null)
@@ -345,7 +348,7 @@ internal sealed class ReviewStartCoordinator
             }
 
             LauncherExecutionSettings executionSettings = await _executionSettingsService.ResolveAsync(
-                activeAgentId, launchInfo.Arguments, launchInfo.WorkingDirectory, modelSelection.Model, cancellationToken);
+                executionAgentId, launchInfo.Arguments, launchInfo.WorkingDirectory, modelSelection.Model, cancellationToken);
             foreach (string error in executionSettings.Errors)
             {
                 await _loggingService.WriteAsync(error);

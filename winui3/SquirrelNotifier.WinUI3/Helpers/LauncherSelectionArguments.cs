@@ -2,6 +2,7 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using SquirrelNotifier.WinUI3.Models;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -9,6 +10,11 @@ namespace SquirrelNotifier.WinUI3.Helpers;
 
 internal sealed record LauncherSelectionArguments(string? Model, string? Effort, string? Profile, bool IgnoreUserConfig, IReadOnlyList<string> SettingsOverrides, string? SettingsSources, string? Directory)
 {
+    public static string? ResolveAgentId(string presetId, string commandPath)
+        => LauncherAgentCatalog.Find(presetId)?.Id
+            ?? LauncherAgentCatalog.All.FirstOrDefault(agent =>
+                string.Equals(agent.Command, Path.GetFileNameWithoutExtension(commandPath), StringComparison.OrdinalIgnoreCase))?.Id;
+
     private static readonly HashSet<string> _valueOptions = new(StringComparer.Ordinal)
     {
         "-p", "--print", "--prompt", "-i", "--prompt-interactive", "--agent", "--conversation",
