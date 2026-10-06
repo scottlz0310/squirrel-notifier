@@ -13,15 +13,15 @@
 - emptyはrunnerの新しい専用ディレクトリを `NUGET_PACKAGES` に指定し、キャッシュを復元しない。
 - どちらの条件もキャッシュを保存しない。既存キャッシュを削除しない。
 - 計測区間はSDKセットアップ直前からCodeQL解析直後まで。証跡集計・upload時間を含めない。
-- Code Scanningへの結果・DBアップロードは行わず、JSONの測定結果だけをartifactに保存する。
+- Code Scanningへの結果・DBアップロードは行わず、測定JSON・SARIF・抽出ソースのsrc.zipをartifactに保存する。
 
 空の領域はrunnerごとに作成するため、ローカルのNuGetパッケージや本番設定には影響しない。
 SDK・CodeQL・runner imageの実際の版が条件間で一致しない場合は同条件の比較に使用しない。
 
 ## 実行と判定
 
-`.github/workflows/nuget-cache-experiment.yml` は作業ブランチへのworkflow変更push、または
-`workflow_dispatch` で実行する。通常のPR/push CIへ新しい必須jobを追加しない。
+`.github/workflows/nuget-cache-experiment.yml` は
+`workflow_dispatch` で実行する。samplesは通常の3標本と、証跡確認用の追加1標本を選べる。初回の実験は作業ブランチへのpushで起動したが、以後は明示起動だけとする。通常のPR/push CIへ新しい必須jobを追加しない。
 対象ソースSHAはworkflowの `SOURCE_SHA` に記録し、別ソースを測る際は明示的に変更する。
 
 各jobの `nuget-experiment-<sample>-<cached|empty>` artifactに `measurement.json` が残る。

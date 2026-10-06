@@ -1,10 +1,13 @@
 name: NuGet cache experiment (#184)
 
 on:
-  push:
-    branches: [ci/184-cache-experiment]
-    paths: [.github/workflows/nuget-cache-experiment.yml]
   workflow_dispatch:
+    inputs:
+      samples:
+        description: '3標本の比較、または証跡確認用の追加1標本'
+        type: choice
+        default: '[1,2,3]'
+        options: ['[1,2,3]', '[4]']
 
 permissions:
   contents: read
@@ -22,7 +25,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        sample: [1, 2, 3]
+        sample: ${{ fromJSON(inputs.samples || '[1,2,3]') }}
         packages: [cached, empty]
     name: compare-${{ matrix.sample }}-${{ matrix.packages }}
     steps:
@@ -99,9 +102,9 @@ jobs:
               $reader = [IO.StreamReader]::new($entry.Open())
               try { $source = $reader.ReadToEnd() } finally { $reader.Dispose() }
               $path = $entry.FullName.Replace('\', '/')
-              $workspacePath = $env:GITHUB_WORKSPACE.Replace('\', '/').TrimStart('/')
-              $packagePath = $packageRoot.Replace('\', '/').TrimStart('/')
-              $path = $path.Replace($workspacePath, 'workspace').Replace($packagePath, 'packages')
+              $workspacePath = $env:GITHUB_WORKSPACE.Replace('\', '/').Replace(':', '_').TrimStart('/')
+              $packagePath = $packageRoot.Replace('\', '/').Replace(':', '_').TrimStart('/')
+              $path = $path.Replace($workspacePath, 'workspace', [StringComparison]::OrdinalIgnoreCase).Replace($packagePath, 'packages', [StringComparison]::OrdinalIgnoreCase)
               $kind = if ($path -match '/obj/') { 'generated' } elseif ($path -match 'workspace/') { 'repository' } else { 'dependency' }
               $inventory.Add([ordered]@{
                 path = $path
@@ -116,7 +119,7 @@ jobs:
           $analysis = @($sarifFiles | ForEach-Object {
             $sarif = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
             foreach ($run in $sarif.runs) {
-              [ordered]@{ toolVersion = $run.tool.driver.version; rules = @($run.tool.driver.rules).Count; results = @($run.results).Count }
+              [ordered]@{ tools = @(@($run.tool.driver) + @($run.tool.extensions) | ForEach-Object { [ordered]@{ name = $_.name; version = $_.version; semanticVersion = $_.semanticVersion; rules = @($_.rules).Count } }); results = @($run.results).Count }
             }
           })
           [ordered]@{
@@ -131,12 +134,14 @@ jobs:
             packageFileCount = $packageFiles.Count
             analysis = $analysis
             sources = @($inventory | Sort-Object path)
-          } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $output 'measurement.json') -Encoding utf8
+          } | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $output 'measurement.json') -Encoding utf8
+          Copy-Item -LiteralPath $sarifFiles.FullName -Destination $output
+          Copy-Item -LiteralPath "$env:RUNNER_TEMP/experiment-codeql/csharp/src.zip" -Destination $output
 
       - name: Upload measurements
         uses: actions/upload-artifact@v7
         with:
           name: nuget-experiment-${{ matrix.sample }}-${{ matrix.packages }}
-          path: ${{ runner.temp }}/experiment-results/measurement.json
+          path: ${{ runner.temp }}/experiment-results
           if-no-files-found: error
           retention-days: 14
