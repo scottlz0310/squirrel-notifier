@@ -63,7 +63,7 @@ if (-not $SkipBuild) {
 
 $appPath = Resolve-BuildOutput $appProject 'SquirrelNotifier.WinUI3.exe' '*\bin\x64\Release\net10.0-windows*\SquirrelNotifier.WinUI3.exe'
 $launcherPath = Resolve-BuildOutput $launcherProject 'codex.exe' '*\x64\Release\net10.0\win-x64\codex.exe'
-$subscriberPath = Resolve-BuildOutput $subscriberProject 'mcp-resource-subscriber.exe' '*\x64\Release\net10.0\win-x64\mcp-resource-subscriber.exe'
+$subscriberPath = Resolve-BuildOutput $subscriberProject 'resource-bridge-cli.exe' '*\x64\Release\net10.0\win-x64\resource-bridge-cli.exe'
 $gatewayHostPath = Resolve-BuildOutput $runnerProject 'SquirrelNotifier.HeadlessE2E.exe' '*\x64\Release\net10.0-windows*\win-x64\SquirrelNotifier.HeadlessE2E.exe'
 
 # 古いビルドを起動すると、データディレクトリの切り替えが効かず実データへ書き込みうるため、起動前に止める

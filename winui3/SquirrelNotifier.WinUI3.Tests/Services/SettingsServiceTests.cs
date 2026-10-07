@@ -53,7 +53,7 @@ public class SettingsServiceTests : IDisposable
 
         // Assert
         // pnpmBinDir=null なので pnpm プローブなし → PATH も空 → デフォルト名のまま
-        settings.SubscriberCommandPath.Should().Be("mcp-resource-subscriber");
+        settings.SubscriberCommandPath.Should().Be("resource-bridge-cli");
         settings.SubscriberArguments.Should().BeEmpty();
         settings.GatewayUrl.Should().Be("http://localhost:3000");
         settings.ResourceUri.Should().Be("queue://review/queue");
@@ -70,6 +70,20 @@ public class SettingsServiceTests : IDisposable
     {
         string result = SettingsService.ResolveCommandPath("nonexistent-tool-xyz", pnpmBinDir: null);
         result.Should().Be("nonexistent-tool-xyz");
+    }
+
+    [Theory]
+    [InlineData("mcp-resource-subscriber")]
+    [InlineData(@"C:\tools\mcp-resource-subscriber.cmd")]
+    [InlineData(@"C:\tools\custom-subscriber.cmd")]
+    public void LoadSettings_ShouldPreserveSavedSubscriberCommandPath(string commandPath)
+    {
+        _settingsService.Settings.SubscriberCommandPath = commandPath;
+        _settingsService.SaveSettings();
+
+        SettingsService reloaded = new(_settingsDirectory, pnpmBinDir: string.Empty);
+
+        reloaded.Settings.SubscriberCommandPath.Should().Be(commandPath);
     }
 
     [Fact]

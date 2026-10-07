@@ -163,8 +163,8 @@ try {
         $dummyLauncher = Get-ChildItem -LiteralPath (Join-Path (Split-Path $dummyProject) 'bin') -Recurse -Filter 'codex.exe' -File |
             Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\codex.exe' } |
             Select-Object -First 1
-        $subscriberFixture = Get-ChildItem -LiteralPath (Join-Path (Split-Path $subscriberProject) 'bin') -Recurse -Filter 'mcp-resource-subscriber.exe' -File |
-            Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\mcp-resource-subscriber.exe' } |
+        $subscriberFixture = Get-ChildItem -LiteralPath (Join-Path (Split-Path $subscriberProject) 'bin') -Recurse -Filter 'resource-bridge-cli.exe' -File |
+            Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\resource-bridge-cli.exe' } |
             Select-Object -First 1
         $runner = Get-ChildItem -LiteralPath (Join-Path (Split-Path $runnerProject) 'bin') -Recurse -Filter 'SquirrelNotifier.HeadlessE2E.exe' -File |
             Where-Object { $_.FullName -like '*\x64\Release\net10.0-windows10.0.26100.0\win-x64\SquirrelNotifier.HeadlessE2E.exe' } |

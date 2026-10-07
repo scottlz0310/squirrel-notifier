@@ -41,7 +41,7 @@ scenario では一時 PATH から codex として解決し、それ以外では�
 dummy は引数、working directory、標準入力のリダイレクト状態、出力形式、終了コードを
 専用 root 内の JSONL へ記録します。
 
-dummy subscriber は `mcp-resource-subscriber.exe` として build され、loopback の fake Gateway
+dummy subscriber は `resource-bridge-cli.exe` として build され、loopback の fake Gateway
 だけへ接続します。`gateway-auth-flow` では実製品の `McpLoginService` と
 `McpSubscriptionService` がこのプロセスを起動し、`review-event-flow` では
 `ReviewRegistrationService` / `EnqueueReviewService` も同じ実プロセス境界を通ります。

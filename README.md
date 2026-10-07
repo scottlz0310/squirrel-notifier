@@ -11,7 +11,7 @@ Squirrel Notifierは、mcp-gateway を経由して MCP resource update（レビ�
 
 ## 機能
 
-- mcp-gateway を経由したレビュー更新イベントの監視（mcp-resource-subscriberを使用）
+- mcp-gateway を経由したレビュー更新イベントの監視（resource-bridge-cliを使用）
 - 更新時のトレイポップアップ通知
 - ログファイルへの記録
 - システムトレイ常駐
@@ -21,14 +21,16 @@ Squirrel Notifierは、mcp-gateway を経由して MCP resource update（レビ�
 
 Squirrel Notifier の購読機能は、以下の外部ツールと連携して動作します。
 
-### mcp-resource-subscriber
+### resource-bridge-cli
+
+新CLI v0.7.0（Node >=26.10.0）を使用します。既存の認証キャッシュは旧名の保存先を引き続き使います。保存済みCommand Pathは自動変更しないため、新CLI配布後に利用者が新名またはそのフルパスを指定して切り替えます。
 
 MCP リソースの購読・イベント受信を担う外部 CLI ツールです。Squirrel Notifier には同梱されていないため、**別途インストールが必要**です。
 
 - **リポジトリ**: [scottlz0310/mcp-resource-subscriber](https://github.com/scottlz0310/mcp-resource-subscriber)
-- **インストール**: [リリースページ](https://github.com/scottlz0310/mcp-resource-subscriber/releases) からバイナリを取得し、PATH の通ったディレクトリに配置してください。
+- **インストール**: `pnpm add --global resource-bridge-cli@0.7.0` で追加し、`resource-bridge-cli --version` を確認してください。Node >=26.10.0が必要です。CLIはMCPサーバーとして登録せず、Squirrelが子プロセスとして起動します。
 
-インストール後、アプリの「Settings」→「Command Path」にコマンド名（PATH に通っていれば `mcp-resource-subscriber`）またはフルパスを設定してください。
+インストール後、アプリの「Settings」→「Command Path」にコマンド名（PATH に通っていれば `resource-bridge-cli`）またはフルパスを設定してください。
 
 ### GitHub CLI（gh）
 
@@ -142,7 +144,7 @@ uninstall.cmd -KeepSettings
 
 アプリケーションを起動後、「Settings」セクションから以下の設定が可能です:
 
-- **Command Path**: mcp-resource-subscriber の絶対パス（またはPATH内のコマンド名）
+- **Command Path**: resource-bridge-cli の絶対パス（またはPATH内のコマンド名）
 - **Arguments**: 必要な固定引数（スペース区切り）
 - **Gateway URL**: mcp-gateway のエンドポイントURL（例: http://localhost:3000）
 - **Resource URI**: 監視対象の MCP リソース URI（例: queue://review/queue）
@@ -178,7 +180,7 @@ launcher の作業ディレクトリはロールごとに固定されます。�
 
 mcp-gateway が認証を要求する構成では、初回起動時に一度だけ device flow ログインが必要です。ログインが未実施のままだと、通知の購読やレビュー登録が認証エラー（HTTP 401 / `AUTH_LOGIN_REQUIRED` 等）で失敗します。
 
-認証処理そのものは mcp-resource-subscriber が担当し、取得したトークンは `%LOCALAPPDATA%\mcp-resource-subscriber\tokens.db` にキャッシュされます。Squirrel Notifier はこの CLI を安全に起動する導線・状態表示・ブラウザ導線・認証後の再購読のみを担い、トークンの取得・保存・更新は行いません。
+認証処理そのものは resource-bridge-cli が担当し、取得したトークンは `%LOCALAPPDATA%\mcp-resource-subscriber\tokens.db` にキャッシュされます。Squirrel Notifier はこの CLI を安全に起動する導線・状態表示・ブラウザ導線・認証後の再購読のみを担い、トークンの取得・保存・更新は行いません。
 
 #### アプリ内から認証する（推奨）
 
@@ -195,7 +197,7 @@ mcp-gateway が認証を要求する構成では、初回起動時に一度だ�
 アプリを使わず、ターミナルから直接ログインすることもできます。
 
 ```powershell
-mcp-resource-subscriber --login --url <Gateway URL>
+resource-bridge-cli --login --url <Gateway URL>
 ```
 
 表示された `verification-uri`（または `verification-uri-complete`）をブラウザで開き、`user-code` で承認します。
@@ -209,8 +211,8 @@ mcp-resource-subscriber --login --url <Gateway URL>
 mcp-gateway の再構築や DCR ストアのリセット後は、キャッシュ済みのクライアント登録が無効になることがあります。その場合はキャッシュを削除してから再ログインしてください。
 
 ```powershell
-mcp-resource-subscriber --logout --url <Gateway URL>
-mcp-resource-subscriber --login  --url <Gateway URL>
+resource-bridge-cli --logout --url <Gateway URL>
+resource-bridge-cli --login  --url <Gateway URL>
 ```
 
 #### 認証後の再購読

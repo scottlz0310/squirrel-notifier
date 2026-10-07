@@ -271,13 +271,13 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
-        if (_settings.SubscriberCommandPath == "mcp-resource-subscriber")
+        if (_settings.SubscriberCommandPath == "resource-bridge-cli")
         {
             // Lazy pnpm probe: only runs when the default command name needs resolution.
             // Tests pass pnpmBinDir: string.Empty to skip the probe entirely.
             string? binDir = pnpmBinDir ?? GetPnpmGlobalBinDir();
             string resolved = ResolveCommandPath(_settings.SubscriberCommandPath, binDir);
-            if (resolved != "mcp-resource-subscriber")
+            if (resolved != "resource-bridge-cli")
             {
                 _settings.SubscriberCommandPath = resolved;
                 SaveSettings();
@@ -623,7 +623,7 @@ internal sealed class SettingsService
 
 internal sealed class AppSettings
 {
-    public string SubscriberCommandPath { get; set; } = "mcp-resource-subscriber";
+    public string SubscriberCommandPath { get; set; } = "resource-bridge-cli";
 
     public string SubscriberArguments { get; set; } = string.Empty;
 

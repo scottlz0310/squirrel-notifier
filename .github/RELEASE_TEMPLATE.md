@@ -28,7 +28,7 @@ install.cmd -StartMinimized
 |------|------|
 | OS | Windows 11 24H2 (10.0.26100) 以降 |
 | ランタイム | .NET 10（self-contained のためインストール不要） |
-| 外部ツール | `mcp-resource-subscriber`（MCP 購読機能を使用する場合） |
+| 外部ツール | `resource-bridge-cli` v0.7.0以降、Node >=26.10.0（MCP 購読機能を使用する場合） |
 
-> **注意:** `mcp-resource-subscriber` は本アプリには同梱されていません。
+> **注意:** `resource-bridge-cli` は本アプリには同梱されていません。
 > MCP 購読機能を使用する場合は別途インストールし、設定画面の「Subscriber Command Path」に実行ファイルのパスを指定してください。

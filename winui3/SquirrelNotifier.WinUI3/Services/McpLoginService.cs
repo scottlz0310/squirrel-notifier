@@ -15,7 +15,7 @@ using SquirrelNotifier.WinUI3.Models;
 namespace SquirrelNotifier.WinUI3.Services;
 
 /// <summary>
-/// 設定済みの mcp-resource-subscriber を <c>--login --url &lt;gateway&gt;</c> で起動し、
+/// 設定済みの resource-bridge-cli を <c>--login --url &lt;gateway&gt;</c> で起動し、
 /// mcp-gateway の初回認証（RFC 8628 device flow）をアプリ内から開始する（#183）。
 /// OAuth / device flow / token refresh 自体は subscriber が担当し、Squirrel Notifier は
 /// 「設定済み外部 CLI の安全な起動・状態表示・ブラウザ導線・再購読」に責務を限定する。
@@ -124,7 +124,7 @@ internal sealed class McpLoginService : IGatewayLoginService
             return new McpLoginResult
             {
                 Outcome = McpLoginOutcome.Failed,
-                ErrorMessage = $"mcp-resource-subscriber の起動に失敗しました。インストール状況と Command Path 設定を確認してください: {ex.Message}",
+                ErrorMessage = $"resource-bridge-cli の起動に失敗しました。インストール状況と Command Path 設定を確認してください: {ex.Message}",
             };
         }
         finally
@@ -263,7 +263,7 @@ internal sealed class McpLoginService : IGatewayLoginService
         return string.Empty;
     }
 
-    // mcp-resource-subscriber の --version を確認し、--login 非対応の古いバージョンを事前に検出する。
+    // resource-bridge-cli の --version を確認し、--login 非対応の古いバージョンを事前に検出する。
     // 問題なければ null、問題があれば案内メッセージを返す（EnqueueReviewService と同方針）。
     private async Task<string?> CheckSubscriberVersionAsync(string resolvedPath, CancellationToken cancellationToken)
     {
@@ -290,7 +290,7 @@ internal sealed class McpLoginService : IGatewayLoginService
                 string outputDetail = string.IsNullOrEmpty(stderrDetail)
                     ? $"\"{stdoutDetail}\""
                     : $"\"{stdoutDetail}\", stderr: \"{stderrDetail}\"";
-                return $"mcp-resource-subscriber のバージョンを確認できませんでした（--version の出力: {outputDetail}）。--login には v{_minimumSubscriberVersion} 以上が必要です。";
+                return $"resource-bridge-cli のバージョンを確認できませんでした（--version の出力: {outputDetail}）。--login には v{_minimumSubscriberVersion} 以上が必要です。";
             }
 
             var detected = new Version(
@@ -300,7 +300,7 @@ internal sealed class McpLoginService : IGatewayLoginService
 
             if (detected < _minimumSubscriberVersion)
             {
-                return $"mcp-resource-subscriber のバージョンが古いため、--login を実行できません（検出: v{detected}, 必要: v{_minimumSubscriberVersion} 以上）。mcp-resource-subscriber を更新してください。";
+                return $"resource-bridge-cli のバージョンが古いため、--login を実行できません（検出: v{detected}, 必要: v{_minimumSubscriberVersion} 以上）。resource-bridge-cli を更新してください。";
             }
 
             return null;
@@ -312,7 +312,7 @@ internal sealed class McpLoginService : IGatewayLoginService
         }
         catch (Exception ex)
         {
-            return $"mcp-resource-subscriber のバージョン確認に失敗しました。インストール状況と Command Path 設定を確認してください: {ex.Message}";
+            return $"resource-bridge-cli のバージョン確認に失敗しました。インストール状況と Command Path 設定を確認してください: {ex.Message}";
         }
         finally
         {

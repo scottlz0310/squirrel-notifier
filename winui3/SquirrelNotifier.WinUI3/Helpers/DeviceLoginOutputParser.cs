@@ -7,7 +7,7 @@ using System;
 namespace SquirrelNotifier.WinUI3.Helpers;
 
 /// <summary>
-/// mcp-resource-subscriber <c>--login</c>（RFC 8628 device flow）の line-based stdout を
+/// resource-bridge-cli <c>--login</c>（RFC 8628 device flow）の line-based stdout を
 /// 1 行ずつ分類する（#183）。subscriber は認証状態を以下の行で通知する:
 /// <list type="bullet">
 /// <item><c>user-code &lt;code&gt;</c></item>

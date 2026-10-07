@@ -20,7 +20,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
     // subscriber がハングした場合に呼び出し側を待たせ続けないための上限（#208）。テストは短い値を注入する.
     private const int _defaultStartTimeoutMs = 30000;
 
-    // mcp-resource-subscriber の ErrorCode のうち、意味が確定していて非認証エラーと
+    // resource-bridge-cli の ErrorCode のうち、意味が確定していて非認証エラーと
     // 判断してよいもの。ここに含まれない ErrorCode（INTERNAL_ERROR、SUBSCRIPTION_FAILED
     // 等の詳細不明な汎用コード）は legacy 文字列マッチングにフォールバックさせる。
     private static readonly HashSet<string> _nonAuthErrorCodesWithConfirmedSemantics = new(StringComparer.OrdinalIgnoreCase)
@@ -32,7 +32,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         "AUTH_REFRESH_FAILED",
     };
 
-    // mcp-resource-subscriber v0.6.0（MCP 2026-07-28 移行）で新設された ErrorCode。
+    // 旧CLI v0.6.0（MCP 2026-07-28 移行）で新設された ErrorCode。
     // いずれも原因が確定しているため、汎用の「予期しないエラー」ではなく次の行動が
     // 分かるメッセージを返す。ホワイトリストより先に判定する。
     //
@@ -238,7 +238,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 return new SubscriptionStartResult
                 {
                     Outcome = SubscriptionStartOutcome.TimedOut,
-                    ErrorMessage = "購読の開始が時間内に完了しませんでした。mcp-resource-subscriber の設定と mcp-gateway の起動状態を確認してください。",
+                    ErrorMessage = "購読の開始が時間内に完了しませんでした。resource-bridge-cli の設定と mcp-gateway の起動状態を確認してください。",
                 };
             }
 
@@ -500,8 +500,8 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 }
 
                 LastError = string.IsNullOrEmpty(detail)
-                    ? $"mcp-resource-subscriber の起動確認に失敗しました（--help が終了コード {exitCode} で終了し、出力もありませんでした）。Subscriber Command Path 設定とインストール状況を確認してください。"
-                    : $"mcp-resource-subscriber の起動確認に失敗しました（--help が終了コード {exitCode} で終了）: {detail}";
+                    ? $"resource-bridge-cli の起動確認に失敗しました（--help が終了コード {exitCode} で終了し、出力もありませんでした）。Subscriber Command Path 設定とインストール状況を確認してください。"
+                    : $"resource-bridge-cli の起動確認に失敗しました（--help が終了コード {exitCode} で終了）: {detail}";
                 await LogAsync($"Preflight check failed. ExitCode={exitCode}. Detail: {detail}").ConfigureAwait(false);
                 return false;
             }
@@ -1045,7 +1045,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
 
     internal static (string FriendlyMessage, string ErrorTag) GetErrorInfo(string rawError, string? structuredErrorCode = null, string? diagnosticText = null)
     {
-        // 構造化された ErrorCode（mcp-resource-subscriber の JSON stdout 由来）が
+        // 構造化された ErrorCode（resource-bridge-cli の JSON stdout 由来）が
         // 得られている場合は、それを最優先で判定する。
         if (!string.IsNullOrWhiteSpace(structuredErrorCode) &&
             !structuredErrorCode.Equals("unknown", StringComparison.OrdinalIgnoreCase))
@@ -1053,7 +1053,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
             if (structuredErrorCode.Equals("AUTH_LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase) ||
                 structuredErrorCode.Equals("REAUTH_REQUIRED", StringComparison.OrdinalIgnoreCase))
             {
-                return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
+                return ("mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
             }
 
             if (_subscriptionErrorCodeMessages.TryGetValue(structuredErrorCode, out (string Message, string Tag) known))
@@ -1116,10 +1116,10 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
             textToMatch.Contains("No access token provided", StringComparison.OrdinalIgnoreCase) ||
             textToMatch.Contains("run --login", StringComparison.OrdinalIgnoreCase))
         {
-            return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
+            return ("mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", _authenticationRequiredErrorTag);
         }
 
-        // MCP_PROBE_AUTH_TOKEN を明示指定している場合、mcp-resource-subscriber は
+        // MCP_PROBE_AUTH_TOKEN を明示指定している場合、resource-bridge-cli は
         // --login のトークンキャッシュを完全に読み飛ばすため、401 の原因が env 変数側の
         // 設定不備でも --login の再認証では解消しない。両方の案内を残す。
         // "401" は単語境界付きで判定するが、それでもポート番号や URI パスセグメントの
@@ -1128,7 +1128,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         if (Regex.IsMatch(textToMatch, @"\b401\b") ||
             textToMatch.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
         {
-            return ("mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください（MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください）。", _authenticationRequiredErrorTag);
+            return ("mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください（MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください）。", _authenticationRequiredErrorTag);
         }
 
         if (textToMatch.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))

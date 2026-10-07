@@ -386,7 +386,7 @@ public sealed class SettingsCoordinatorTests : IDisposable
     }
 
     private static SettingsInput CreateInput(
-        string commandPath = "mcp-resource-subscriber",
+        string commandPath = "resource-bridge-cli",
         string gatewayUrl = "http://localhost:3000/mcp",
         string resourceUrisText = "queue://review/queue",
         string repositoryMappings = "",
