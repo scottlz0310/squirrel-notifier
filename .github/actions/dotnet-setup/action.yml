@@ -1,5 +1,5 @@
 name: .NET セットアップ
-description: .NET SDK を導入し、NuGet global packages folder をキャッシュから復元する。
+description: .NET SDK を導入し、必要に応じて NuGet global packages folder をキャッシュから復元する。
 
 outputs:
   nuget-cache-key:
@@ -10,6 +10,10 @@ outputs:
     value: ${{ steps.nuget-cache.outputs.cache-hit }}
 
 inputs:
+  restore-nuget-cache:
+    description: NuGet キャッシュを復元するか。無効時はキャッシュ出力も空になる。
+    required: false
+    default: "true"
   dotnet-version:
     description: 導入する .NET SDK のバージョン指定。
     required: false
@@ -24,6 +28,7 @@ runs:
         dotnet-version: ${{ inputs.dotnet-version }}
 
     - name: Restore NuGet cache
+      if: ${{ inputs.restore-nuget-cache == 'true' }}
       id: nuget-cache
       uses: actions/cache/restore@v6
       with:

@@ -205,8 +205,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      # 大容量キャッシュの復元を省き、この job が必要とする依存だけを取得する。
+      - name: Prepare isolated NuGet packages
+        shell: pwsh
+        run: |
+          $packageRoot = Join-Path $env:RUNNER_TEMP 'security-scan-nuget'
+          New-Item -ItemType Directory -Path $packageRoot | Out-Null
+          "NUGET_PACKAGES=$packageRoot" | Add-Content $env:GITHUB_ENV
+
       - name: Setup .NET
         uses: ./.github/actions/dotnet-setup
+        with:
+          restore-nuget-cache: "false"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
