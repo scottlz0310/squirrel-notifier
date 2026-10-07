@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - PR 状態の照会を認証済みの `gh api` に移し、private repository のマージ・クローズ済みレビューイベントも自動で片付けられるようにした。取得失敗時のイベント保持、レート制限ヘッダーに基づく待機、初期5回・毎時25回補充の巡回予算は維持する。アプリ起動ユーザーの `gh` の PATH とログイン状態を使う（#475）。
 
+### Changed
+
+- CI の security-scan だけ NuGet キャッシュの復元を省き、job 専用の空のパッケージ領域へ必要な依存を取得するようにした。同一ソースの比較実験を根拠に採用し、CodeQL の manual build・解析範囲・品質ゲートと他 job のキャッシュは維持する（#184）。
+
 ## [0.17.0] - 2026-10-03
 
 ### Added

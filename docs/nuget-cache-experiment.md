@@ -103,9 +103,15 @@ WinRTGenericInstantiationは行内容が揃い、宣言順序だけが変わっ�
 
 ## 次の判断
 
-候補はsecurity-scanだけを専用の空のNuGet領域へ変更し、同じmanual build・クエリ・品質ゲートで
-通常CIを再計測すること。今回の比較はその変更の根拠として使い、恒久変更は利用者の合意後に行う。
-他jobへの適用やキャッシュの削除はこの実験の完了に含めない。
+2026-10-07に利用者が変更範囲を承認したため、security-scanだけを専用の空のNuGet領域へ変更する。
+共通dotnet-setupの`restore-nuget-cache`は既定`true`で、security-scanだけ`false`を指定する。
+Setup .NETより前にrunner.temp内へ専用ディレクトリを作り、`GITHUB_ENV`で`NUGET_PACKAGES`を設定する。
+後続のrestore・CodeQLのmanual build・解析は同じパッケージ領域を使用する。
+他job・releaseのキャッシュ、SDK・CodeQL・解析範囲・品質ゲート・時間予算は変更せず、既存cacheも削除しない。
+
+通常CIの変更後は、同じHEADの複数runをjob時刻で再計測する。SDK・CodeQL・image revision・
+cache状態も記録し、既存3job・全体・両E2Eの時間予算を別々に照合する。
+実験の測定区間と通常CIの壁時計を混ぜず、単発の成功を継続安定性や30%目標達成とは扱わない。
 
 #184は、通常PR CIの中央値30%短縮とE2Eの時間予算を確認するまでOPENを維持する。
 このPRは比較実験・再計測記録の追加であり、Epic全体を閉じる変更ではない。
