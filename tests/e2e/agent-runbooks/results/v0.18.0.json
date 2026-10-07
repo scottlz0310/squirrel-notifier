@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "version": "0.18.0",
+  "testedCommit": "7b69fbb47a38454d3791014372b3466ba4911f90",
+  "productVersion": "0.18.0+7b69fbb47a38454d3791014372b3466ba4911f90",
+  "executedAt": "2026-10-07T04:51:53.2984237Z",
+  "executor": {
+    "agent": "codex",
+    "model": "GPT-6",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Windows 11 Home 10.0.26200",
+    "notes": "PowerShell 7.6.6。実装に関与していない独立エージェントが対話デスクトップで標準runbook toolingを実行。常駐PID12932は稼働継続。全run.jsonのcommitとProductVersionが対象に一致。証跡保管先: C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261007-134939-isolated-launch / C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261007-135004-review-event-flow / C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261007-135038-register-while-stopped"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 13,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed."
+        },
+        {
+          "kind": "log",
+          "path": "evidence/launch-checks.json",
+          "summary": "テストPID 28888は対象Release exeから起動しResponding=true。既定インスタンスPID 12932はPrograms\\SquirrelNotifierの別プロセスとして稼働継続。dataRootのsettings.jsonとlogs/winui3.logが存在。"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "Stop-RunbookEnvironment実行済み。isolated=true、realSettingsUnchanged=true、findings=[]。アプリ・fake GatewayのPID不在を再確認、fixture残留プロセスなし。"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 23,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "停止後StartButton isEnabled=true。PrimaryButton（購読を開始して登録）をマウスでクリック後、StopButton isEnabled=true。"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/subscriber.jsonl",
+          "summary": "mode=callは正確に1行。--tool enqueue_review、--url=http://127.0.0.1:56069/、--args={\"owner\":\"fixture-owner\",\"repo\":\"fixture-repository\",\"prNumber\":320,\"reason\":\"opened\"}、exitCode=0、hasAuthorization=false。"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "13:50:47 State: Stopped → 13:50:57 State: Running → Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened) → 13:50:58 enqueue_review call finished. ExitCode=0 の順を確認。"
+        },
+        {
+          "kind": "log",
+          "path": "evidence/health.jsonl",
+          "summary": "全8操作後のResponding=true。"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "Stop-RunbookEnvironment実行済み。isolated=true、realSettingsUnchanged=true、findings=[]。アプリ・fake GatewayのPID不在を再確認、fixture残留プロセスなし。"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 21,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "TitleText=synchronized: second-owner/second-repository#308。ReviewEventListに#307/#308/#309の正確に3件。#307のLaunchReviewerButtonをマウスでクリック後、ラウンド1のreviewer 実行完了（結果未確認）を確認。"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/launcher.jsonl",
+          "summary": "arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectory=dataRoot\\launcher-workspace\\reviewer\\fixture-owner\\fixture-repository\\307。"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "Review process finished. ExitCode=0 と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました（結果未確認）。を確認。fixture PR状態の読取り404はREADME記載の既知挙動。"
+        },
+        {
+          "kind": "log",
+          "path": "evidence/health.jsonl",
+          "summary": "全5操作後のResponding=true。"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "Stop-RunbookEnvironment実行済み。isolated=true、realSettingsUnchanged=true、findings=[]。アプリ・fake GatewayのPID不在を再確認、fixture残留プロセスなし。"
+        }
+      ],
+      "flaky": []
+    }
+  ]
+}
