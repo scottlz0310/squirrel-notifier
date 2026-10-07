@@ -4,7 +4,7 @@
   "phase": "headless",
   "timeoutSeconds": 120,
   "components": {
-    "mcp-resource-subscriber": "0.6.0"
+    "resource-bridge-cli": "0.6.0"
   },
   "fixture": "review-registration/event-flow",
   "expectedOutcome": "ENQUEUE_NOTIFICATION_AND_DUMMY_LAUNCHER",

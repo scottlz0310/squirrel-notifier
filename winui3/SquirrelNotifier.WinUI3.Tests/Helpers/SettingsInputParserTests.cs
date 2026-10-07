@@ -93,7 +93,7 @@ public sealed class SettingsInputParserTests
     {
         LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
         return new SettingsInput(
-            "mcp-resource-subscriber",
+            "resource-bridge-cli",
             "--skip-resource-list-check",
             "http://localhost:3000/mcp",
             resourceUrisText,

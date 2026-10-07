@@ -15,7 +15,7 @@ namespace SquirrelNotifier.E2EDummySubscriber;
     Justification = "subscriber fixture の stdout / stderr は決定的な wire fixture であり、翻訳対象ではない。")]
 internal static class Program
 {
-    private const string _version = "v0.6.0";
+    private const string _version = "v0.7.0";
     private const string _fixtureToken = "fixture-token-never-written-to-artifacts";
     private const string _observationPathVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_OBSERVATION_PATH";
     private const string _tokenCachePathVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_TOKEN_CACHE_PATH";
@@ -49,7 +49,7 @@ internal static class Program
         if (string.Equals(mode, "--version", StringComparison.Ordinal))
         {
             Record(args, "version", null, null, false, 0);
-            await WriteOutputAsync($"mcp-resource-subscriber {_version}").ConfigureAwait(false);
+            await WriteOutputAsync($"resource-bridge-cli {_version}").ConfigureAwait(false);
             return 0;
         }
 
@@ -68,7 +68,7 @@ internal static class Program
 
             await DelayIfConfiguredAsync().ConfigureAwait(false);
             Record(args, "help", null, null, false, 0);
-            await WriteOutputAsync("mcp-resource-subscriber fixture: --version | --help | --login --url <url> | --url <url> --uri <uri> --timeout-ms <ms> --json").ConfigureAwait(false);
+            await WriteOutputAsync("resource-bridge-cli fixture: --version | --help | --login --url <url> | --url <url> --uri <uri> --timeout-ms <ms> --json").ConfigureAwait(false);
             return 0;
         }
 

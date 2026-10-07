@@ -368,7 +368,7 @@ public class McpSubscriptionServiceTests : IDisposable
     [Fact]
     public async Task Start_ShouldDetectAuthErrorFromStderrWhenErrorCodeIsGenericInternalError()
     {
-        // Arrange: MCP_PROBE_AUTH_TOKEN を明示指定している場合、mcp-resource-subscriber は
+        // Arrange: MCP_PROBE_AUTH_TOKEN を明示指定している場合、resource-bridge-cli は
         // resolveBearerToken 以外の経路（client.connect でのトークン拒否等）で失敗し、
         // errorCode は詳細不明な汎用コード "INTERNAL_ERROR" になる。実際の認証エラー
         // 詳細（invalid_token）は stderr にのみ出力されるため、legacy 文字列マッチングへの
@@ -854,7 +854,7 @@ public class McpSubscriptionServiceTests : IDisposable
         var testDir = Path.Combine(baseTempDir, "Test Folder With Spaces");
         Directory.CreateDirectory(testDir);
 
-        var cmdPath = Path.Combine(testDir, "mcp-resource-subscriber.cmd");
+        var cmdPath = Path.Combine(testDir, "resource-bridge-cli.cmd");
         var resultJson = JsonSerializer.Serialize(new SubscriptionResult
         {
             Route = "subscription",
@@ -866,7 +866,7 @@ public class McpSubscriptionServiceTests : IDisposable
         var scriptContent = $"@echo off\r\nif \"%1\"==\"--help\" (\r\n    exit /b 0\r\n)\r\necho {resultJson}\r\nping 127.0.0.1 -n 10 > nul\r\nexit /b 0\r\n";
         await File.WriteAllTextAsync(cmdPath, scriptContent, Encoding.ASCII);
 
-        var shimPath = Path.Combine(testDir, "mcp-resource-subscriber");
+        var shimPath = Path.Combine(testDir, "resource-bridge-cli");
         await File.WriteAllTextAsync(shimPath, "@echo off\r\necho ERROR: Extensionless shim executed!\r\nexit /b 1\r\n", Encoding.ASCII);
 
         var oldPath = Environment.GetEnvironmentVariable("PATH");
@@ -2120,14 +2120,14 @@ public class McpSubscriptionServiceTests : IDisposable
     [InlineData("connect ECONNREFUSED 127.0.0.1:8080", "mcp-gateway への接続に失敗しました。mcp-gateway コンテナが起動しているか、または Gateway URL の設定が正しいか確認してください。", "[CONN_REFUSED]")]
     [InlineData("404 page not found", "指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]")]
     [InlineData("Error POSTing to endpoint: 404", "指定されたエンドポイントが見つかりませんでした (404)。Gateway URL のポート番号やパスプレフィックス、または Resource URI が正しいか確認してください。", "[HTTP_404]")]
-    [InlineData("AUTH_LOGIN_REQUIRED", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("REAUTH_REQUIRED", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("{\"error\":\"invalid_token\"}", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("No access token provided", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("invalid_grant: run --login again", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("{\"error\":\"invalid_client\"}", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("{\"error\":\"unauthorized_client\"}", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("401 Unauthorized", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください（MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください）。", "[AUTH_REQUIRED]")]
+    [InlineData("AUTH_LOGIN_REQUIRED", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("REAUTH_REQUIRED", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("{\"error\":\"invalid_token\"}", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("No access token provided", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("invalid_grant: run --login again", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("{\"error\":\"invalid_client\"}", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("{\"error\":\"unauthorized_client\"}", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("401 Unauthorized", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください（MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください）。", "[AUTH_REQUIRED]")]
     [InlineData(
         "Subscriber process exited with non-zero code 1. ErrorCode: RESOURCE_NOT_FOUND. Stdout: {\"route\":\"failed\",\"serverUrl\":\"http://localhost:4010/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}. Stderr: ",
         "予期しないエラーが発生しました: Subscriber process exited with non-zero code 1. ErrorCode: RESOURCE_NOT_FOUND. Stdout: {\"route\":\"failed\",\"serverUrl\":\"http://localhost:4010/mcp\",\"errorCode\":\"RESOURCE_NOT_FOUND\"}. Stderr: ",
@@ -2149,8 +2149,8 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("AUTH_LOGIN_REQUIRED", "some raw message", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("REAUTH_REQUIRED", "some raw message", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("AUTH_LOGIN_REQUIRED", "some raw message", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("REAUTH_REQUIRED", "some raw message", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
     [InlineData("AUTH_REFRESH_FAILED", "raw", "予期しないエラーが発生しました: raw", "[GENERAL_ERROR]")]
     [InlineData("AUTH_TIMEOUT", "raw", "予期しないエラーが発生しました: raw", "[GENERAL_ERROR]")]
     [InlineData(
@@ -2182,7 +2182,7 @@ public class McpSubscriptionServiceTests : IDisposable
         tagResult.Should().Be(expectedTag);
     }
 
-    // mcp-resource-subscriber v0.6.0（MCP 2026-07-28）で新設された ErrorCode。
+    // resource-bridge-cli v0.6.0（MCP 2026-07-28）で新設された ErrorCode。
     // ホワイトリスト外のまま legacy 文字列マッチングへ落とすと、原因が分からない
     // 「予期しないエラー」になる（stderr が空のケースが多いため）。
     [Theory]
@@ -2206,7 +2206,7 @@ public class McpSubscriptionServiceTests : IDisposable
         tagResult.Should().NotBe("[AUTH_REQUIRED]");
     }
 
-    // mcp-resource-subscriber の networkErrorClassification が返す 3 コード（#236 レビュー指摘）。
+    // resource-bridge-cli の networkErrorClassification が返す 3 コード（#236 レビュー指摘）。
     // undici はいずれも "fetch failed" として包むため、legacy 文字列判定へ落とすと TLS 証明書
     // 不信頼・DNS 解決失敗まで [CONN_REFUSED] になり、gateway 起動待ち（5 分）に入って
     // 設定エラーの確定が遅れる。待機してよいのは CONNECTION_REFUSED だけ。
@@ -2251,8 +2251,8 @@ public class McpSubscriptionServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("INTERNAL_ERROR", "full raw message", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
-    [InlineData("SUBSCRIPTION_FAILED", "full raw message", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("INTERNAL_ERROR", "full raw message", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
+    [InlineData("SUBSCRIPTION_FAILED", "full raw message", "gateway rejected token: invalid_token", "mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。", "[AUTH_REQUIRED]")]
     [InlineData("INTERNAL_ERROR", "something unrelated happened", "something unrelated happened", "予期しないエラーが発生しました: something unrelated happened", "[GENERAL_ERROR]")]
     public void ErrorMessageMapping_WithGenericStructuredErrorCode_ShouldFallBackToLegacyStringMatchingOnDiagnosticText(
         string structuredErrorCode, string rawError, string diagnosticText, string expectedFriendly, string expectedTag)

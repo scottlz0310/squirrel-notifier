@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace SquirrelNotifier.WinUI3.Services;
 
 /// <summary>
-/// mcp-resource-subscriber の購読モード <c>--json</c> 出力のスキーマ.
+/// resource-bridge-cli の購読モード <c>--json</c> 出力のスキーマ.
 /// </summary>
 /// <remarks>
 /// v0.6.0（MCP 2026-07-28）で <c>subscribed</c> / <c>unsubscribed</c> は廃止された。

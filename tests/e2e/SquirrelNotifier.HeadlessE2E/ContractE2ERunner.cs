@@ -14,7 +14,7 @@ internal static class ContractE2ERunner
     private const string _subscriberTokenCacheVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_TOKEN_CACHE_PATH";
     private const string _subscriberFixtureVariable = "SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_FIXTURE";
     private const string _authTokenVariable = "MCP_PROBE_AUTH_TOKEN";
-    private const string _subscriberCommand = "mcp-resource-subscriber";
+    private const string _subscriberCommand = "resource-bridge-cli";
     private const string _resourceUri = "queue://review/queue";
 
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)

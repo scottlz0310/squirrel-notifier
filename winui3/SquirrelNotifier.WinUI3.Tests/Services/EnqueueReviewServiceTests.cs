@@ -67,7 +67,7 @@ public class EnqueueReviewServiceTests : IDisposable
     // EnqueueReviewService が必ず 1 回 --version を実行するため、全テストで必要。
     private Mock<IProcessInstance> CreateVersionOkMockProcess()
     {
-        return CreateMockProcess(0, "mcp-resource-subscriber v0.4.0", string.Empty);
+        return CreateMockProcess(0, "resource-bridge-cli v0.4.0", string.Empty);
     }
 
     private static Mock<IProcessRunner> CreateRunner(
@@ -134,7 +134,7 @@ public class EnqueueReviewServiceTests : IDisposable
         // Arrange: 購読側と同じ固定引数（例: --skip-resource-list-check）を call モードにも引き継ぐ
         var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
         _settingsService.UpdateSettings(
-            "mcp-resource-subscriber", "--skip-resource-list-check",
+            "resource-bridge-cli", "--skip-resource-list-check",
             "http://localhost:3000", new[] { "queue://review/queue" }, 30000,
             "claude", "-p test", string.Empty,
             "claude", "-p test", string.Empty,
@@ -252,7 +252,7 @@ public class EnqueueReviewServiceTests : IDisposable
         result.ErrorMessage.Should().Contain("通信エラー");
     }
 
-    // mcp-resource-subscriber v0.6.0 は tools/call 自体の拒否と protocol negotiation 失敗も
+    // resource-bridge-cli v0.6.0 は tools/call 自体の拒否と protocol negotiation 失敗も
     // exit 3 で返す。ErrorCode で切り分けないと、いずれも「通信エラー」と案内してしまう。
     [Theory]
     [InlineData("TOOL_REQUEST_REJECTED", "拒否されました")]
@@ -288,7 +288,7 @@ public class EnqueueReviewServiceTests : IDisposable
         // Arrange: v0.3.0 は call サブコマンドを認識せず subscribe モードへフォールバックするため、
         // 実際に call を試みる前に検出して拒否する。
         var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
-        Mock<IProcessInstance> versionProcess = CreateMockProcess(0, "mcp-resource-subscriber v0.3.0", string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateMockProcess(0, "resource-bridge-cli v0.3.0", string.Empty);
         Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
 
         Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);
@@ -335,7 +335,7 @@ public class EnqueueReviewServiceTests : IDisposable
         // call timeout に達して失敗する。
         var reference = new PrReference("scottlz0310", "squirrel-notifier", 123);
         Mock<IProcessInstance> versionProcess =
-            StderrDrainProcessDouble.CreateBlockingOnStderr("mcp-resource-subscriber v0.4.0");
+            StderrDrainProcessDouble.CreateBlockingOnStderr("resource-bridge-cli v0.4.0");
         Mock<IProcessInstance> callProcess = CreateMockProcess(0, "{\"isError\":false,\"content\":[]}", string.Empty);
 
         Mock<IProcessRunner> mockRunner = CreateRunner(callProcess, versionProcess);

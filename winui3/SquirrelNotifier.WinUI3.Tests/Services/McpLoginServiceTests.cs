@@ -73,7 +73,7 @@ public class McpLoginServiceTests : IDisposable
 
     private static Mock<IProcessInstance> CreateVersionOkMockProcess()
     {
-        return CreateMockProcess(0, "mcp-resource-subscriber v0.5.0", string.Empty);
+        return CreateMockProcess(0, "resource-bridge-cli v0.5.0", string.Empty);
     }
 
     private static Mock<IProcessRunner> CreateRunner(Mock<IProcessInstance> loginProcess, Mock<IProcessInstance> versionProcess)
@@ -219,7 +219,7 @@ public class McpLoginServiceTests : IDisposable
     [Fact]
     public async Task LoginAsync_ShouldFailFast_WhenSubscriberVersionIsTooOld()
     {
-        Mock<IProcessInstance> versionProcess = CreateMockProcess(0, "mcp-resource-subscriber v0.2.0", string.Empty);
+        Mock<IProcessInstance> versionProcess = CreateMockProcess(0, "resource-bridge-cli v0.2.0", string.Empty);
         Mock<IProcessInstance> loginProcess = CreateMockProcess(0, _successStdout, string.Empty);
         Mock<IProcessRunner> runner = CreateRunner(loginProcess, versionProcess);
         var urlOpener = new FakeUrlOpener(true);
@@ -278,7 +278,7 @@ public class McpLoginServiceTests : IDisposable
         // この double は stderr が読み切られるまで終了しないため、stderr 未読なら
         // login timeout に達して TimedOut になる。
         Mock<IProcessInstance> versionProcess =
-            StderrDrainProcessDouble.CreateBlockingOnStderr("mcp-resource-subscriber v0.5.0");
+            StderrDrainProcessDouble.CreateBlockingOnStderr("resource-bridge-cli v0.5.0");
         Mock<IProcessInstance> loginProcess = CreateMockProcess(0, _successStdout, string.Empty);
         Mock<IProcessRunner> runner = CreateRunner(loginProcess, versionProcess);
 

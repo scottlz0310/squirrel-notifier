@@ -147,7 +147,7 @@ public sealed class GatewayLoginCoordinatorTests
 
     [Theory]
     [InlineData("TimedOut", "承認がタイムアウトしました（device flow）。")]
-    [InlineData("Failed", "mcp-resource-subscriber が見つかりません。")]
+    [InlineData("Failed", "resource-bridge-cli が見つかりません。")]
     [InlineData("Failed", "gateway へ接続できません（ECONNREFUSED）。")]
     public void DescribeResult_ShouldSurfaceErrorMessage_WhenProvided(string outcome, string errorMessage)
     {

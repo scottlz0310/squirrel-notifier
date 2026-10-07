@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 購読/enqueue/loginの既定CLIを `resource-bridge-cli` へ変更し、案内・エラー・fixture/E2E・文書を整合。新CLIはv0.7.0（Node >=26.10.0）を使用する。保存済みSubscriberCommandPathは旧CLI名/絶対パス/カスタムパスも保持し、自動で書き換えない。JSON/終了コード・認証cache/env・URI/HEAD確認の契約は維持する
+
 ## [0.18.0] - 2026-10-07
 
 ### Added

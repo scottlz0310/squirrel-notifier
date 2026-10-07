@@ -97,7 +97,7 @@ public sealed class SettingsInputCoordinatorTests : IDisposable
     {
         LauncherAgentDefinition claude = LauncherAgentCatalog.Find("claude")!;
         return new SettingsInput(
-            "mcp-resource-subscriber",
+            "resource-bridge-cli",
             "--skip-resource-list-check",
             "http://localhost:3000/mcp",
             "queue://review/queue",

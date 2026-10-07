@@ -16,7 +16,7 @@ using SquirrelNotifier.WinUI3.Models;
 namespace SquirrelNotifier.WinUI3.Services;
 
 /// <summary>
-/// PR URL / <c>owner/repo#number</c> の手動登録を、mcp-resource-subscriber の
+/// PR URL / <c>owner/repo#number</c> の手動登録を、resource-bridge-cli の
 /// <c>call --tool enqueue_review</c> 経由で thread-owl の review queue へ enqueue する。
 /// queue をバイパスして直接ランチャーを起動する経路は作らない（重複排除・通知記録を通る
 /// 正規経路を維持するため）.
@@ -26,7 +26,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
     private const string _toolName = "enqueue_review";
     private const int _callTimeoutMs = 30000;
 
-    // call サブコマンドは mcp-resource-subscriber v0.4.0 で追加された。これより古いバージョンは
+    // call サブコマンドは旧CLIのv0.4.0で追加された。これより古いバージョンは
     // "call" を positional 引数として認識せず、既定の subscribe モード（test://review/status への
     // 購読）にフォールバックしてしまい、失敗の原因が分かりにくい形で誤動作する。
     private static readonly Version _minimumSubscriberVersion = new(0, 4, 0);
@@ -156,7 +156,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
         }
     }
 
-    // mcp-resource-subscriber の --version 出力（"<name> vX.Y.Z"）を確認し、call サブコマンドが
+    // resource-bridge-cli の --version 出力（"<name> vX.Y.Z"）を確認し、call サブコマンドが
     // 存在しない古いバージョンを事前に検出する。問題なければ null、問題があれば案内メッセージを返す。
     private async Task<string?> CheckSubscriberVersionAsync(string resolvedPath, CancellationToken cancellationToken)
     {
@@ -193,7 +193,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
                 string outputDetail = string.IsNullOrEmpty(stderrDetail)
                     ? $"\"{stdoutDetail}\""
                     : $"\"{stdoutDetail}\", stderr: \"{stderrDetail}\"";
-                return $"mcp-resource-subscriber のバージョンを確認できませんでした（--version の出力: {outputDetail}）。call サブコマンドには v{_minimumSubscriberVersion} 以上が必要です。";
+                return $"resource-bridge-cli のバージョンを確認できませんでした（--version の出力: {outputDetail}）。call サブコマンドには v{_minimumSubscriberVersion} 以上が必要です。";
             }
 
             var detected = new Version(
@@ -203,7 +203,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
 
             if (detected < _minimumSubscriberVersion)
             {
-                return $"mcp-resource-subscriber のバージョンが古いため、call サブコマンドを実行できません（検出: v{detected}, 必要: v{_minimumSubscriberVersion} 以上）。mcp-resource-subscriber を更新してください。";
+                return $"resource-bridge-cli のバージョンが古いため、call サブコマンドを実行できません（検出: v{detected}, 必要: v{_minimumSubscriberVersion} 以上）。resource-bridge-cli を更新してください。";
             }
 
             return null;
@@ -215,7 +215,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
         }
         catch (Exception ex)
         {
-            return $"mcp-resource-subscriber のバージョン確認に失敗しました: {ex.Message}";
+            return $"resource-bridge-cli のバージョン確認に失敗しました: {ex.Message}";
         }
         finally
         {
@@ -244,7 +244,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
         }
     }
 
-    // mcp-resource-subscriber の call モードの exit code は成否・エラー種別を区別する:
+    // resource-bridge-cli の call モードの exit code は成否・エラー種別を区別する:
     // 0 = 成功, 1 = tool エラー（allowlist 外を含む）, 2 = 認証エラー, 3 = 通信/使用方法エラー。
     // exit 3 の内訳は ErrorCode でしか区別できないため、BuildCommunicationErrorMessage で切り分ける。
     private static EnqueueReviewResult BuildResult(int exitCode, string stdout, string stderr)
@@ -295,7 +295,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
         };
     }
 
-    // exit 3 は通信エラーだけの袋ではない。mcp-resource-subscriber v0.6.0 は
+    // exit 3 は通信エラーだけの袋ではない。旧CLI v0.6.0 は
     // tools/call 自体の拒否（不明な tool 名・不正な引数）と protocol negotiation 失敗も
     // exit 3 で返すため、ErrorCode で切り分けないと原因の分からない案内になる。
     private static string BuildCommunicationErrorMessage(string? errorCode, string detail)
@@ -310,7 +310,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
             return $"接続先が MCP プロトコル 2026-07-28 に未対応です。mcp-gateway と接続先サーバーを 2026-07-28 対応版へ更新してください: {detail}";
         }
 
-        return $"通信エラーが発生しました。Gateway URL や mcp-resource-subscriber の設定を確認してください: {detail}";
+        return $"通信エラーが発生しました。Gateway URL や resource-bridge-cli の設定を確認してください: {detail}";
     }
 
     // AUTH_FAILED（明示指定した MCP_PROBE_AUTH_TOKEN が無効な場合など）は --login のトークン
@@ -323,7 +323,7 @@ internal sealed class EnqueueReviewService : IEnqueueReviewService
             return $"mcp-gateway への認証に失敗しました。MCP_PROBE_AUTH_TOKEN を指定している場合は、そのトークンが有効か確認してください（明示的なトークンは --login のキャッシュより優先されるため、再ログインだけでは解消しません）。({detail})";
         }
 
-        return $"mcp-gateway への認証が必要です。mcp-resource-subscriber の --login を実行して再認証してください。({detail})";
+        return $"mcp-gateway への認証が必要です。resource-bridge-cli の --login を実行して再認証してください。({detail})";
     }
 
     private async Task LogAsync(string message)

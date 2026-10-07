@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 namespace SquirrelNotifier.WinUI3.Services;
 
 /// <summary>
-/// mcp-resource-subscriber の <c>call --json</c> 出力のスキーマ.
+/// resource-bridge-cli の <c>call --json</c> 出力のスキーマ.
 /// </summary>
 internal sealed class CallToolResult
 {
