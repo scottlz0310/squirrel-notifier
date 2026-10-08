@@ -20,8 +20,6 @@ internal static class ReviewerWorkspaceLayout
     /// </summary>
     public const string ScratchDirectoryEnvironmentVariable = "SQUIRREL_REVIEW_SCRATCH_DIR";
 
-    private const string _scratchDirectoryName = "tmp";
-
     public static string GetReviewerRoot(string settingsDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(settingsDirectory);
@@ -55,10 +53,12 @@ internal static class ReviewerWorkspaceLayout
     public static bool IsExpired(DateTime lastUsedUtc, DateTimeOffset now, TimeSpan timeToLive)
         => now - new DateTimeOffset(DateTime.SpecifyKind(lastUsedUtc, DateTimeKind.Utc)) >= timeToLive;
 
-    public static string GetScratchDirectory(string workspaceDirectory)
+    public static string GetScratchRoot(string settingsDirectory)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceDirectory);
-        return Path.Combine(workspaceDirectory, _scratchDirectoryName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(settingsDirectory);
+
+        // WinUI の生成パスに余裕を残すため、セッション再開用の作業領域とは別の短いルートを使う。
+        return Path.Combine(settingsDirectory, "s");
     }
 
     // TEMP / TMP の付け替えは skill を変えなくても効く経路、専用の環境変数は付け替えが

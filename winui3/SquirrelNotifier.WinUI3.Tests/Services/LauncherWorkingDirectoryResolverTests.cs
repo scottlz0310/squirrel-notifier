@@ -40,7 +40,7 @@ public class LauncherWorkingDirectoryResolverTests : IDisposable
         string result = _resolver.Resolve(CreateReviewEvent(), LauncherRole.Reviewer);
 
         result.Should().Be(Path.Combine(_tempDirectory, "launcher-workspace", "reviewer", "scottlz0310", "squirrel-notifier", "186"));
-        Directory.Exists(Path.Combine(result, "tmp")).Should().BeTrue();
+        Directory.Exists(Path.Combine(_tempDirectory, "s", "scottlz0310", "squirrel-notifier", "186")).Should().BeTrue();
     }
 
     [Fact]

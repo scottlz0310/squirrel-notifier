@@ -61,6 +61,7 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
     private static readonly TimeSpan _defaultTimeToLive = TimeSpan.FromDays(7);
     private static readonly TimeSpan _defaultSweepInterval = TimeSpan.FromHours(24);
     private readonly string _reviewerRoot;
+    private readonly string _scratchRoot;
     private readonly Func<string, int, bool> _isReviewerRunning;
     private readonly LoggingService _loggingService;
     private readonly TimeProvider _timeProvider;
@@ -74,6 +75,7 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
 
     public ReviewerWorkspaceCleanupService(
         string reviewerRoot,
+        string scratchRoot,
         Func<string, int, bool> isReviewerRunning,
         LoggingService loggingService,
         TimeProvider? timeProvider = null,
@@ -81,7 +83,9 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
         TimeSpan? sweepInterval = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reviewerRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scratchRoot);
         _reviewerRoot = reviewerRoot;
+        _scratchRoot = scratchRoot;
         _isReviewerRunning = isReviewerRunning ?? throw new ArgumentNullException(nameof(isReviewerRunning));
         _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -107,6 +111,7 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(cleanupCoordinator);
         var service = new ReviewerWorkspaceCleanupService(
             ReviewerWorkspaceLayout.GetReviewerRoot(settingsDirectory),
+            ReviewerWorkspaceLayout.GetScratchRoot(settingsDirectory),
             launcherService.IsReviewerRunningFor,
             loggingService);
         cleanupCoordinator.PullRequestClosed += service.OnPullRequestClosed;
@@ -163,26 +168,41 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
     public ReviewerWorkspaceCleanupResult Cleanup(string repository, int prNumber)
     {
         string workspace = ReviewerWorkspaceLayout.GetWorkspaceDirectory(_reviewerRoot, repository, prNumber);
+        string scratch = ReviewerWorkspaceLayout.GetWorkspaceDirectory(_scratchRoot, repository, prNumber);
         if (_isReviewerRunning(repository, prNumber))
         {
             return ReviewerWorkspaceCleanupResult.SkippedReviewerRunning;
         }
 
         // ルート・owner・repo の階層がリンクだと、PR 単位のディレクトリの実体が管理外の場所になるため消さない.
-        string? repoDirectory = Path.GetDirectoryName(workspace);
-        string? ownerDirectory = Path.GetDirectoryName(repoDirectory);
-        foreach (string? ancestor in new[] { _reviewerRoot, ownerDirectory, repoDirectory })
+        foreach (string target in new[] { workspace, scratch })
         {
-            if (ancestor is not null && IsReparsePoint(ancestor))
+            string? repoDirectory = Path.GetDirectoryName(target);
+            string? ownerDirectory = Path.GetDirectoryName(repoDirectory);
+            string? rootDirectory = Path.GetDirectoryName(ownerDirectory);
+            foreach (string? ancestor in new[] { rootDirectory, ownerDirectory, repoDirectory })
             {
-                throw new IOException($"作業領域の親ディレクトリがリンクのため削除しません: {ancestor}");
+                if (ancestor is not null && IsReparsePoint(ancestor))
+                {
+                    throw new IOException($"作業領域の親ディレクトリがリンクのため削除しません: {ancestor}");
+                }
             }
         }
 
+        // scratch の削除失敗時には作業領域を残し、既存の TTL 回収と終了時の再試行で扱えるようにする。
+        bool scratchDeleted = DeleteWorkspace(scratch);
+        bool workspaceDeleted = DeleteWorkspace(workspace);
+        return scratchDeleted || workspaceDeleted
+            ? ReviewerWorkspaceCleanupResult.Deleted
+            : ReviewerWorkspaceCleanupResult.NotFound;
+    }
+
+    private static bool DeleteWorkspace(string workspace)
+    {
         var directory = new DirectoryInfo(workspace);
         if (!directory.Exists)
         {
-            return ReviewerWorkspaceCleanupResult.NotFound;
+            return false;
         }
 
         // 作業領域そのものがリンクなら、リンク先をたどらずリンク自体だけを消す.
@@ -195,7 +215,7 @@ internal sealed class ReviewerWorkspaceCleanupService : IAsyncDisposable
             DeleteTree(directory);
         }
 
-        return ReviewerWorkspaceCleanupResult.Deleted;
+        return true;
     }
 
     public void OnPullRequestClosed(object? sender, PullRequestClosedEventArgs e)

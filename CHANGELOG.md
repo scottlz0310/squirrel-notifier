@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- reviewerのscratchをSettings保存先の短い `s/<owner>/<repo>/<PR>` 配下へ配置し、WinUI生成ファイルの長いパスを短縮。セッション再開用の作業ディレクトリは維持し、PR終了・TTL回収・手動削除でscratchも片付ける。
+
 ## [0.19.0] - 2026-10-07
 
 ### Changed

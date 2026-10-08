@@ -224,7 +224,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             psi.WorkingDirectory = workingDirectory;
             if (role == LauncherRole.Reviewer)
             {
-                string scratchDirectory = ReviewerWorkspaceLayout.GetScratchDirectory(workingDirectory);
+                string scratchDirectory = ReviewerWorkspaceLayout.GetWorkspaceDirectory(
+                    ReviewerWorkspaceLayout.GetScratchRoot(_settingsService.SettingsDirectory),
+                    reviewEvent.Repository,
+                    reviewEvent.PrNumber);
                 foreach ((string name, string value) in ReviewerWorkspaceLayout.BuildEnvironment(scratchDirectory))
                 {
                     psi.Environment[name] = value;
