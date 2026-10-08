@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 検証専用PR：公開済みreviewer24のローカル検証を実測する資料を追加。マージ・公開は行わない（Mcp-Docker #365）
+
 ## [0.19.0] - 2026-10-07
 
 ### Changed
