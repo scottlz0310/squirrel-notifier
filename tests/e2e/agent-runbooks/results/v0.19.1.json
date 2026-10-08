@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "version": "0.19.1",
+  "testedCommit": "6ab827165900b3600ed45efa0c40621f850c274e",
+  "productVersion": "0.19.1+6ab827165900b3600ed45efa0c40621f850c274e",
+  "executedAt": "2026-10-08T15:59:07.1233771+09:00",
+  "executor": {
+    "agent": "codex",
+    "model": "不明（正確なモデルIDはこの実行セッションに公開されていないため取得不能。推測せず記録）",
+    "implementerSession": false
+  },
+  "environment": {
+    "notes": "実装に参加していない独立セッション。既存Start/Invoke-RunbookUia/Stopをpwsh -Fileの別プロセスで実行。常駐PID12948は稼働継続、本番gateway/queue/資格情報への書込みなし。全5runのcommit/ProductVersion一致・isolated=true・settings不変・残留0。必須3件は各1回、補助scratch観測のみ2回。証跡root=C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook。補助初回=20261008-155408-reviewer-scratch-observation、補助成功=20261008-155632-reviewer-scratch-observation-retry。wrapperおよび変更したfixture設定はrun内だけ。",
+    "os": "Microsoft Windows 11 Home 10.0.26200"
+  },
+  "scenarios": [
+    {
+      "evidence": [
+        {
+          "kind": "uia",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed.。両操作直後Responding=true。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155156-isolated-launch\\evidence\\uia.jsonl"
+        },
+        {
+          "kind": "log",
+          "summary": "テストPID44504はrun.appPathと一致するRelease exe。常駐PID12948はPrograms\\SquirrelNotifierの別プロセスでResponding=true。隔離settings.jsonとlogs/winui3.logが存在。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155156-isolated-launch\\evidence\\process-files.json"
+        },
+        {
+          "kind": "isolation",
+          "summary": "Stop実行済み。isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。cleanup-processes.jsonでアプリ・gateway・run固有プロセスの残留0、常駐PID12948の稼働継続を確認。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155156-isolated-launch\\evidence\\isolation.json"
+        }
+      ],
+      "result": "pass",
+      "durationSeconds": 31,
+      "attempts": 1,
+      "flaky": [],
+      "id": "isolated-launch"
+    },
+    {
+      "evidence": [
+        {
+          "kind": "uia",
+          "summary": "TitleText=opened: fixture-owner/fixture-repository#307。Recent review eventsに#307/#308/#309の3件。#307のLaunchReviewerButtonをClickし、ラウンド1 reviewer 実行完了（結果未確認）を確認。全操作直後Responding=true。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155235-review-event-flow\\evidence\\uia.jsonl"
+        },
+        {
+          "kind": "observation",
+          "summary": "arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectory=dataRoot\\launcher-workspace\\reviewer\\fixture-owner\\fixture-repository\\307。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155235-review-event-flow\\observations\\launcher.jsonl"
+        },
+        {
+          "kind": "log",
+          "summary": "15:53:05 Review process finished. ExitCode=0 と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました を確認。fixture PR読取り404はREADME記載の挙動。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155235-review-event-flow\\data\\logs\\winui3.log"
+        },
+        {
+          "kind": "isolation",
+          "summary": "Stop実行済み。isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。cleanup-processes.jsonでアプリ・gateway・run固有プロセスの残留0、常駐PID12948の稼働継続を確認。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155235-review-event-flow\\evidence\\isolation.json"
+        }
+      ],
+      "result": "pass",
+      "durationSeconds": 33,
+      "attempts": 1,
+      "flaky": [],
+      "id": "review-event-flow"
+    },
+    {
+      "evidence": [
+        {
+          "kind": "uia",
+          "summary": "停止後StartButton isEnabled=true。PrimaryButton（購読を開始して登録）をClickし、再開後StopButton isEnabled=true。全操作直後Responding=true。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155319-register-while-stopped\\evidence\\uia.jsonl"
+        },
+        {
+          "kind": "observation",
+          "summary": "mode=callは正確に1行。--tool enqueue_review、--url=http://127.0.0.1:49876/、--args={\"owner\":\"fixture-owner\",\"repo\":\"fixture-repository\",\"prNumber\":320,\"reason\":\"opened\"}、exitCode=0、hasAuthorization=false。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155319-register-while-stopped\\observations\\subscriber.jsonl"
+        },
+        {
+          "kind": "log",
+          "summary": "15:53:26 State: Runningが15:53:39 Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened)に先行し、続けてenqueue_review call finished. ExitCode=0。停止後の再開時State: Running行は記録されておらず、初期購読のRunning行による順序確認である。再開はStopButton有効とsubscriber call成功で確認。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155319-register-while-stopped\\data\\logs\\winui3.log"
+        },
+        {
+          "kind": "isolation",
+          "summary": "Stop実行済み。isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。cleanup-processes.jsonでアプリ・gateway・run固有プロセスの残留0、常駐PID12948の稼働継続を確認。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155319-register-while-stopped\\evidence\\isolation.json"
+        }
+      ],
+      "result": "pass",
+      "durationSeconds": 22,
+      "attempts": 1,
+      "flaky": [
+        "再開時のState: Running行がログに記録されなかった。初期Running行はenqueueより前にあり、再開StopButton有効およびcall成功を確認。再実行なし。"
+      ],
+      "id": "register-while-stopped"
+    },
+    {
+      "evidence": [
+        {
+          "kind": "observation",
+          "summary": "必須3シナリオとは別の補助run。run内wrapperがlauncherに引数をそのまま渡す前に環境を記録。2行ともSQUIRREL_REVIEW_SCRATCH_DIR/TEMP/TMP=dataRoot\\s\\fixture-owner\\fixture-repository\\307、workingDirectory=dataRoot\\launcher-workspace\\reviewer\\fixture-owner\\fixture-repository\\307。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155632-reviewer-scratch-observation-retry\\observations\\scratch.jsonl"
+        },
+        {
+          "kind": "observation",
+          "summary": "転送先は既存dummy launcher。2行ともarguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectoryは従来root配下。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155632-reviewer-scratch-observation-retry\\observations\\launcher.jsonl"
+        },
+        {
+          "kind": "uia",
+          "summary": "補助再試行でイベント受信・LaunchReviewerButton Click・reviewer 実行完了を確認。各操作直後Responding=true。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155632-reviewer-scratch-observation-retry\\evidence\\uia.jsonl"
+        },
+        {
+          "kind": "isolation",
+          "summary": "Stop実行済み。isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。cleanup-processes.jsonでアプリ・gateway・run固有プロセスの残留0、常駐PID12948の稼働継続を確認。",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261008-155632-reviewer-scratch-observation-retry\\evidence\\isolation.json"
+        }
+      ],
+      "result": "pass",
+      "durationSeconds": 158,
+      "attempts": 2,
+      "flaky": [
+        "補助初回20261008-155408-reviewer-scratch-observationはwrapper設定のための再起動前にイベントがcacheへ入り、再起動後一覧が空でWaitText/Click失敗。UIA記録のforegroundWindowは別アプリ、processWindows=[Squirrel Notifier]、ログはDuplicate event ignored。Responding=true。Stopでisolated=true、settings不変、残留0。新規補助runでは初期subscriber遅延600000msで設定を用意後、5000msで再起動し成功。",
+        "補助再試行では1回のClickに対してwrapper観測/元launcher観測が2行ずつ残り、2起動をログでも確認。理由は未特定。全行のscratch/TEMP/TMP/workingDirectory/arguments一致・exitCode=0。必須review-event-flowのlauncher観測は1行。"
+      ],
+      "id": "reviewer-scratch-observation"
+    }
+  ]
+}
