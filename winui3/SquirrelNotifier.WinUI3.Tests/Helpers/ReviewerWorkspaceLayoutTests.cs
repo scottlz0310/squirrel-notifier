@@ -83,11 +83,27 @@ public class ReviewerWorkspaceLayoutTests
     }
 
     [Fact]
-    public void GetScratchDirectory_ShouldBeUnderWorkspace()
+    public void GetScratchRoot_ShouldBeUnderSettingsDirectory()
     {
-        string workspace = Path.Combine(_root, "owner", "repo", "1");
+        string settings = Path.Combine(Path.GetTempPath(), "settings");
 
-        ReviewerWorkspaceLayout.GetScratchDirectory(workspace).Should().Be(Path.Combine(workspace, "tmp"));
+        ReviewerWorkspaceLayout.GetScratchRoot(settings).Should().Be(Path.Combine(settings, "s"));
+    }
+
+    [Theory]
+    [InlineData("jojob", "scottlz0310/squirrel-notifier", 490)]
+    [InlineData("a-longer-user-name", "scottlz0310/squirrel-notifier", 490)]
+    public void ShortScratchAndCloneNames_ShouldLeaveRoomForWinUiGeneratedFile(string user, string repository, int prNumber)
+    {
+        string settings = Path.Combine("C:\\Users", user, "AppData", "Local", "SquirrelNotifier");
+        string scratch = ReviewerWorkspaceLayout.GetWorkspaceDirectory(
+            ReviewerWorkspaceLayout.GetScratchRoot(settings), repository, prNumber);
+        string clone = Path.Combine(scratch, "c-a8948205e564");
+        string generated = Path.Combine(clone, "winui3", "SquirrelNotifier.WinUI3", "obj", "x64", "Release",
+            "net10.0-windows10.0.26100.0", "win-x64", "ReviewNotificationPopup.g.cs");
+
+        generated.Length.Should().BeLessThan(260);
+        clone.Length.Should().BeLessThan(110);
     }
 
     [Theory]

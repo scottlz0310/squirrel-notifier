@@ -60,6 +60,124 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         Directory.Exists(workspace).Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Cleanup_ShouldDeleteSeparateScratchAndKeepOtherPr(bool running)
+    {
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        string scratch = Path.Combine(_tempDirectory, "s", "owner", "repo", "1");
+        string otherScratch = Path.Combine(_tempDirectory, "s", "owner", "repo", "2");
+        Directory.CreateDirectory(scratch);
+        Directory.CreateDirectory(otherScratch);
+        string pack = Path.Combine(scratch, "pack");
+        File.WriteAllText(pack, "pack");
+        File.SetAttributes(pack, FileAttributes.ReadOnly);
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => running, _loggingService);
+
+        service.Cleanup("Owner/Repo", 1);
+
+        Directory.Exists(workspace).Should().Be(running);
+        Directory.Exists(scratch).Should().Be(running);
+        Directory.Exists(otherScratch).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("root")]
+    [InlineData("owner")]
+    [InlineData("repo")]
+    public void Cleanup_ShouldRefuseScratchParentLink(string level)
+    {
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        string outside = CreateOutsideDirectoryWithFile(out string outsideFile);
+        string scratchRoot = Path.Combine(_tempDirectory, "s");
+        string link = level switch
+        {
+            "root" => scratchRoot,
+            "owner" => Path.Combine(scratchRoot, "owner"),
+            _ => Path.Combine(scratchRoot, "owner", "repo"),
+        };
+        Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+        Directory.CreateSymbolicLink(link, outside);
+
+        Action act = () => CreateService().Cleanup("owner/repo", 1);
+
+        act.Should().Throw<IOException>().WithMessage("*リンク*");
+        Directory.Exists(workspace).Should().BeTrue();
+        File.Exists(outsideFile).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ShouldDeleteSeparateScratchTogetherWithWorkspace()
+    {
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        string scratch = Path.Combine(_tempDirectory, "s", "owner", "repo", "1");
+        Directory.CreateDirectory(scratch);
+        DateTimeOffset now = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+        Directory.SetLastWriteTimeUtc(workspace, now.AddDays(-8).UtcDateTime);
+
+        await CreateService(now).SweepExpiredAsync();
+
+        Directory.Exists(workspace).Should().BeFalse();
+        Directory.Exists(scratch).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteAllAsync_ShouldDeleteSeparateScratchTogetherWithWorkspace()
+    {
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        string scratch = Path.Combine(_tempDirectory, "s", "owner", "repo", "1");
+        Directory.CreateDirectory(scratch);
+
+        ReviewerWorkspaceBulkCleanupResult result = await CreateService().DeleteAllAsync();
+
+        result.Deleted.Should().Be(1);
+        Directory.Exists(workspace).Should().BeFalse();
+        Directory.Exists(scratch).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RetryPendingAsync_ShouldKeepWorkspaceUntilScratchDeletionSucceeds()
+    {
+        string workspace = CreateWorkspace("owner", "repo", 1);
+        string scratch = Path.Combine(_tempDirectory, "s", "owner", "repo", "1");
+        Directory.CreateDirectory(scratch);
+        string lockedFile = Path.Combine(scratch, "locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        ReviewerWorkspaceCleanupService service = CreateService();
+        using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await service.CleanupAndLogAsync("owner/repo", 1);
+            Directory.Exists(workspace).Should().BeTrue();
+            Directory.Exists(scratch).Should().BeTrue();
+            service.PendingCount.Should().Be(1);
+        }
+
+        await service.RetryPendingAsync();
+
+        Directory.Exists(workspace).Should().BeFalse();
+        Directory.Exists(scratch).Should().BeFalse();
+        service.PendingCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Cleanup_ShouldNotFollowScratchLink(bool scratchItselfIsLink)
+    {
+        CreateWorkspace("owner", "repo", 1);
+        string scratch = Path.Combine(_tempDirectory, "s", "owner", "repo", "1");
+        string outside = CreateOutsideDirectoryWithFile(out string outsideFile);
+        string link = scratchItselfIsLink ? scratch : Path.Combine(scratch, "link");
+        Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+        Directory.CreateSymbolicLink(link, outside);
+
+        CreateService().Cleanup("owner/repo", 1);
+
+        Directory.Exists(scratch).Should().BeFalse();
+        File.Exists(outsideFile).Should().BeTrue();
+    }
+
     [Fact]
     public void Cleanup_ShouldKeepOtherPullRequestsAndUnmanagedDirectories()
     {
@@ -147,7 +265,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         Directory.CreateDirectory(outsideWorkspace);
         string linkedRoot = Path.Combine(_tempDirectory, "linked-reviewer-root");
         Directory.CreateSymbolicLink(linkedRoot, outside);
-        var service = new ReviewerWorkspaceCleanupService(linkedRoot, (_, _) => false, _loggingService);
+        var service = new ReviewerWorkspaceCleanupService(linkedRoot, Path.Combine(_tempDirectory, "s"), (_, _) => false, _loggingService);
 
         Action act = () => service.Cleanup("owner/repo", 1);
 
@@ -165,6 +283,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         int calls = 0;
         service = new ReviewerWorkspaceCleanupService(
             _reviewerRoot,
+            Path.Combine(_tempDirectory, "s"),
             (_, _) =>
             {
                 if (Interlocked.Increment(ref calls) == 1)
@@ -188,7 +307,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     {
         string workspace = CreateWorkspace("owner", "repo", 1);
         bool running = true;
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService);
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => running, _loggingService);
         await service.CleanupAndLogAsync("owner/repo", 1);
         service.PendingCount.Should().Be(1);
         Directory.Exists(workspace).Should().BeTrue();
@@ -225,7 +344,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     {
         string workspace = CreateWorkspace("owner", "repo", 1);
         bool running = true;
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService);
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => running, _loggingService);
         await service.CleanupAndLogAsync("owner/repo", 1);
 
         running = false;
@@ -279,7 +398,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
         string workspace = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
         bool running = true;
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService, new FixedTimeProvider(now));
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => running, _loggingService, new FixedTimeProvider(now));
 
         await service.SweepExpiredAsync();
         running = false;
@@ -295,7 +414,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         // PR 完了時に見送った保留は、回収で見送っても外さない
         DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
         CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => true, _loggingService, new FixedTimeProvider(now));
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => true, _loggingService, new FixedTimeProvider(now));
         await service.CleanupAndLogAsync("owner/repo", 1);
 
         await service.SweepExpiredAsync();
@@ -327,7 +446,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
         string workspace = CreateWorkspace("owner", "repo", 1, now);
         bool running = true;
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => running, _loggingService, new FixedTimeProvider(now));
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => running, _loggingService, new FixedTimeProvider(now));
         await service.CleanupAndLogAsync("owner/repo", 1);
 
         running = false;
@@ -342,6 +461,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     {
         var service = new ReviewerWorkspaceCleanupService(
             Path.Combine(_tempDirectory, "missing"),
+            Path.Combine(_tempDirectory, "s"),
             (_, _) => false,
             _loggingService);
 
@@ -355,7 +475,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     {
         DateTimeOffset now = new(2026, 9, 26, 0, 0, 0, TimeSpan.Zero);
         string workspace = CreateWorkspace("owner", "repo", 1, now - TimeSpan.FromDays(8));
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => false, _loggingService, new FixedTimeProvider(now));
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => false, _loggingService, new FixedTimeProvider(now));
 
         service.Start();
         service.Start();
@@ -409,7 +529,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         File.WriteAllText(legacyFile, "shared reviewer directory before #403");
         string notPrNumber = Path.Combine(_reviewerRoot, "owner", "repo", "tmp");
         Directory.CreateDirectory(notPrNumber);
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, prNumber) => prNumber == 3, _loggingService);
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, prNumber) => prNumber == 3, _loggingService);
 
         ReviewerWorkspaceBulkCleanupResult result = await service.DeleteAllAsync();
 
@@ -430,7 +550,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         File.WriteAllText(lockedFile, "locked");
         string pendingWorkspace = CreateWorkspace("owner", "repo", 2);
         bool running = true;
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, prNumber) => running && prNumber == 2, _loggingService);
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, prNumber) => running && prNumber == 2, _loggingService);
         await service.CleanupAndLogAsync("owner/repo", 2);
         service.PendingCount.Should().Be(1);
         running = false;
@@ -482,7 +602,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     [Fact]
     public async Task DeleteAllAsync_ShouldReturnZero_WhenRootDoesNotExist()
     {
-        var service = new ReviewerWorkspaceCleanupService(Path.Combine(_tempDirectory, "missing"), (_, _) => false, _loggingService);
+        var service = new ReviewerWorkspaceCleanupService(Path.Combine(_tempDirectory, "missing"), Path.Combine(_tempDirectory, "s"), (_, _) => false, _loggingService);
 
         ReviewerWorkspaceBulkCleanupResult result = await service.DeleteAllAsync();
 
@@ -505,6 +625,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
         string workspace = CreateWorkspace("owner", "repo", 1);
         var service = new ReviewerWorkspaceCleanupService(
             _reviewerRoot,
+            Path.Combine(_tempDirectory, "s"),
             (repository, prNumber) => repository == "owner/repo" && prNumber == 1,
             _loggingService);
 
@@ -569,7 +690,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     public async Task CleanupAndLogAsync_ShouldLogSkip_WhenReviewerIsRunning()
     {
         CreateWorkspace("owner", "repo", 1);
-        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, (_, _) => true, _loggingService);
+        var service = new ReviewerWorkspaceCleanupService(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => true, _loggingService);
 
         await service.CleanupAndLogAsync("owner/repo", 1);
 
@@ -611,7 +732,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     }
 
     private ReviewerWorkspaceCleanupService CreateService()
-        => new(_reviewerRoot, (_, _) => false, _loggingService);
+        => new(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => false, _loggingService);
 
     // 現在のユーザーに対して一覧の取得を拒否し、テスト終了時に拒否を外す
     private void DenyListDirectory(string path)
@@ -633,7 +754,7 @@ public class ReviewerWorkspaceCleanupServiceTests : IDisposable
     }
 
     private ReviewerWorkspaceCleanupService CreateService(DateTimeOffset now)
-        => new(_reviewerRoot, (_, _) => false, _loggingService, new FixedTimeProvider(now));
+        => new(_reviewerRoot, Path.Combine(_tempDirectory, "s"), (_, _) => false, _loggingService, new FixedTimeProvider(now));
 
     private string CreateWorkspace(string owner, string repo, int prNumber)
     {

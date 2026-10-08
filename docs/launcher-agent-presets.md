@@ -60,6 +60,7 @@ session 情報は `%LOCALAPPDATA%\SquirrelNotifier\sessions.json` に保存す�
 ## 作業ディレクトリ契約
 
 - reviewer は Settings 保存先配下の `launcher-workspace/reviewer` を作成し、常にそこから起動する。対象 repository の checkout mapping は参照しない
+- reviewerのscratchは同じSettings保存先の `s/<owner>/<repo>/<PR>` に置き、`TEMP`・`TMP`・`SQUIRREL_REVIEW_SCRATCH_DIR`で渡す。短いルートで生成パスの余裕を確保し、既存の作業ディレクトリはセッション再開用に維持する。PR終了・TTL回収・手動削除は両領域を対象とし、旧作業領域内のtmpも作業領域とともに回収する。
 - reviewed は Settings の Checkout Mappings（`owner/repo=絶対パス`）から対象 repository の Git checkout を解決し、そこから起動する
 - reviewed の mapping が無い、パスが存在しない、`.git` を持たない、または Windows／Program Files／アプリのインストール先配下の場合は、launcher プロセスを起動する前に失敗する
 - `ProcessStartInfo.WorkingDirectory` を常に明示するため、タスクスケジューラー、ショートカット、親プロセスの current directory には依存しない

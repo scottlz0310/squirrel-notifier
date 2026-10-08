@@ -351,7 +351,7 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedPsi.WorkingDirectory.Should().Be(expectedWorkingDirectory);
 
         // 一時領域の付け替えは reviewer だけに行い、reviewed は利用者の checkout と環境をそのまま使う（#403）
-        string scratchDirectory = Path.Combine(expectedWorkingDirectory, "tmp");
+        string scratchDirectory = Path.Combine(_tempDir, "s", "scottlz0310", "squirrel-notifier", "52");
         if (role == LauncherRole.Reviewer)
         {
             capturedPsi.Environment["TEMP"].Should().Be(scratchDirectory);

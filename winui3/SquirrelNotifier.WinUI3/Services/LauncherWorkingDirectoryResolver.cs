@@ -30,7 +30,11 @@ internal sealed class LauncherWorkingDirectoryResolver
                 ReviewerWorkspaceLayout.GetReviewerRoot(_settingsService.SettingsDirectory),
                 reviewEvent.Repository,
                 reviewEvent.PrNumber);
-            Directory.CreateDirectory(ReviewerWorkspaceLayout.GetScratchDirectory(reviewerDirectory));
+            Directory.CreateDirectory(reviewerDirectory);
+            Directory.CreateDirectory(ReviewerWorkspaceLayout.GetWorkspaceDirectory(
+                ReviewerWorkspaceLayout.GetScratchRoot(_settingsService.SettingsDirectory),
+                reviewEvent.Repository,
+                reviewEvent.PrNumber));
 
             // TTL による回収（#403）が最終起動からの経過で判定できるよう、起動のたびに更新時刻を記録する.
             Directory.SetLastWriteTimeUtc(reviewerDirectory, DateTime.UtcNow);
