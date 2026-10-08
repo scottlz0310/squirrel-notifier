@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-08
+
 ### Fixed
 
 - reviewerのscratchをSettings保存先の短い `s/<owner>/<repo>/<PR>` 配下へ配置し、WinUI生成ファイルの長いパスを短縮。セッション再開用の作業ディレクトリは維持し、PR終了・TTL回収・手動削除でscratchも片付ける。
@@ -603,7 +605,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.1...HEAD
+[0.19.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.16.0...v0.17.0
