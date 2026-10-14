@@ -32,9 +32,9 @@
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
     <PackageVersion Include="FluentAssertions" Version="8.11.0" />
-    <PackageVersion Include="Moq" Version="4.20.72" />
-    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
-    <PackageVersion Include="coverlet.msbuild" Version="10.0.1" />
+    <PackageVersion Include="Moq" Version="4.21.0" />
+    <PackageVersion Include="coverlet.collector" Version="10.1.0" />
+    <PackageVersion Include="coverlet.msbuild" Version="10.1.0" />
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
     <!-- テスト境界の primary fixture は公式 SDK のサーバー実装をそのまま動かす（#238）。
          protocol lifecycle を手書きで複製しないため、ModelContextProtocol.Core と同一バージョンを保つこと。 -->
