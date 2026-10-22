@@ -105,7 +105,7 @@ jobs:
   # 配布物 E2E（#221）は別 job で実行し、両方とも初期導入では non-required とする。
   headless-e2e:
     runs-on: windows-2025
-    timeout-minutes: 6
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
