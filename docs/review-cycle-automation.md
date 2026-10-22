@@ -189,9 +189,9 @@ PR の現在の head SHA に対する、required checks の確定状態を `gh a
 
 恒久案では、reviewer は即時に起動して独立確認を進め、完了通知の直前に CI の確定を 1 回だけ待つ。
 待機の手段（Squirrel Notifier のローカル API、thread-owl の待機付き tool など）は未決で、
-reviewers-forest のハンドオフ `squirrel-notifier.md` の「トピック 2」にある
-「#325（reviewer の CI 完了待ち）の置き場（D3）」で扱っている
-（横断の方針は `cross_review-operation-mcp-boundary.md` の「再計画」）。
+reviewers-forest の統合ハンドオフ `docs/hand-off/cross.md` の
+「保留・任意・通常運用」（D3）で扱っている。2026-10-09の判断で現行の起動前ゲートを継続し、
+並行化は待ち時間が実際に支障になるまで保留している。
 
 移行で作り直さずに済むよう、実装は 3 つに分けてある。
 
