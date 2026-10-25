@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- リリース準備・公開・確定の共通 workflow を release-automate v3.1.0 の固定 SHA に更新し、準備 PR の認証を `RELEASE_BOT_CLIENT_ID` に移行した。公開承認、CI・ランブック・配布物の検証、日本語リリースノートの生成手順は維持する。
 - 観測の送信の運用文書（`docs/review-observation-publishing.md`）に、凍結中であることを明記した。送信の認証に使うサービス主体を専用の GitHub アカウントとする記述を外し、主体の形は未決とした。レビューの進捗は、公開状態（`review-status.json`）を `resource-bridge-cli watch-review-status`（v0.8.0 以降）で読む方式に倒したため。実装と既定（無効）は変えていない。
 
 ## [0.19.1] - 2026-10-08
