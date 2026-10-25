@@ -629,6 +629,16 @@ internal sealed class AppSettings
 
     public string GatewayUrl { get; set; } = "http://localhost:3000";
 
+    // review-raven への観測の送信（squirrel-notifier#497 の S1）。既定は無効。
+    // サービス主体のトークンは設定に保存せず、環境変数 SQUIRREL_OBSERVATION_TOKEN で渡す
+    public bool ObservationPublishEnabled { get; set; }
+
+    // review-raven の内部面の URL（gateway の内部ルート。例: https://<gateway>/mcp/review-raven-internal）
+    public string ObservationPublishUrl { get; set; } = string.Empty;
+
+    // 観測の送信主体の ID。review-raven の保護設定（REVIEW_RAVEN_SERVICE_ACL の producers）に載せた ID と一致させる
+    public string ObservationProducerId { get; set; } = "squirrel-notifier";
+
     // 旧フィールド（後方互換; 新設定は ResourceUris を使用）
     public string ResourceUri { get; set; } = "queue://review/queue";
 

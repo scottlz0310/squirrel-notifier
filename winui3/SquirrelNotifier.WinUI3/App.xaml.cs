@@ -31,6 +31,7 @@ public partial class App : Application
     private readonly RateLimitFileService _rateLimitFileService;
     private readonly StatuslineSummaryService _statuslineSummaryService;
     private readonly ReviewStatusService _reviewStatusService;
+    private readonly ReviewObservationPublisher _observationPublisher;
 
     public App()
     {
@@ -76,6 +77,7 @@ public partial class App : Application
             () => _settingsService.Settings.AutoReviewStartEnabled,
             () => _subscriptionService.State,
             () => _subscriptionService.IsAuthenticationRequired);
+        _observationPublisher = ReviewObservationPublishing.Attach(_settingsService, _reviewStatusService, _loggingService);
         _subscriptionService.StateChanged += (_, _) => _ = _reviewStatusService.NotifySubscriptionChangedAsync();
         var enqueueReviewService = new EnqueueReviewService(_settingsService, _loggingService);
         _reviewRegistrationService = new ReviewRegistrationService(_subscriptionService, enqueueReviewService);
@@ -110,6 +112,7 @@ public partial class App : Application
     {
         Program.Reactivated -= OnReactivated;
         await _statuslineSummaryService.ShutdownAsync().ConfigureAwait(false);
+        await _observationPublisher.ShutdownAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         await _reviewStatusService.ShutdownAsync().ConfigureAwait(false);
         await _subscriptionService.DisposeAsync().ConfigureAwait(false);
         await _reviewEventCleanupCoordinator.DisposeAsync().ConfigureAwait(false);

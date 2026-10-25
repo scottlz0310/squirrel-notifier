@@ -119,6 +119,12 @@ internal sealed class ReviewStatusService
             HeartbeatInterval);
     }
 
+    /// <summary>
+    /// 観測の状態が変わった、または heartbeat の時刻になった（review-raven への観測の送信が購読する）。
+    /// ファイルへの書き出しの成否に関わらず、状態を更新したあとに発火する。ハンドラーは、状態を読み直すだけにして、長く待たないこと.
+    /// </summary>
+    internal event EventHandler<ReviewStatusChangedEventArgs>? EntriesChanged;
+
     /// <summary>購読を解除し、文書を削除する。以降の状態変化は書き出さない.</summary>
     /// <returns>削除が完了したタスク.</returns>
     public async Task ShutdownAsync()
@@ -165,7 +171,7 @@ internal sealed class ReviewStatusService
 
     /// <summary>状態が変わっていなくても、<c>updatedAt</c> を現在時刻へ更新する（heartbeat）.</summary>
     /// <returns>書き出しが完了したタスク.</returns>
-    internal Task RefreshAsync() => UpdateAsync(() => true);
+    internal Task RefreshAsync() => UpdateAsync(() => true, isHeartbeat: true);
 
     /// <summary>
     /// 観測しているレビューの写し（起動待ち・実行中・終了）を返す。review-raven への観測の送信が、状態の変化と heartbeat のたびに読む.
@@ -438,8 +444,9 @@ internal sealed class ReviewStatusService
     private void OnReviewEventsRemoved(object? sender, ReviewEventsRemovedEventArgs e)
         => _ = RemoveEventsAsync(e.EventIds);
 
-    private async Task UpdateAsync(Func<bool> mutate)
+    private async Task UpdateAsync(Func<bool> mutate, bool isHeartbeat = false)
     {
+        bool changed = false;
         await _writeGate.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -447,6 +454,8 @@ internal sealed class ReviewStatusService
             {
                 return;
             }
+
+            changed = true;
 
             PruneFinished();
             string json = JsonSerializer.Serialize(BuildDocument(), _serializerOptions);
@@ -462,6 +471,11 @@ internal sealed class ReviewStatusService
         finally
         {
             _writeGate.Release();
+            if (changed)
+            {
+                // ロックの外で発火する。ハンドラーが GetEntriesAsync で読み直しても、書き出しの待ちと競合しない
+                EntriesChanged?.Invoke(this, new ReviewStatusChangedEventArgs(isHeartbeat));
+            }
         }
     }
 
