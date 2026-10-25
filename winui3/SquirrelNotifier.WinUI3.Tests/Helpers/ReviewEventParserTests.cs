@@ -15,10 +15,46 @@ public class ReviewEventParserTests
     private const string _candidateId = "cand_01jbq3x8n5r7t9v2w4y6z8a0d1";
     private const string _headSha = "0123456789abcdef0123456789abcdef01234567";
 
-    [Fact]
-    public void Parse_CandidateWithCycle_ShouldCarryTheCycleToTheEvent()
+    // 受信形式: 候補の配列（キューの資源）、単一の候補、完成済みの ReviewEvent
+    public static TheoryData<string> Formats => ["array", "single", "event"];
+
+    public static TheoryData<string, string> MalformedCyclesInEveryFormat
     {
-        string json = CandidateJson($$"""
+        get
+        {
+            string[] malformed =
+            [
+                "\"cycle\":null",
+                "\"cycle\":\"invalid\"",
+                "\"cycle\":[]",
+                "\"cycle\":{}",
+                "\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1}",
+                "\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":0,\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}",
+                "\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":\"1\",\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}",
+                "\"cycle\":{\"round\":\"1\"}",
+                "\"cycle\":{\"candidateId\":\"bad\",\"cycleId\":\"bad\",\"round\":0,\"headSha\":\"bad\"}",
+                "\"cycle\":{\"candidateId\":\"cand_BAD\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}",
+                "\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456789ABCDEF0123456789abcdef01234567\"}",
+                "\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456\"}",
+            ];
+            TheoryData<string, string> data = [];
+            foreach (string format in new[] { "array", "single", "event" })
+            {
+                foreach (string cycleJson in malformed)
+                {
+                    data.Add(format, cycleJson);
+                }
+            }
+
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Formats))]
+    public void Parse_CandidateWithCycle_ShouldCarryTheCycleToTheEvent_InEveryFormat(string format)
+    {
+        string json = PayloadJson(format, $$"""
             "cycle":{"candidateId":"{{_candidateId}}","cycleId":"{{_cycleId}}","round":2,"headSha":"{{_headSha}}"}
             """);
 
@@ -26,6 +62,27 @@ public class ReviewEventParserTests
 
         result.Status.Should().Be(ReviewEventParseStatus.Parsed);
         result.Events.Single().Cycle.Should().Be(new ReviewCycleRef(_candidateId, _cycleId, 2, _headSha));
+    }
+
+    [Fact]
+    public void ReviewEvent_ShouldKeepItsCycleWhenSerializedAndReadBack()
+    {
+        ReviewCycleRef cycle = new(_candidateId, _cycleId, 3, _headSha);
+        ReviewEvent original = new()
+        {
+            EventId = "evt_1",
+            Repository = "org/repo",
+            PrNumber = 42,
+            PrUrl = "https://github.com/org/repo/pull/42",
+            Reason = "opened",
+            Cycle = cycle,
+        };
+
+        string json = System.Text.Json.JsonSerializer.Serialize(original);
+        ReviewEvent? restored = System.Text.Json.JsonSerializer.Deserialize<ReviewEvent>(json);
+
+        restored!.Cycle.Should().Be(cycle);
+        json.Should().Contain("\"cycle\":{\"candidateId\":\"" + _candidateId + "\",\"cycleId\":\"" + _cycleId + "\",\"round\":3,\"headSha\":\"" + _headSha + "\"}");
     }
 
     [Fact]
@@ -37,21 +94,12 @@ public class ReviewEventParserTests
         result.Events.Single().Cycle.Should().BeNull();
     }
 
-    // 契約に合わない cycle は、観測を相関できないものとして捨てる。候補（キュー全体）は壊さない
+    // 契約に合わない cycle は、受信形式に関わらず、観測を相関できないものとして捨てる。候補（キュー全体）は壊さない
     [Theory]
-    [InlineData("\"cycle\":null")]
-    [InlineData("\"cycle\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\"")]
-    [InlineData("\"cycle\":[]")]
-    [InlineData("\"cycle\":{}")]
-    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1}")]
-    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":0,\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}")]
-    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":\"1\",\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}")]
-    [InlineData("\"cycle\":{\"candidateId\":\"cand_BAD\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}")]
-    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456789ABCDEF0123456789abcdef01234567\"}")]
-    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456\"}")]
-    public void Parse_CandidateWithAMalformedCycle_ShouldKeepTheEventWithoutIt(string cycleJson)
+    [MemberData(nameof(MalformedCyclesInEveryFormat))]
+    public void Parse_CandidateWithAMalformedCycle_ShouldKeepTheEventWithoutIt_InEveryFormat(string format, string cycleJson)
     {
-        ReviewEventParseResult result = ReviewEventParser.Parse(CandidateJson(cycleJson));
+        ReviewEventParseResult result = ReviewEventParser.Parse(PayloadJson(format, cycleJson));
 
         result.Status.Should().Be(ReviewEventParseStatus.Parsed);
         ReviewEvent reviewEvent = result.Events.Single();
@@ -268,6 +316,16 @@ public class ReviewEventParserTests
     // キューの 1 件分（候補の配列）。extra は、候補に足す追加の項目（JSON の断片）
     private static string CandidateJson(string? extra, int prNumber = 42)
         => $"[{Candidate(extra, prNumber)}]";
+
+    // 受信形式ごとの JSON。array=候補の配列、single=単一の候補、event=完成済みの ReviewEvent
+    private static string PayloadJson(string format, string? extra)
+        => format switch
+        {
+            "array" => CandidateJson(extra),
+            "single" => Candidate(extra, 42),
+            "event" => $"{{\"eventId\":\"evt_1\",\"repository\":\"org/repo\",\"prNumber\":42,\"prUrl\":\"https://github.com/org/repo/pull/42\",\"reason\":\"opened\",\"source\":\"src\",\"message\":\"msg\"{(extra is null ? string.Empty : "," + extra)}}}",
+            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "未知の受信形式です。"),
+        };
 
     private static string Candidate(string? extra, int prNumber)
         => $"{{\"owner\":\"org\",\"repo\":\"repo\",\"prNumber\":{prNumber},\"installationId\":1,\"queuedAt\":\"2026-10-25T00:00:00.000Z\",\"reason\":\"opened\"{(extra is null ? string.Empty : "," + extra)}}}";

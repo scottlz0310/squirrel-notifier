@@ -18,11 +18,8 @@ namespace SquirrelNotifier.WinUI3.Models;
 /// <param name="CycleId">依頼 cycle の ID（<c>cyc_</c> + 26 桁）.</param>
 /// <param name="Round">cycle のラウンド（1 以上）.</param>
 /// <param name="HeadSha">レビュー対象の HEAD（40 桁の小文字 16 進）.</param>
-internal sealed record ReviewCycleRef(
-    [property: JsonPropertyName("candidateId")] string CandidateId,
-    [property: JsonPropertyName("cycleId")] string CycleId,
-    [property: JsonPropertyName("round")] int Round,
-    [property: JsonPropertyName("headSha")] string HeadSha)
+[JsonConverter(typeof(ReviewCycleRefConverter))]
+internal sealed record ReviewCycleRef(string CandidateId, string CycleId, int Round, string HeadSha)
 {
     private static readonly Regex _cycleIdPattern = new("^cyc_[0-9a-z]{26}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex _candidateIdPattern = new("^cand_[0-9a-z]{26}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -66,8 +63,38 @@ internal sealed record ReviewCycleRef(
             && _headShaPattern.IsMatch(HeadSha)
             && Round >= 1;
 
+    // 読み書きは ReviewCycleRefConverter が行う。どの受信形式でも、同じ検証（TryRead）を通すため
     private static string? ReadString(JsonElement element, string name)
         => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+}
+
+/// <summary>
+/// <see cref="ReviewCycleRef"/> の読み書き。読むときは、受信形式（候補の配列・単一の候補・完成済みの <see cref="ReviewEvent"/>）に関わらず
+/// <see cref="ReviewCycleRef.TryRead"/> を通し、契約に合わないものは例外にせず <see langword="null"/> にする
+/// （相関が壊れていても、候補・キュー全体は壊さない）.
+/// </summary>
+internal sealed class ReviewCycleRefConverter : JsonConverter<ReviewCycleRef>
+{
+    /// <inheritdoc/>
+    public override ReviewCycleRef? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using JsonDocument document = JsonDocument.ParseValue(ref reader);
+        return ReviewCycleRef.TryRead(document.RootElement);
+    }
+
+    /// <inheritdoc/>
+    public override void Write(Utf8JsonWriter writer, ReviewCycleRef value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(value);
+
+        writer.WriteStartObject();
+        writer.WriteString("candidateId", value.CandidateId);
+        writer.WriteString("cycleId", value.CycleId);
+        writer.WriteNumber("round", value.Round);
+        writer.WriteString("headSha", value.HeadSha);
+        writer.WriteEndObject();
+    }
 }
