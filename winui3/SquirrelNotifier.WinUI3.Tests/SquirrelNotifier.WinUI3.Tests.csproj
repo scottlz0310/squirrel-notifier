@@ -52,6 +52,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- review-raven の契約のフィクスチャ。テストが実行時に読む -->
+  <ItemGroup>
+    <None Include="TestData\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\SquirrelNotifier.WinUI3\SquirrelNotifier.WinUI3.csproj" />
   </ItemGroup>

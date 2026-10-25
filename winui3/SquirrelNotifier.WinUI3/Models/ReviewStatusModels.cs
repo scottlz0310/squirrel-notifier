@@ -61,6 +61,7 @@ internal enum ReviewerOutcome
 /// <param name="HoldSince">保留し始めた時刻（UTC）.</param>
 /// <param name="Outcome">プロセスの終了結果.</param>
 /// <param name="ExitCode">プロセスの終了コード.</param>
+/// <param name="Cycle">review-raven の依頼 cycle との対応。review-raven 経由の候補にだけ付き、公開状態には載せない.</param>
 internal sealed record ReviewStatusEntry(
     string Key,
     string Repository,
@@ -76,7 +77,8 @@ internal sealed record ReviewStatusEntry(
     ReviewHoldKind? Hold = null,
     DateTimeOffset? HoldSince = null,
     ReviewerOutcome? Outcome = null,
-    int? ExitCode = null);
+    int? ExitCode = null,
+    ReviewCycleRef? Cycle = null);
 
 /// <summary>アプリ全体の観測（購読の状態など）。<c>review-status.json</c> の元になる.</summary>
 /// <param name="AppVersion">アプリの版.</param>

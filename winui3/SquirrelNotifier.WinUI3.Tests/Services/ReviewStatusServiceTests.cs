@@ -684,6 +684,100 @@ public sealed class ReviewStatusServiceTests : IDisposable
         await WaitForStatusAsync(node => node["items"]!.AsArray().Count == 0);
     }
 
+    [Fact]
+    public async Task ApplyStateAsync_ShouldCarryTheCycleOfTheEventToWaitingRunningAndFinishedEntries()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent reviewEvent = CreateReviewEvent("event-opened", cycle: Cycle("a"));
+
+        await service.ApplyStateAsync(reviewEvent, CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
+        (await service.GetEntriesAsync()).Single().Cycle.Should().Be(Cycle("a"));
+
+        await service.ApplyStateAsync(
+            reviewEvent,
+            CreateState(status: ReviewCycleStatus.ReviewerRunning, lastEventId: "event-opened", activeEventId: "event-opened"));
+        (await service.GetEntriesAsync()).Single().Cycle.Should().Be(Cycle("a"));
+
+        await service.ApplyStateAsync(
+            reviewEvent,
+            CreateState(status: ReviewCycleStatus.ReviewerCompleted, lastEventId: "event-opened", updatedAt: _initialTime.AddMinutes(1)),
+            exitCode: 0);
+        ReviewStatusEntry finished = (await service.GetEntriesAsync()).Single();
+        finished.State.Should().Be(ReviewStatusState.Finished);
+        finished.Cycle.Should().Be(Cycle("a"));
+    }
+
+    [Fact]
+    public async Task ApplyStateAsync_ShouldPointARunningEntryAtTheCycleOfTheEventThatWasStarted()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent started = CreateReviewEvent("event-started", cycle: Cycle("a"));
+        await service.ApplyStateAsync(
+            started,
+            CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-started"));
+
+        // 起動する前に、同じ PR の次の event が届いている。実行中の状態は、起動した event を指したまま、
+        // 次の event を最新として通知される（通知に添える event は、最新の次の event）
+        ReviewEvent next = CreateReviewEvent("event-next", reason: "synchronized", cycle: Cycle("b"));
+        await service.ApplyStateAsync(
+            next,
+            CreateState(status: ReviewCycleStatus.ReviewerRunning, lastEventId: "event-next", activeEventId: "event-started", updatedAt: _initialTime.AddMinutes(1)));
+
+        ReviewStatusEntry entry = (await service.GetEntriesAsync()).Single();
+        entry.EventId.Should().Be("event-started");
+        entry.Cycle.Should().Be(Cycle("a"));
+    }
+
+    [Fact]
+    public async Task ApplyStateAsync_ShouldLeaveTheCycleEmptyForAnEventFromTheLegacyPath()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent legacy = CreateReviewEvent("event-legacy");
+
+        await service.ApplyStateAsync(legacy, CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-legacy"));
+
+        (await service.GetEntriesAsync()).Single().Cycle.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ApplyStateAsync_ShouldNotPublishTheCycleInThePublicStatusDocument()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent reviewEvent = CreateReviewEvent("event-opened", cycle: Cycle("a"));
+
+        await service.ApplyStateAsync(reviewEvent, CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
+        await service.ApplyStateAsync(
+            reviewEvent,
+            CreateState(status: ReviewCycleStatus.ReviewerRunning, lastEventId: "event-opened", activeEventId: "event-opened"));
+        await service.ApplyStateAsync(
+            reviewEvent,
+            CreateState(status: ReviewCycleStatus.ReviewerCompleted, lastEventId: "event-opened", updatedAt: _initialTime.AddMinutes(1)),
+            exitCode: 0);
+
+        // 公開契約（schemaVersion 1）の形式は変えない。相関の ID は内部だけに留める
+        string raw = await File.ReadAllTextAsync(StatusPath);
+        raw.Should().NotContain("cycleId").And.NotContain("candidateId").And.NotContain("cyc_").And.NotContain("cand_");
+    }
+
+    [Fact]
+    public async Task RemoveEventsAsync_ShouldDropTheEntryTogetherWithItsCycle()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent reviewEvent = CreateReviewEvent("event-opened", cycle: Cycle("a"));
+        await service.ApplyStateAsync(reviewEvent, CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
+
+        await service.RemoveEventsAsync(["event-opened"]);
+
+        (await service.GetEntriesAsync()).Should().BeEmpty();
+    }
+
+    private static ReviewCycleRef Cycle(string name)
+        => new(
+            $"cand_{name}{new string('0', 25)}",
+            $"cyc_{name}{new string('0', 25)}",
+            1,
+            new string(name == "a" ? 'a' : 'b', 40));
+
     private ReviewStatusService CreateService()
         => new(
             _testDirectory,
@@ -756,9 +850,11 @@ public sealed class ReviewStatusServiceTests : IDisposable
         string eventId,
         int prNumber = 42,
         string reason = "opened",
-        DateTimeOffset? receivedAt = null)
+        DateTimeOffset? receivedAt = null,
+        ReviewCycleRef? cycle = null)
         => new()
         {
+            Cycle = cycle,
             EventId = eventId,
             Repository = "owner/Repo",
             PrNumber = prNumber,

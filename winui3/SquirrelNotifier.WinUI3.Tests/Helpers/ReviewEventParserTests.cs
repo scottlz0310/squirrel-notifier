@@ -11,6 +11,69 @@ namespace SquirrelNotifier.WinUI3.Tests.Helpers;
 
 public class ReviewEventParserTests
 {
+    private const string _cycleId = "cyc_01jbq3x8n5r7t9v2w4y6z8a0c1";
+    private const string _candidateId = "cand_01jbq3x8n5r7t9v2w4y6z8a0d1";
+    private const string _headSha = "0123456789abcdef0123456789abcdef01234567";
+
+    [Fact]
+    public void Parse_CandidateWithCycle_ShouldCarryTheCycleToTheEvent()
+    {
+        string json = CandidateJson($$"""
+            "cycle":{"candidateId":"{{_candidateId}}","cycleId":"{{_cycleId}}","round":2,"headSha":"{{_headSha}}"}
+            """);
+
+        ReviewEventParseResult result = ReviewEventParser.Parse(json);
+
+        result.Status.Should().Be(ReviewEventParseStatus.Parsed);
+        result.Events.Single().Cycle.Should().Be(new ReviewCycleRef(_candidateId, _cycleId, 2, _headSha));
+    }
+
+    [Fact]
+    public void Parse_CandidateWithoutCycle_ShouldLeaveTheCycleEmpty()
+    {
+        ReviewEventParseResult result = ReviewEventParser.Parse(CandidateJson(null));
+
+        result.Status.Should().Be(ReviewEventParseStatus.Parsed);
+        result.Events.Single().Cycle.Should().BeNull();
+    }
+
+    // 契約に合わない cycle は、観測を相関できないものとして捨てる。候補（キュー全体）は壊さない
+    [Theory]
+    [InlineData("\"cycle\":null")]
+    [InlineData("\"cycle\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\"")]
+    [InlineData("\"cycle\":[]")]
+    [InlineData("\"cycle\":{}")]
+    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1}")]
+    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":0,\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}")]
+    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":\"1\",\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}")]
+    [InlineData("\"cycle\":{\"candidateId\":\"cand_BAD\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456789abcdef0123456789abcdef01234567\"}")]
+    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456789ABCDEF0123456789abcdef01234567\"}")]
+    [InlineData("\"cycle\":{\"candidateId\":\"cand_01jbq3x8n5r7t9v2w4y6z8a0d1\",\"cycleId\":\"cyc_01jbq3x8n5r7t9v2w4y6z8a0c1\",\"round\":1,\"headSha\":\"0123456\"}")]
+    public void Parse_CandidateWithAMalformedCycle_ShouldKeepTheEventWithoutIt(string cycleJson)
+    {
+        ReviewEventParseResult result = ReviewEventParser.Parse(CandidateJson(cycleJson));
+
+        result.Status.Should().Be(ReviewEventParseStatus.Parsed);
+        ReviewEvent reviewEvent = result.Events.Single();
+        reviewEvent.Cycle.Should().BeNull();
+        reviewEvent.PrNumber.Should().Be(42);
+    }
+
+    [Fact]
+    public void Parse_QueueWithLegacyAndRavenCandidates_ShouldKeepEachCandidatesOwnCycle()
+    {
+        string raven = $$"""
+            "cycle":{"candidateId":"{{_candidateId}}","cycleId":"{{_cycleId}}","round":1,"headSha":"{{_headSha}}"}
+            """;
+        string json = $"[{Candidate(raven, 42)},{Candidate(null, 43)}]";
+
+        ReviewEventParseResult result = ReviewEventParser.Parse(json);
+
+        result.Events.Should().HaveCount(2);
+        result.Events[0].Cycle.Should().NotBeNull();
+        result.Events[1].Cycle.Should().BeNull();
+    }
+
     [Fact]
     public void Parse_ValidJson_ShouldReturnReviewEvent()
     {
@@ -201,4 +264,11 @@ public class ReviewEventParserTests
         result.Events.Should().ContainSingle();
         result.Events[0].Source.Should().Be("queue://review/re-review-requests");
     }
+
+    // キューの 1 件分（候補の配列）。extra は、候補に足す追加の項目（JSON の断片）
+    private static string CandidateJson(string? extra, int prNumber = 42)
+        => $"[{Candidate(extra, prNumber)}]";
+
+    private static string Candidate(string? extra, int prNumber)
+        => $"{{\"owner\":\"org\",\"repo\":\"repo\",\"prNumber\":{prNumber},\"installationId\":1,\"queuedAt\":\"2026-10-25T00:00:00.000Z\",\"reason\":\"opened\"{(extra is null ? string.Empty : "," + extra)}}}";
 }

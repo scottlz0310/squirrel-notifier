@@ -31,6 +31,10 @@ internal sealed class ReviewEvent : INotifyPropertyChanged
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
 
+    // review-raven の依頼 cycle との対応。review-raven 経由の候補にだけ付き、旧経路の候補では null
+    [JsonPropertyName("cycle")]
+    public ReviewCycleRef? Cycle { get; set; }
+
     [JsonIgnore]
     public DateTime ReceivedTime { get; set; } = DateTime.Now;
 

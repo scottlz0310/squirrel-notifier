@@ -143,6 +143,7 @@ Squirrel Notifier は、reviewer の**起動待ち・実行中・終了**の状�
 - 互換性のない変更（フィールドの削除、意味の変更）をするときだけ、`schemaVersion` を上げる。
 - `items[]` と `recent[]` は **N 件**を前提にする。消費者は、実行中の件数が 1 であることを前提にしないこと（将来の並列実行に備える）。
 - `statusline-summary.json` は変えない。
+- **review-raven の依頼 cycle との対応（`cycleId` / `candidateId` / `headSha`）は、このファイルに載せない。** review-raven 経由の queue event にだけ付く相関で、Squirrel Notifier の内部では保持するが、公開状態の形式は変えない。review-raven への観測の送信（review-raven#144 の契約 v1 の `publish_review_observation`）は、この公開契約とは別の契約で、この状態と同じ規則（保留の理由・終了結果）で組み立てる。
 
 ## 書き出しの仕様
 
