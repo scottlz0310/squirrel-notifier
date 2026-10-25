@@ -2,6 +2,8 @@
 
 Squirrel Notifier は、reviewer の**起動待ち・実行中・終了**の観測を、review-raven（依頼側の窓口）へ送れる。実装側のセッションが、Notifier ホストのファイルや画面に触れずに、レビューの途中経過（CI 待ち → 起動待ち → 実行中 → 結果）をリモートから購読できるようにするための、送信元である。
 
+> **凍結中（2026-10-25）。有効にしない。** 送信の認証に使うサービス主体の形が未決のため（[内部連携の運用](https://github.com/scottlz0310/Mcp-Docker/blob/main/docs/review-internal-link.md)）。レビューの進捗は、この送信ではなく、公開状態（`review-status.json`、[契約](review-status-contract.md)）を `resource-bridge-cli watch-review-status`（v0.8.0 以降）で読む方式に倒した。この送信の実装は、必要になるかの判断がつくまで残している。
+
 **既定は無効**。有効にしなければ、これまでと動作は変わらない。
 
 ## 位置づけ
@@ -24,7 +26,7 @@ review-raven 側の前提（Mcp-Docker の [内部連携の運用](https://githu
    | `ObservationProducerId` | 送信主体の ID。既定は `squirrel-notifier`。review-raven の保護設定 `REVIEW_RAVEN_SERVICE_ACL` の、この主体の `producers` に載せた ID と一致させる（小文字の英数字と `._-`、64 文字以内） |
 
 2. サービス主体のトークンを、環境変数 **`SQUIRREL_OBSERVATION_TOKEN`** で渡す。
-   - 内部面は、利用者ではなく**サービス主体**（専用の GitHub アカウント）のトークンで呼ぶ。resource-bridge-cli の認証キャッシュは origin 単位で、同じ gateway の利用者のトークンと衝突するため、このトークンはキャッシュに入れない。
+   - 内部面は、利用者ではなく**サービス主体**のトークンで呼ぶ（主体の形は未決。上の注記と Mcp-Docker の手順書を参照）。resource-bridge-cli の認証キャッシュは origin 単位で、同じ gateway の利用者のトークンと衝突するため、このトークンはキャッシュに入れない。
    - アプリは、トークンを**設定ファイルに保存せず、ログにも出さない**。resource-bridge-cli を起動するとき、子プロセスの `MCP_PROBE_AUTH_TOKEN` にだけ渡す（コマンドライン引数には載せない）。
    - トークンの発行・rotation・失効の手順は、Mcp-Docker の手順書を参照する。
 3. アプリを再起動する（環境変数は起動時に決まる）。`ObservationPublishEnabled` / `Url` / `ProducerId` は、実行中に読み直す。
