@@ -1,7 +1,7 @@
 # リリースの準備と公開
 
-`scottlz0310/release-automate` v2.0.0 の prepare / publish / finalize をすべて
-`fd3e676a431bbd6e189270e6911ec4c2307e9f2b` に固定する。Squirrel Notifier 側は x64 の配布物生成、
+`scottlz0310/release-automate` v3.1.0 の prepare / publish / finalize をすべて
+`fde6d796e366b4a70d73a992a48241c03f49ee68` に固定する。Squirrel Notifier 側は x64 の配布物生成、
 日本語ノートの合成、CI・ランブック・配布物の検証を担当する。安定版 `X.Y.Z` のみを受け付ける。
 
 ## 準備 PR
@@ -15,7 +15,7 @@
 5. 明示的なマージ許可を得て Squash merge する。コミットのタイトルを **`chore(release): vX.Y.Z`** にする。
    通常の PR 番号の接尾辞を付けず、この形式を維持する。
 
-Organization の `RELEASE_BOT_APP_ID` / `RELEASE_BOT_PRIVATE_KEY` を準備 workflow に渡す。
+Organization の `RELEASE_BOT_CLIENT_ID` / `RELEASE_BOT_PRIVATE_KEY` を準備 workflow に渡す。
 鍵の管理・ローテーションは release-automate 側の責務で、個別 repo に秘密鍵を置かない。
 
 ## 公開承認
