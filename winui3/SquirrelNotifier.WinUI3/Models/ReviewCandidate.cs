@@ -2,6 +2,7 @@
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace SquirrelNotifier.WinUI3.Models;
@@ -31,4 +32,8 @@ internal sealed class ReviewCandidate
 
     [JsonPropertyName("requestedBy")]
     public string? RequestedBy { get; set; }
+
+    // review-raven の依頼 cycle との対応。review-raven 経由の候補にだけ付く。形式の検証は ReviewCycleRef.TryRead が行う
+    [JsonPropertyName("cycle")]
+    public JsonElement? Cycle { get; set; }
 }

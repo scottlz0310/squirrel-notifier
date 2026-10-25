@@ -95,12 +95,7 @@ internal static class ReviewStatusDocumentBuilder
         ReviewStatusEnvironment environment,
         int? queuePosition)
     {
-        // 保留を観測していない起動待ちのうち、自動起動が off のものは、操作（「レビューする」）を待っている
-        string? holdReason = entry.State != ReviewStatusState.Waiting
-            ? null
-            : entry.Hold is ReviewHoldKind hold
-                ? DescribeHold(hold)
-                : environment.AutoStartEnabled ? null : "manual";
+        string? holdReason = DescribeHoldReason(entry, environment.AutoStartEnabled);
         DateTimeOffset? holdSince = holdReason is null ? null : entry.HoldSince ?? entry.ReceivedAt;
 
         return new ReviewStatusItem(
@@ -122,7 +117,26 @@ internal static class ReviewStatusDocumentBuilder
             entry.ExitCode);
     }
 
-    private static string DescribeState(ReviewStatusState state)
+    /// <summary>
+    /// 起動待ちの理由（<c>ciPending</c> / <c>busy</c> / <c>manual</c> / <c>autoPause</c>）を決める。起動待ち以外、および保留を観測していない
+    /// 起動待ち（自動起動が on の評価の途中）は <see langword="null"/>。公開状態と review-raven への観測で同じ規則を使う.
+    /// </summary>
+    /// <param name="entry">PR ごとのレビューの観測.</param>
+    /// <param name="autoStartEnabled">「レビュー自動開始」が on か.</param>
+    /// <returns>起動待ちの理由.</returns>
+    internal static string? DescribeHoldReason(ReviewStatusEntry entry, bool autoStartEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        // 保留を観測していない起動待ちのうち、自動起動が off のものは、操作（「レビューする」）を待っている
+        return entry.State != ReviewStatusState.Waiting
+            ? null
+            : entry.Hold is ReviewHoldKind hold
+                ? DescribeHold(hold)
+                : autoStartEnabled ? null : "manual";
+    }
+
+    internal static string DescribeState(ReviewStatusState state)
         => state switch
         {
             ReviewStatusState.Waiting => "waiting",
@@ -140,7 +154,7 @@ internal static class ReviewStatusDocumentBuilder
             _ => throw new ArgumentOutOfRangeException(nameof(hold), hold, "未知の保留の理由です。"),
         };
 
-    private static string DescribeOutcome(ReviewerOutcome outcome)
+    internal static string DescribeOutcome(ReviewerOutcome outcome)
         => outcome switch
         {
             ReviewerOutcome.Completed => "completed",

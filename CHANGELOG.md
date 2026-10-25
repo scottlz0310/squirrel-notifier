@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- review-raven の依頼 cycle との対応（`cycleId` / `candidateId` / `headSha` / `round`。review-raven#144 の契約 v1）を、queue の候補から読み、reviewer の起動待ち・実行中・終了の観測に保持するようにした（squirrel-notifier#497 の段階 1）。review-raven 経由の候補にだけ付き、形式が契約に合わない `cycle` は捨てる（候補は壊さない）。あわせて、review-raven へ送る実行状態の観測（`publish_review_observation` の入力）を組み立てる処理を追加した。起動待ちの理由・終了結果は、公開状態（`review-status.json`）と同じ規則で決め、契約の許可項目だけを出力する（ローカルパス・コマンドライン・ログ本文・秘密値・reviewer の選択は含まない）。`review-status.json`（schemaVersion 1）と `statusline-summary.json` の形式は変えず、相関の ID は載せない。**この変更は、観測を送信しない**（送信するサービス、heartbeat、設定は次の変更）。
+
 ## [0.19.1] - 2026-10-08
 
 ### Fixed

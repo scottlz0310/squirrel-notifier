@@ -142,6 +142,7 @@ internal static class ReviewEventParser
             Reason = candidate.Reason,
             Source = source,
             Message = message,
+            Cycle = ReviewCycleRef.TryRead(candidate.Cycle),
         };
 
         reviewEvent.Validate();

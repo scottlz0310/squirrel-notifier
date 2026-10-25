@@ -61,6 +61,10 @@ internal sealed class ReviewStatusService
     // 終了済み PR のイベントを削除した後にも、実行中だった reviewer の終了通知が同じイベントの状態を
     // 発行する。削除済みイベントの状態で PR を再登録しないよう、削除した ID を保持する
     private readonly HashSet<string> _removedEventIds = new(StringComparer.Ordinal);
+
+    // event ID ごとの review-raven の依頼 cycle との対応。起動待ち・実行中・終了の項目は、対応する event の同一性を持つ
+    // （実行中の項目は、その PR の最新の event ではなく、起動した event を指すことがあるため、event ID で引く）
+    private readonly Dictionary<string, ReviewCycleRef> _cycleByEventId = new(StringComparer.Ordinal);
     private string _subscriptionState;
     private DateTimeOffset _subscriptionSince;
     private ITimer? _heartbeat;
@@ -163,6 +167,23 @@ internal sealed class ReviewStatusService
     /// <returns>書き出しが完了したタスク.</returns>
     internal Task RefreshAsync() => UpdateAsync(() => true);
 
+    /// <summary>
+    /// 観測しているレビューの写し（起動待ち・実行中・終了）を返す。review-raven への観測の送信が、状態の変化と heartbeat のたびに読む.
+    /// </summary>
+    /// <returns>PR ごとのレビューの観測.</returns>
+    internal async Task<IReadOnlyList<ReviewStatusEntry>> GetEntriesAsync()
+    {
+        await _writeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            return [.. _current.Values.Concat(_finished)];
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
     internal Task ApplyStateAsync(ReviewEvent reviewEvent, ReviewCycleState state, int? exitCode = null)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
@@ -188,6 +209,7 @@ internal sealed class ReviewStatusService
             foreach (string eventId in eventIds)
             {
                 _holds.Remove(eventId);
+                _cycleByEventId.Remove(eventId);
             }
 
             string[] keysToRemove = [.. _current
@@ -233,6 +255,11 @@ internal sealed class ReviewStatusService
         }
 
         _lastAppliedAt[key] = state.UpdatedAt;
+        if (reviewEvent.Cycle is not null)
+        {
+            _cycleByEventId[reviewEvent.EventId] = reviewEvent.Cycle;
+        }
+
         TrackRelatedEvents(key, reviewEvent, state);
         _current.TryGetValue(key, out ReviewStatusEntry? existing);
 
@@ -264,7 +291,8 @@ internal sealed class ReviewStatusService
                     ReviewStatusState.Waiting,
                     ToUtc(reviewEvent.ReceivedTime),
                     Hold: hold,
-                    HoldSince: holdSince);
+                    HoldSince: holdSince,
+                    Cycle: CycleOf(eventId));
                 return true;
 
             case ReviewCycleStatus.ReviewerRunning:
@@ -290,7 +318,8 @@ internal sealed class ReviewStatusService
                     ReviewStatusState.Running,
                     waited?.ReceivedAt ?? (isActiveEvent ? ToUtc(reviewEvent.ReceivedTime) : state.UpdatedAt),
                     StartedAt: state.UpdatedAt,
-                    Agent: state.ActiveAgent);
+                    Agent: state.ActiveAgent,
+                    Cycle: CycleOf(eventId));
                 return true;
 
             default:
@@ -317,10 +346,14 @@ internal sealed class ReviewStatusService
                     FinishedAt: state.UpdatedAt,
                     Agent: running?.Agent,
                     Outcome: state.Status == ReviewCycleStatus.ReviewerCompleted ? ReviewerOutcome.Completed : ReviewerOutcome.Failed,
-                    ExitCode: exitCode));
+                    ExitCode: exitCode,
+                    Cycle: CycleOf(eventId)));
                 return true;
         }
     }
+
+    private ReviewCycleRef? CycleOf(string eventId)
+        => _cycleByEventId.TryGetValue(eventId, out ReviewCycleRef? cycle) ? cycle : null;
 
     private void TrackRelatedEvents(string key, ReviewEvent reviewEvent, ReviewCycleState state)
     {
@@ -453,12 +486,23 @@ internal sealed class ReviewStatusService
     private void PruneFinished()
     {
         DateTimeOffset cutoff = _timeProvider.GetUtcNow() - ReviewStatusDocumentBuilder.RecentRetention;
+        string[] expired = [.. _finished.Where(entry => entry.FinishedAt < cutoff).Select(static entry => entry.EventId)];
         _finished.RemoveAll(entry => entry.FinishedAt < cutoff);
+        foreach (string eventId in expired)
+        {
+            _cycleByEventId.Remove(eventId);
+        }
+
         if (_finished.Count > ReviewStatusDocumentBuilder.RecentLimit)
         {
             ReviewStatusEntry[] keep = [.. _finished
                 .OrderByDescending(static entry => entry.FinishedAt)
                 .Take(ReviewStatusDocumentBuilder.RecentLimit)];
+            foreach (ReviewStatusEntry dropped in _finished.Except(keep))
+            {
+                _cycleByEventId.Remove(dropped.EventId);
+            }
+
             _finished.Clear();
             _finished.AddRange(keep);
         }
