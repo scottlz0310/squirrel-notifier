@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-27
+
 ### Added
 
 - 起動待ち・実行中・終了の観測を review-raven へ送るようにした（squirrel-notifier#497 の段階 2。review-raven#144 の契約 v1 の `publish_review_observation`）。**既定は無効**で、`settings.json` の `ObservationPublishEnabled` / `ObservationPublishUrl` / `ObservationProducerId` と、環境変数 `SQUIRREL_OBSERVATION_TOKEN`（サービス主体のトークン。設定ファイルに保存せず、ログにも出さず、子プロセスの環境変数にだけ渡す）で有効にする。review-raven 経由の候補だけを送り、状態が変わったときと 60 秒ごとの heartbeat（起動待ち・実行中。終了は受理されたら二度と送らない）に、cycle ごとに増える連番と、起動ごとに増える世代（`observation-producer.json` に保存）を付けて送る。アプリの終了時は `stopped=true` を送る（最大 5 秒）。送信の失敗は reviewer の起動・公開状態・アプリの動作を止めず、送り直せる失敗は次の機会に**最新の状態**を送り直し、送り直しても成功しない拒否はその cycle の送信をやめる。送信が重なっても同時に 1 件だけで、最後の状態が必ず送られる。`review-status.json`（schemaVersion 1）と `statusline-summary.json` の形式は変えず、reviewer の選択変更・外部からの起動 API は追加しない。手順は `docs/review-observation-publishing.md`。実際の thread-owl・review-raven・gateway を経由した送信は未確認。
@@ -619,7 +621,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.17.0...v0.18.0

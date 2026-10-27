@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "version": "0.20.0",
+  "testedCommit": "2922fb7a2e06f3d100e4437ddf48fe03e0ad70f3",
+  "productVersion": "0.20.0+2922fb7a2e06f3d100e4437ddf48fe03e0ad70f3",
+  "executedAt": "2026-10-27T13:36:24+09:00",
+  "executor": {
+    "agent": "claude-code",
+    "model": "claude-haiku-5-5",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Home 10.0.26300",
+    "notes": "v0.20.0 の実装・PR 作成をしていない独立セッション（Claude Code の /desktop-e2e-runbook）。対話デスクトップ（Default）で実行。pwsh 7.6.9、.NET SDK 10.0.403。各シナリオは Start-RunbookEnvironment.ps1 から Stop-RunbookEnvironment.ps1 まで 1 回の実行で行い、durationSeconds は build を含む。常駐インスタンス（PID 38368）は停止せず、全 run で isolated=true・realSettingsUnchanged=true・残留プロセス 0。ボタン操作はすべて実マウス入力（Click）で、各操作後に Responding=true を確認。再実行なし。"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 90,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133624-isolated-launch\\evidence\\uia.jsonl",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed.（WaitText に一致）"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133624-isolated-launch\\evidence\\process-files.json",
+          "summary": "テスト用 PID 24540 は run.appPath と一致（Release exe）。常駐 PID 38368 は別プロセスで Responding=true。隔離 settings.json と logs/winui3.log が存在"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133624-isolated-launch\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 72,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133753-review-event-flow\\evidence\\uia.jsonl",
+          "summary": "TitleText=re-review-requested: third-owner/third-repository#309（3 件の正規表現のいずれかに完全一致）。Recent review events に #307/#308/#309 の 3 件。#307 の LaunchReviewerButton を Click し、「reviewer 実行完了」を確認"
+        },
+        {
+          "kind": "observation",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133753-review-event-flow\\observations\\launcher.jsonl",
+          "summary": "arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectory は dataRoot 配下の launcher-workspace\\reviewer\\fixture-owner\\fixture-repository\\307"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133753-review-event-flow\\data\\logs\\winui3.log",
+          "summary": "Review process finished. ExitCode=0 と、[Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました、の 2 行を確認"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133753-review-event-flow\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 76,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133933-register-while-stopped\\evidence\\uia.jsonl",
+          "summary": "停止後 StartButton isEnabled=true（購読を開始）。確認ダイアログの PrimaryButton（購読を開始して登録）を Click。再開後 StopButton isEnabled=true（購読を停止）"
+        },
+        {
+          "kind": "observation",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133933-register-while-stopped\\observations\\subscriber.jsonl",
+          "summary": "mode=call は 1 行。--tool enqueue_review、--url は fake Gateway の URL、--args={owner:fixture-owner, repo:fixture-repository, prNumber:320, reason:opened}、exitCode=0、hasAuthorization=false"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133933-register-while-stopped\\data\\logs\\winui3.log",
+          "summary": "State: Running（行 10）→ Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened)（行 11）→ enqueue_review call finished. ExitCode=0（行 12）の順"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\jojob\\AppData\\Local\\Temp\\squirrel-notifier-runbook\\20261027-133933-register-while-stopped\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    }
+  ]
+}
