@@ -110,6 +110,30 @@ public class McpSubscriptionServiceTests : IDisposable
         return (Task)runMethod!.Invoke(service, new object[] { token })!;
     }
 
+    // 非認証エラーは確定後も自動回復待機（60s〜）へ入るため、確定エラーへの遷移だけを
+    // 検証するテストでは自動回復待機に入った時点でループを畳む
+    private async Task InvokeSubscriptionLoopUntilAutoRecoveryAsync(McpSubscriptionService service)
+    {
+        using var cts = new CancellationTokenSource();
+        void OnLogAppended(object? sender, string line)
+        {
+            if (line.Contains("Entering auto-recovery mode", StringComparison.Ordinal))
+            {
+                cts.Cancel();
+            }
+        }
+
+        _loggingService.LogAppended += OnLogAppended;
+        try
+        {
+            await InvokeSubscriptionLoopAsync(service, cts.Token);
+        }
+        finally
+        {
+            _loggingService.LogAppended -= OnLogAppended;
+        }
+    }
+
     [Fact]
     public async Task Start_ShouldSucceedAndResubscribeOnSuccessJson()
     {
@@ -240,11 +264,9 @@ public class McpSubscriptionServiceTests : IDisposable
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
 
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
-        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
-        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
-        await task;
+        await InvokeSubscriptionLoopUntilAutoRecoveryAsync(service);
 
         // Assert
         service.State.Should().Be(SubscriptionState.Error);
@@ -266,11 +288,9 @@ public class McpSubscriptionServiceTests : IDisposable
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
 
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
-        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
-        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
-        await task;
+        await InvokeSubscriptionLoopUntilAutoRecoveryAsync(service);
 
         // Assert
         service.State.Should().Be(SubscriptionState.Error);
@@ -289,11 +309,9 @@ public class McpSubscriptionServiceTests : IDisposable
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
 
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
-        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
-        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
-        await task;
+        await InvokeSubscriptionLoopUntilAutoRecoveryAsync(service);
 
         // Assert
         service.State.Should().Be(SubscriptionState.Error);
@@ -324,11 +342,9 @@ public class McpSubscriptionServiceTests : IDisposable
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : subscriptionProcess);
 
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
-        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
-        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
-        await task;
+        await InvokeSubscriptionLoopUntilAutoRecoveryAsync(service);
 
         // Assert
         service.State.Should().Be(SubscriptionState.Error);
@@ -725,11 +741,9 @@ public class McpSubscriptionServiceTests : IDisposable
             .Returns<ProcessStartInfo>(psi => psi.ArgumentList.Contains("--help") ? preflightProcess : mockProcess.Object);
 
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
-        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
-        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
-        await task;
+        await InvokeSubscriptionLoopUntilAutoRecoveryAsync(service);
 
         // Assert: OCE without loop/process cancellation is treated as an error and triggers retry/error path
         service.State.Should().Be(SubscriptionState.Error);
@@ -1028,11 +1042,9 @@ public class McpSubscriptionServiceTests : IDisposable
 
         // maxRetries: 1 → 1 initial + 1 retry = 2 total subscription calls
         var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 1);
-        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
-        var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
-        await task;
+        await InvokeSubscriptionLoopUntilAutoRecoveryAsync(service);
 
         // Assert
         subscriptionCallCount.Should().Be(2);
@@ -1152,13 +1164,11 @@ public class McpSubscriptionServiceTests : IDisposable
             mockRunner.Object,
             maxRetries: 0,
             dependencyWaitBudgetMs: 0);
-        var runMethod = typeof(McpSubscriptionService).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         // Act
         try
         {
-            var task = (Task)runMethod!.Invoke(service, new object[] { CancellationToken.None })!;
-            await task;
+            await InvokeSubscriptionLoopUntilAutoRecoveryAsync(service);
         }
         finally
         {
@@ -2322,11 +2332,242 @@ public class McpSubscriptionServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Start_AfterDependencyWaitBudgetExceeded_ShouldAutoRecoverWithExponentialBackoffWhenGatewayBecomesReady()
+    {
+        // Arrange: コンテナ再起動等で 5 分の待機予算を超過して Error に遷移したあとも、
+        // 60s → 120s → 240s → 300s（最大 5 分）の指数バックオフで自動再試行を続け、
+        // 接続できたら Running / "Subscribed." へ自動復帰し、その後の再障害では
+        // 初回の待機予算から数え直すことを確認する
+        string successJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = false,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", string.Empty);
+        var testCts = new CancellationTokenSource();
+        var mockRunner = CreateScriptedRunner(preflightProcess, call => call switch
+        {
+            // Call 1: 予算 0ms のため即座に Error 遷移 → recoveryAttempt=1 (60s)
+            // Call 2: 失敗 → recoveryAttempt=2 (120s)
+            // Call 3: 失敗 → recoveryAttempt=3 (240s)
+            // Call 4: 失敗 → recoveryAttempt=4 (300s)
+            // Call 5: 失敗 → recoveryAttempt=5 (300s cap)
+            1 or 2 or 3 or 4 or 5 => CreateConnectionRefusedProcess(),
+            // Call 6: gateway 起動完了により購読成功 → Running に復帰
+            6 => CreateMockProcess(0, successJson, string.Empty),
+            _ => CreateLoopStoppingProcess(testCts),
+        });
+
+        var timeProvider = new InstantWaitTimeProvider();
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            maxRetries: 0,
+            dependencyWaitBudgetMs: 0,
+            timeProvider: timeProvider);
+
+        var observedStates = new List<SubscriptionState>();
+        var statusTexts = new List<string>();
+        service.StateChanged += (_, state) => observedStates.Add(state);
+        service.StatusTextChanged += (_, text) => statusTexts.Add(text);
+
+        using var logCapture = new LogCapture(_loggingService);
+
+        // Act
+        await InvokeSubscriptionLoopAsync(service, testCts.Token);
+
+        // Assert
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+        service.IsAuthenticationRequired.Should().BeFalse();
+
+        observedStates.Should().ContainInOrder(
+            SubscriptionState.Running,
+            SubscriptionState.Error,
+            SubscriptionState.Running);
+        statusTexts[^1].Should().Be("Subscribed.");
+
+        timeProvider.RecordedDelays.Should().Equal(
+            TimeSpan.FromSeconds(60),
+            TimeSpan.FromSeconds(120),
+            TimeSpan.FromSeconds(240),
+            TimeSpan.FromSeconds(300),
+            TimeSpan.FromSeconds(300));
+
+        IReadOnlyList<string> captured = logCapture.Lines;
+        captured.Should().ContainSingle(line => line.Contains("Subscription loop error (dependency wait budget exceeded", StringComparison.Ordinal));
+        captured.Should().ContainSingle(line => line.Contains("Entering auto-recovery mode (initial interval: 60s, max: 300s).", StringComparison.Ordinal));
+        captured.Should().ContainSingle(line => line.Contains("Subscription recovered after error.", StringComparison.Ordinal));
+        // 自動回復中の再失敗（Call 2〜5）では Launching subscriber ログを抑制し、復帰後の再購読（Call 7）で再開する
+        captured.Count(line => line.Contains("Launching subscriber for resource:", StringComparison.Ordinal)).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Start_DuringAutoRecovery_ShouldUpdateErrorWhenMessageChangesAndStopWhenAuthRequiredOccurs()
+    {
+        // Arrange: 自動回復待機中に別の非認証エラーへ変化した場合は LastError を更新して継続し、
+        // 認証必須エラー（[AUTH_REQUIRED]）へ変化した場合は自動回復を停止してループを抜ける
+        string authFailureJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "failed",
+            ErrorCode = "AUTH_LOGIN_REQUIRED",
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", string.Empty);
+        int subscriptionCalls = 0;
+        var mockRunner = CreateScriptedRunner(preflightProcess, call =>
+        {
+            subscriptionCalls = call;
+            return call switch
+            {
+                1 => CreateConnectionRefusedProcess(),
+                2 => CreateConnectionRefusedProcess(),
+                3 => CreateMockProcess(1, string.Empty, "Error POSTing to endpoint: 404"),
+                _ => CreateMockProcess(1, authFailureJson, "run --login again"),
+            };
+        });
+
+        var timeProvider = new InstantWaitTimeProvider();
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            maxRetries: 0,
+            dependencyWaitBudgetMs: 0,
+            timeProvider: timeProvider);
+
+        var statusTexts = new List<string>();
+        service.StatusTextChanged += (_, text) => statusTexts.Add(text);
+
+        using var logCapture = new LogCapture(_loggingService);
+
+        // Act: 認証エラーで自ら break するため CancellationToken.None で完走する
+        await InvokeSubscriptionLoopAsync(service, CancellationToken.None);
+
+        // Assert
+        subscriptionCalls.Should().Be(4);
+        service.State.Should().Be(SubscriptionState.Error);
+        service.IsAuthenticationRequired.Should().BeTrue();
+        service.LastError.Should().StartWith("mcp-gateway への認証が必要です。");
+
+        statusTexts.Should().Contain(text => text.Contains("mcp-gateway への接続に失敗しました", StringComparison.Ordinal));
+        statusTexts.Should().Contain(text => text.Contains("指定されたエンドポイントが見つかりませんでした (404)", StringComparison.Ordinal));
+        statusTexts[^1].Should().Contain("mcp-gateway への認証が必要です。");
+
+        IReadOnlyList<string> captured = logCapture.Lines;
+        captured.Should().ContainSingle(line => line.Contains("Subscription auto-recovery stopped [AUTH_REQUIRED]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Start_WhenCalledManuallyDuringAutoRecovery_ShouldCancelPreviousLoopAndRestartImmediately()
+    {
+        // Arrange: Error 状態で自動回復の 60 秒待機に入っている最中に手動で Start() が呼ばれたら、
+        // 古い待機ループをキャンセルして即座に新しい購読ループを開始できることを確認する
+        string successJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = false,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", string.Empty);
+        var enteringRecoveryTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recoveredRunningTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int subscriptionCalls = 0;
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return CreateMockProcess(0, "help", string.Empty);
+                }
+
+                int call = Interlocked.Increment(ref subscriptionCalls);
+                if (call == 1)
+                {
+                    return CreateMockProcess(1, string.Empty, "persistent failure on first start");
+                }
+
+                if (call == 2)
+                {
+                    return CreateMockProcess(0, successJson, string.Empty);
+                }
+
+                var waitingMock = new Mock<IProcessInstance>();
+                waitingMock.SetupGet(p => p.ExitCode).Returns(0);
+                waitingMock.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream()));
+                waitingMock.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+                waitingMock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                    .Returns<CancellationToken>(ct => Task.Delay(Timeout.Infinite, ct));
+                return waitingMock.Object;
+            });
+
+        void OnLogAppended(object? sender, string line)
+        {
+            if (line.Contains("Entering auto-recovery mode", StringComparison.Ordinal))
+            {
+                enteringRecoveryTcs.TrySetResult();
+            }
+
+            if (line.Contains("Subscriber finished execution. Route=subscription", StringComparison.Ordinal))
+            {
+                recoveredRunningTcs.TrySetResult();
+            }
+        }
+
+        _loggingService.LogAppended += OnLogAppended;
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            maxRetries: 0);
+
+        try
+        {
+            // Act 1: 初回起動 → 失敗して Error 状態・60 秒の自動回復待機に入る
+            service.Start();
+            await enteringRecoveryTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            service.State.Should().Be(SubscriptionState.Error);
+
+            // Act 2: 60 秒待たずに手動で Start() を呼ぶと即座に再開して Running になる
+            service.Start();
+            await recoveredRunningTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Assert
+            service.State.Should().Be(SubscriptionState.Running);
+            service.LastError.Should().BeEmpty();
+        }
+        finally
+        {
+            _loggingService.LogAppended -= OnLogAppended;
+            await service.StopAsync();
+        }
+    }
+
     // 待機を要求された分だけ仮想時刻を進め、待機自体は即座に満了させる TimeProvider。
     // 経過時間の計算は実装のままなので、待機予算の判定は実時間を待たずに検証できる（#332）
     private sealed class InstantWaitTimeProvider : TimeProvider
     {
+        private readonly List<TimeSpan> _recordedDelays = new();
         private long _ticks = new DateTimeOffset(2026, 9, 16, 0, 0, 0, TimeSpan.Zero).Ticks;
+
+        public IReadOnlyList<TimeSpan> RecordedDelays
+        {
+            get
+            {
+                lock (_recordedDelays)
+                {
+                    return new List<TimeSpan>(_recordedDelays);
+                }
+            }
+        }
 
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
@@ -2338,6 +2579,11 @@ public class McpSubscriptionServiceTests : IDisposable
         {
             if (dueTime > TimeSpan.Zero)
             {
+                lock (_recordedDelays)
+                {
+                    _recordedDelays.Add(dueTime);
+                }
+
                 Interlocked.Add(ref _ticks, dueTime.Ticks);
             }
 
