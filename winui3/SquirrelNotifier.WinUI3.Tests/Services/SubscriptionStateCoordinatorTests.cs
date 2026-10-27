@@ -106,4 +106,35 @@ public sealed class SubscriptionStateCoordinatorTests
         normal.Notification.Should().BeNull();
         nextError.Notification.Should().NotBeNull();
     }
+
+    [Fact]
+    public void Update_WhenErrorEscalatesToAuthenticationRequired_ShouldShowAuthBalloonOnce()
+    {
+        SubscriptionStateCoordinator coordinator = new();
+
+        SubscriptionStatePresentation connectionError = coordinator.Update(
+            SubscriptionState.Error,
+            "mcp-gateway への接続に失敗しました。",
+            isAuthenticationRequired: false);
+        SubscriptionStatePresentation escalatedAuthError = coordinator.Update(
+            SubscriptionState.Error,
+            "mcp-gateway への認証が必要です。",
+            isAuthenticationRequired: true);
+        SubscriptionStatePresentation repeatedAuthError = coordinator.Update(
+            SubscriptionState.Error,
+            "mcp-gateway への認証が必要です。",
+            isAuthenticationRequired: true);
+
+        connectionError.IsAuthenticationRequired.Should().BeFalse();
+        connectionError.Notification.Should().NotBeNull();
+        connectionError.Notification!.Message.Should().Be("接続エラー: mcp-gateway への接続に失敗しました。");
+
+        escalatedAuthError.IsAuthenticationRequired.Should().BeTrue();
+        escalatedAuthError.StatusText.Should().Be("Error: mcp-gateway への認証が必要です。");
+        escalatedAuthError.Notification.Should().NotBeNull();
+        escalatedAuthError.Notification!.Message.Should().Be("mcp-gateway への認証が必要です。");
+        escalatedAuthError.NotificationLogMessage.Should().Be("[UI] Showing authentication required balloon notification.");
+
+        repeatedAuthError.Notification.Should().BeNull();
+    }
 }

@@ -2409,8 +2409,9 @@ public class McpSubscriptionServiceTests : IDisposable
     [Fact]
     public async Task Start_DuringAutoRecovery_ShouldUpdateErrorWhenMessageChangesAndStopWhenAuthRequiredOccurs()
     {
-        // Arrange: 自動回復待機中に別の非認証エラーへ変化した場合は LastError を更新して継続し、
-        // 認証必須エラー（[AUTH_REQUIRED]）へ変化した場合は自動回復を停止してループを抜ける
+        // Arrange: 自動回復待機中に別の非認証エラーへ変化した場合は LastError を更新して StateChanged も発火し、
+        // 認証必須エラー（[AUTH_REQUIRED]）へ変化した場合は StateChanged で UI（SubscriptionStateCoordinator）の
+        // 認証必須表示・バルーン通知まで更新した上で自動回復を停止してループを抜ける
         string authFailureJson = JsonSerializer.Serialize(new SubscriptionResult
         {
             Route = "failed",
@@ -2442,7 +2443,13 @@ public class McpSubscriptionServiceTests : IDisposable
             timeProvider: timeProvider);
 
         var statusTexts = new List<string>();
+        var coordinator = new SubscriptionStateCoordinator();
+        var presentations = new List<SubscriptionStatePresentation>();
         service.StatusTextChanged += (_, text) => statusTexts.Add(text);
+        service.StateChanged += (_, state) =>
+        {
+            presentations.Add(coordinator.Update(state, service.LastError, service.IsAuthenticationRequired));
+        };
 
         using var logCapture = new LogCapture(_loggingService);
 
@@ -2459,8 +2466,244 @@ public class McpSubscriptionServiceTests : IDisposable
         statusTexts.Should().Contain(text => text.Contains("指定されたエンドポイントが見つかりませんでした (404)", StringComparison.Ordinal));
         statusTexts[^1].Should().Contain("mcp-gateway への認証が必要です。");
 
+        // Running → Error(CONN_REFUSED) → Error(404) → Error(AUTH_REQUIRED)。Call 2 の同一エラーでは発火しない
+        presentations.Should().HaveCount(4);
+        presentations[1].State.Should().Be(SubscriptionState.Error);
+        presentations[1].IsAuthenticationRequired.Should().BeFalse();
+        presentations[1].Notification.Should().NotBeNull();
+        presentations[2].State.Should().Be(SubscriptionState.Error);
+        presentations[2].IsAuthenticationRequired.Should().BeFalse();
+        presentations[2].Tooltip.Should().Contain("指定されたエンドポイントが見つかりませんでした (404)");
+        presentations[2].Notification.Should().BeNull();
+        presentations[3].State.Should().Be(SubscriptionState.Error);
+        presentations[3].IsAuthenticationRequired.Should().BeTrue();
+        presentations[3].Tooltip.Should().Contain("mcp-gateway への認証が必要です。");
+        presentations[3].Notification.Should().NotBeNull();
+        presentations[3].NotificationLogMessage.Should().Be("[UI] Showing authentication required balloon notification.");
+
         IReadOnlyList<string> captured = logCapture.Lines;
         captured.Should().ContainSingle(line => line.Contains("Subscription auto-recovery stopped [AUTH_REQUIRED]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Start_WithMultipleResourceUris_WhenOneRecoversWhileAnotherHasAuthError_ShouldKeepErrorAndAuthRequired()
+    {
+        // Arrange: URI A が AUTH_REQUIRED で停止中、URI B が接続エラーから自動回復したとき、
+        // B の復帰によって A の認証必須エラーが消されず、State == Error / IsAuthenticationRequired == true が維持され、
+        // その後の手動 Start() も AlreadyActive で弾かれずに再実行できることを確認する
+        _settingsService.UpdateSettings(
+            "my-cmd",
+            string.Empty,
+            "http://gateway:80",
+            new[] { "queue://uri-auth", "queue://uri-recover" },
+            30000,
+            "review-raven",
+            string.Empty,
+            string.Empty,
+            "review-raven",
+            string.Empty,
+            string.Empty,
+            300000,
+            false,
+            "custom",
+            "custom");
+
+        string authFailureJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "failed",
+            ErrorCode = "AUTH_LOGIN_REQUIRED",
+        });
+        string successJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = false,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", string.Empty);
+        var testCts = new CancellationTokenSource();
+        int uriACalls = 0;
+        int uriBCalls = 0;
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                int uriIndex = new List<string>(psi.ArgumentList).IndexOf("--uri");
+                string uri = psi.ArgumentList[uriIndex + 1];
+
+                if (uri == "queue://uri-auth")
+                {
+                    Interlocked.Increment(ref uriACalls);
+                    return CreateMockProcess(1, authFailureJson, "run --login again");
+                }
+
+                int bCall = Interlocked.Increment(ref uriBCalls);
+                return bCall switch
+                {
+                    1 => CreateConnectionRefusedProcess(),
+                    2 => CreateMockProcess(0, successJson, string.Empty),
+                    _ => CreateLoopStoppingProcess(testCts),
+                };
+            });
+
+        var timeProvider = new InstantWaitTimeProvider();
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            maxRetries: 0,
+            dependencyWaitBudgetMs: 0,
+            timeProvider: timeProvider);
+
+        var statusTexts = new List<string>();
+        service.StatusTextChanged += (_, text) => statusTexts.Add(text);
+
+        using var logCapture = new LogCapture(_loggingService);
+
+        // Act
+        await InvokeSubscriptionLoopAsync(service, testCts.Token);
+
+        // Assert: URI B が復帰しても、URI A の認証必須エラーが残っているため Error / IsAuthenticationRequired が維持される
+        uriACalls.Should().Be(1);
+        uriBCalls.Should().BeGreaterThanOrEqualTo(2);
+        service.State.Should().Be(SubscriptionState.Error);
+        service.IsAuthenticationRequired.Should().BeTrue();
+        service.LastError.Should().StartWith("mcp-gateway への認証が必要です。");
+        statusTexts[^1].Should().Contain("mcp-gateway への認証が必要です。");
+
+        logCapture.Lines.Should().ContainSingle(
+            line => line.Contains("[queue://uri-recover] Subscription recovered after error.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Start_WithMultipleResourceUris_WhenAllUrisRecover_ShouldTransitionBackToRunning()
+    {
+        // Arrange: 2 つの URI がともに Error に陥ったあと、片方ずつ順に回復したとき、
+        // 1 つ目の回復時点ではもう片方のエラーを残して Error を維持し、2 つ目も回復した時点で
+        // Running / "Subscribed." に戻ることを確認する
+        _settingsService.UpdateSettings(
+            "my-cmd",
+            string.Empty,
+            "http://gateway:80",
+            new[] { "queue://uri-one", "queue://uri-two" },
+            30000,
+            "review-raven",
+            string.Empty,
+            string.Empty,
+            "review-raven",
+            string.Empty,
+            string.Empty,
+            300000,
+            false,
+            "custom",
+            "custom");
+
+        string successJson = JsonSerializer.Serialize(new SubscriptionResult
+        {
+            Route = "subscription",
+            NotificationReceived = false,
+        });
+
+        var preflightProcess = CreateMockProcess(0, "help", string.Empty);
+        var testCts = new CancellationTokenSource();
+        var uriOneFailedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var uriTwoFailedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int uriOneCalls = 0;
+        int uriTwoCalls = 0;
+
+        static IProcessInstance CreateInfiniteProcess()
+        {
+            var mock = new Mock<IProcessInstance>();
+            mock.SetupGet(p => p.ExitCode).Returns(0);
+            mock.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream()));
+            mock.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream()));
+            mock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                .Returns<CancellationToken>(ct => Task.Delay(Timeout.Infinite, ct));
+            return mock.Object;
+        }
+
+        static IProcessInstance CreateGatedProcess(Task gateTask, int exitCode, string stdout, string stderr)
+        {
+            byte[] stdoutBytes = Encoding.UTF8.GetBytes(stdout);
+            byte[] stderrBytes = Encoding.UTF8.GetBytes(stderr);
+            var mock = new Mock<IProcessInstance>();
+            mock.SetupGet(p => p.ExitCode).Returns(exitCode);
+            mock.SetupGet(p => p.StandardOutput).Returns(new StreamReader(new MemoryStream(stdoutBytes)));
+            mock.SetupGet(p => p.StandardError).Returns(new StreamReader(new MemoryStream(stderrBytes)));
+            mock.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                .Returns<CancellationToken>(ct => gateTask.WaitAsync(ct));
+            return mock.Object;
+        }
+
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Returns<ProcessStartInfo>(psi =>
+            {
+                if (psi.ArgumentList.Contains("--help"))
+                {
+                    return preflightProcess;
+                }
+
+                int uriIndex = new List<string>(psi.ArgumentList).IndexOf("--uri");
+                string uri = psi.ArgumentList[uriIndex + 1];
+
+                if (uri == "queue://uri-one")
+                {
+                    int call = Interlocked.Increment(ref uriOneCalls);
+                    if (call == 1)
+                    {
+                        uriOneFailedTcs.TrySetResult();
+                        return CreateConnectionRefusedProcess();
+                    }
+
+                    if (call == 2)
+                    {
+                        return CreateGatedProcess(uriTwoFailedTcs.Task, 0, successJson, string.Empty);
+                    }
+
+                    return CreateInfiniteProcess();
+                }
+                else
+                {
+                    int call = Interlocked.Increment(ref uriTwoCalls);
+                    if (call == 1)
+                    {
+                        uriTwoFailedTcs.TrySetResult();
+                        return CreateMockProcess(1, string.Empty, "Error POSTing to endpoint: 404");
+                    }
+
+                    if (call == 2)
+                    {
+                        return CreateGatedProcess(uriOneFailedTcs.Task, 0, successJson, string.Empty);
+                    }
+
+                    return CreateLoopStoppingProcess(testCts);
+                }
+            });
+
+        var timeProvider = new InstantWaitTimeProvider();
+        var service = new McpSubscriptionService(
+            _settingsService,
+            _notificationService,
+            _loggingService,
+            mockRunner.Object,
+            maxRetries: 0,
+            dependencyWaitBudgetMs: 0,
+            timeProvider: timeProvider);
+
+        // Act
+        await InvokeSubscriptionLoopAsync(service, testCts.Token);
+
+        // Assert
+        service.State.Should().Be(SubscriptionState.Running);
+        service.LastError.Should().BeEmpty();
+        service.IsAuthenticationRequired.Should().BeFalse();
     }
 
     [Fact]
