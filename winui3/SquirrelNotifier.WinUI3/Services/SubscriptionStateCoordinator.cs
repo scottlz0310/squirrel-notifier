@@ -36,6 +36,7 @@ internal sealed class SubscriptionStateCoordinator
     private const string _stoppedStatusText = "Stopped";
 
     private bool _hasShownErrorBalloon;
+    private bool _hasShownAuthErrorBalloon;
 
     /// <summary>購読状態の変化を画面・トレイへ反映する値へ変換する.</summary>
     /// <param name="state">現在の購読状態.</param>
@@ -50,6 +51,7 @@ internal sealed class SubscriptionStateCoordinator
         if (state != SubscriptionState.Error)
         {
             _hasShownErrorBalloon = false;
+            _hasShownAuthErrorBalloon = false;
 
             // 状態表示は購読ループの ReportStatus が更新するだけで、停止しても Subscribed. のまま残るため、停止は状態から示す
             string? statusText = state == SubscriptionState.Stopped ? _stoppedStatusText : null;
@@ -64,8 +66,14 @@ internal sealed class SubscriptionStateCoordinator
                 state);
         }
 
-        bool shouldShowErrorBalloon = !_hasShownErrorBalloon;
+        // 接続エラー等から自動回復中に認証必須エラー（[AUTH_REQUIRED]）へ変化した場合は、
+        // 自動回復が停止して手動の --login が必要になるため、再度バルーン通知を出す
+        bool shouldShowErrorBalloon = !_hasShownErrorBalloon || (isAuthenticationRequired && !_hasShownAuthErrorBalloon);
         _hasShownErrorBalloon = true;
+        if (isAuthenticationRequired)
+        {
+            _hasShownAuthErrorBalloon = true;
+        }
 
         TrayNotificationPresentation? notification = null;
         string? notificationLogMessage = null;

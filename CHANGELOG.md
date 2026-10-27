@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 起動待ち・実行中・終了の観測を review-raven へ送るようにした（squirrel-notifier#497 の段階 2。review-raven#144 の契約 v1 の `publish_review_observation`）。**既定は無効**で、`settings.json` の `ObservationPublishEnabled` / `ObservationPublishUrl` / `ObservationProducerId` と、環境変数 `SQUIRREL_OBSERVATION_TOKEN`（サービス主体のトークン。設定ファイルに保存せず、ログにも出さず、子プロセスの環境変数にだけ渡す）で有効にする。review-raven 経由の候補だけを送り、状態が変わったときと 60 秒ごとの heartbeat（起動待ち・実行中。終了は受理されたら二度と送らない）に、cycle ごとに増える連番と、起動ごとに増える世代（`observation-producer.json` に保存）を付けて送る。アプリの終了時は `stopped=true` を送る（最大 5 秒）。送信の失敗は reviewer の起動・公開状態・アプリの動作を止めず、送り直せる失敗は次の機会に**最新の状態**を送り直し、送り直しても成功しない拒否はその cycle の送信をやめる。送信が重なっても同時に 1 件だけで、最後の状態が必ず送られる。`review-status.json`（schemaVersion 1）と `statusline-summary.json` の形式は変えず、reviewer の選択変更・外部からの起動 API は追加しない。手順は `docs/review-observation-publishing.md`。実際の thread-owl・review-raven・gateway を経由した送信は未確認。
 - review-raven の依頼 cycle との対応（`cycleId` / `candidateId` / `headSha` / `round`。review-raven#144 の契約 v1）を、queue の候補から読み、reviewer の起動待ち・実行中・終了の観測に保持するようにした（squirrel-notifier#497 の段階 1）。review-raven 経由の候補にだけ付き、形式が契約に合わない `cycle` は捨てる（候補は壊さない）。あわせて、review-raven へ送る実行状態の観測（`publish_review_observation` の入力）を組み立てる処理を追加した。起動待ちの理由・終了結果は、公開状態（`review-status.json`）と同じ規則で決め、契約の許可項目だけを出力する（ローカルパス・コマンドライン・ログ本文・秘密値・reviewer の選択は含まない）。`review-status.json`（schemaVersion 1）と `statusline-summary.json` の形式は変えず、相関の ID は載せない。**この変更は、観測を送信しない**（送信するサービス、heartbeat、設定は次の変更）。
 
+### Fixed
+
+- コンテナ再起動などで初回の依存待機（5 分）や通常のリトライ上限を超えて購読が `Error` 状態に遷移したあと、手動で再開するまでエラーのまま復帰できなかった問題を修正した。`Error` 遷移後も、再認証が必要なエラー（`[AUTH_REQUIRED]`）を除き、初回 60 秒・最大 5 分（60 秒 → 120 秒 → 240 秒 → 300 秒）の指数バックオフで自動再試行を継続し、すべての購読対象 URI が正常に戻った時点で `Running`（`Subscribed.`）へ自動復帰する（複数 URI の一部で認証必須エラーなどが残っている間は `Error` を維持する）。待機中の再失敗時は重複ログを抑制し、エラー内容や再認証要否が変化したときは `StateChanged` も発火して UI・トレイ表示を更新する。
+
 ### Changed
 
 - リリース準備・公開・確定の共通 workflow を release-automate v3.1.0 の固定 SHA に更新し、準備 PR の認証を `RELEASE_BOT_CLIENT_ID` に移行した。公開承認、CI・ランブック・配布物の検証、日本語リリースノートの生成手順は維持する。

@@ -25,11 +25,20 @@ internal static class SubscriptionRetryPolicy
     /// <summary>依存サービス未 Ready とみなすエラータグ（<c>fetch failed</c> / <c>ECONNREFUSED</c>）.</summary>
     public const string DependencyNotReadyErrorTag = "[CONN_REFUSED]";
 
+    /// <summary>ユーザーの明示的な再認証操作が必要なエラータグ.</summary>
+    public const string AuthenticationRequiredErrorTag = "[AUTH_REQUIRED]";
+
     /// <summary>依存サービスの起動待ちリトライ間隔.</summary>
     public const int DependencyWaitIntervalMs = 5000;
 
     /// <summary>依存サービスの起動待ちに費やす上限。超過したら確定エラーにする.</summary>
     public const int DefaultDependencyWaitBudgetMs = 300000;
+
+    /// <summary>確定エラー後の自動回復試行の初回待機間隔（60 秒）.</summary>
+    public const int InitialRecoveryIntervalMs = 60000;
+
+    /// <summary>確定エラー後の自動回復試行の最大待機間隔（5 分）.</summary>
+    public const int MaxRecoveryIntervalMs = 300000;
 
     private const int _initialBackoffMs = 1000;
     private const int _maxBackoffMs = 32000;
@@ -60,6 +69,32 @@ internal static class SubscriptionRetryPolicy
         return consecutiveFailureCount > maxRetries
             ? new SubscriptionRetryDecision(false, 0, false)
             : new SubscriptionRetryDecision(true, CalculateBackoffMs(consecutiveFailureCount), false);
+    }
+
+    /// <summary>
+    /// 確定エラー後にバックグラウンドでの自動回復試行を継続すべきかどうかを判定する.
+    /// 認証エラー（ユーザーの明示的なログイン操作が必須）は自動回復しない.
+    /// </summary>
+    /// <param name="errorTag"><c>GetErrorInfo</c> が返したエラータグ.</param>
+    /// <returns>自動回復を試みる場合は true.</returns>
+    public static bool ShouldAutoRecover(string errorTag)
+        => !string.Equals(errorTag, AuthenticationRequiredErrorTag, StringComparison.Ordinal);
+
+    /// <summary>
+    /// 確定エラー後の自動回復試行に対する待機時間を計算する.
+    /// 初回 60 秒から指数バックオフ（60s → 120s → 240s）で増加し、最大 5 分（300s）で頭打ちにする.
+    /// </summary>
+    /// <param name="recoveryAttempt">自動回復の試行回数（1 以上）.</param>
+    /// <returns>次の回復試行までの待機時間（ミリ秒）.</returns>
+    public static int CalculateRecoveryBackoffMs(int recoveryAttempt)
+    {
+        if (recoveryAttempt <= 1)
+        {
+            return InitialRecoveryIntervalMs;
+        }
+
+        double delay = InitialRecoveryIntervalMs * Math.Pow(2, recoveryAttempt - 1);
+        return delay >= MaxRecoveryIntervalMs ? MaxRecoveryIntervalMs : (int)delay;
     }
 
     private static int CalculateBackoffMs(int consecutiveFailureCount)

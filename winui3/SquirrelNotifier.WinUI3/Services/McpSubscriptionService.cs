@@ -14,7 +14,7 @@ namespace SquirrelNotifier.WinUI3.Services;
 internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscriptionService
 {
     private const int _maxRecentEvents = 20;
-    private const string _authenticationRequiredErrorTag = "[AUTH_REQUIRED]";
+    private const string _authenticationRequiredErrorTag = SubscriptionRetryPolicy.AuthenticationRequiredErrorTag;
 
     // 購読は preflight（subscriber の --help）を通れば Running になるため、通常は数秒で確定する。
     // subscriber がハングした場合に呼び出し側を待たせ続けないための上限（#208）。テストは短い値を注入する.
@@ -73,8 +73,11 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
 
     // 開始・停止の状態遷移を直列化する（#208）。イベント記録用の _lock とは用途が異なるため分ける
     private readonly object _lifecycleLock = new();
+    private readonly Dictionary<string, UriErrorState> _uriErrors = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, IProcessInstance> _activeProcesses = new();
     private readonly SemaphoreSlim _cacheSemaphore = new(1, 1);
+
+    private readonly record struct UriErrorState(string FriendlyMessage, bool IsAuthenticationRequired);
 
     private Task? _loopTask;
     private CancellationTokenSource? _activeProcessCts;
@@ -160,14 +163,16 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 return StartAttempt.RejectedWhileStopping;
             }
 
+            _uriErrors.Clear();
             LastError = string.Empty;
             IsAuthenticationRequired = false;
 
             // StateChanged は購読ループ起動より前に発火させ、Starting → Running の順序を保つ。
             // ハンドラは排他区間内で走るため、ブロックする処理を持たせてはならない
             State = SubscriptionState.Starting;
-            _stopCts?.Dispose();
+            CancellationTokenSource? previousStopCts = _stopCts;
             _stopCts = new CancellationTokenSource();
+            previousStopCts?.Cancel();
             _loopTask = Task.Run(() => RunSubscriptionLoopAsync(_stopCts.Token));
             return StartAttempt.Started;
         }
@@ -275,11 +280,11 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
     // _loopTask = null / State = Stopped で実体だけが残る。
     // Stopped は対象にしない。StopAsync は捕捉した loopTask の完了を待ってから Stopped を
     // 設定するため、Stopped の時点で生きている購読ループは存在しない。
-    private bool TryTransitionFromLoop(SubscriptionState next)
+    private bool TryTransitionFromLoop(SubscriptionState next, CancellationToken loopToken = default)
     {
         lock (_lifecycleLock)
         {
-            if (_state == SubscriptionState.Stopping)
+            if (_state == SubscriptionState.Stopping || loopToken.IsCancellationRequested)
             {
                 return false;
             }
@@ -291,21 +296,126 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
 
     // Error 遷移では LastError / IsAuthenticationRequired を StateChanged より先に確定させる。
     // ハンドラ（トレイのツールチップ・バルーン通知）が LastError を読むため、順序が逆だと
-    // 古い値が表示される
-    private bool TryTransitionToErrorFromLoop(string friendlyMessage, bool authenticationRequired)
+    // 古い値が表示される。
+    // 複数 URI 実行時は URI ごとの障害状態を保持して全体状態を集約し、同じ Error 状態内で
+    // LastError や IsAuthenticationRequired が変化したときも StateChanged を発火させて UI へ通知する。
+    private bool TryRecordUriErrorFromLoop(
+        string resourceUri,
+        string friendlyMessage,
+        bool authenticationRequired,
+        CancellationToken loopToken,
+        out string activeErrorMessage)
     {
         lock (_lifecycleLock)
         {
-            if (_state == SubscriptionState.Stopping)
+            if (_state == SubscriptionState.Stopping || loopToken.IsCancellationRequested)
             {
+                activeErrorMessage = string.Empty;
                 return false;
             }
 
-            LastError = friendlyMessage;
-            IsAuthenticationRequired = authenticationRequired;
-            State = SubscriptionState.Error;
+            _uriErrors[resourceUri] = new UriErrorState(friendlyMessage, authenticationRequired);
+            (string aggregatedError, bool aggregatedAuthRequired) = AggregateUriErrors(friendlyMessage, authenticationRequired);
+
+            bool stateWasError = _state == SubscriptionState.Error;
+            bool detailsChanged = !string.Equals(LastError, aggregatedError, StringComparison.Ordinal)
+                || IsAuthenticationRequired != aggregatedAuthRequired;
+
+            if (stateWasError && !detailsChanged)
+            {
+                activeErrorMessage = aggregatedError;
+                return false;
+            }
+
+            LastError = aggregatedError;
+            IsAuthenticationRequired = aggregatedAuthRequired;
+            activeErrorMessage = aggregatedError;
+
+            if (!stateWasError)
+            {
+                State = SubscriptionState.Error;
+            }
+            else
+            {
+                StateChanged?.Invoke(this, _state);
+            }
+
             return true;
         }
+    }
+
+    private bool TryResolveUriErrorFromLoop(
+        string resourceUri,
+        CancellationToken loopToken,
+        out bool recoveredToRunning,
+        out string remainingErrorMessage)
+    {
+        lock (_lifecycleLock)
+        {
+            if (_state == SubscriptionState.Stopping || loopToken.IsCancellationRequested)
+            {
+                recoveredToRunning = false;
+                remainingErrorMessage = string.Empty;
+                return false;
+            }
+
+            _uriErrors.Remove(resourceUri);
+
+            if (_uriErrors.Count == 0)
+            {
+                LastError = string.Empty;
+                IsAuthenticationRequired = false;
+                State = SubscriptionState.Running;
+                recoveredToRunning = true;
+                remainingErrorMessage = string.Empty;
+                return true;
+            }
+
+            (string aggregatedError, bool aggregatedAuthRequired) = AggregateUriErrors(string.Empty, false);
+            bool detailsChanged = !string.Equals(LastError, aggregatedError, StringComparison.Ordinal)
+                || IsAuthenticationRequired != aggregatedAuthRequired;
+
+            LastError = aggregatedError;
+            IsAuthenticationRequired = aggregatedAuthRequired;
+            recoveredToRunning = false;
+            remainingErrorMessage = aggregatedError;
+
+            if (_state != SubscriptionState.Error)
+            {
+                State = SubscriptionState.Error;
+                return true;
+            }
+
+            if (detailsChanged)
+            {
+                StateChanged?.Invoke(this, _state);
+                return true;
+            }
+
+            return false;
+        }
+    }
+
+    private (string FriendlyMessage, bool IsAuthenticationRequired) AggregateUriErrors(
+        string fallbackMessage,
+        bool fallbackAuthRequired)
+    {
+        // いずれかの URI が再認証必須（[AUTH_REQUIRED]）で停止している場合は、
+        // 他の URI の一時エラーで認証案内が隠れないよう認証必須エラーを優先する
+        foreach (UriErrorState error in _uriErrors.Values)
+        {
+            if (error.IsAuthenticationRequired)
+            {
+                return (error.FriendlyMessage, true);
+            }
+        }
+
+        foreach (UriErrorState error in _uriErrors.Values)
+        {
+            return (error.FriendlyMessage, false);
+        }
+
+        return (fallbackMessage, fallbackAuthRequired);
     }
 
     /// <summary>購読開始要求の受理結果（#208）.</summary>
@@ -379,6 +489,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         lock (_lifecycleLock)
         {
             // 待機したループ以外が入っていることはない（Stopping 中は開始を拒否するため）
+            _uriErrors.Clear();
             _loopTask = null;
             State = SubscriptionState.Stopped;
         }
@@ -532,7 +643,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
         {
             // 停止要求による preflight のキャンセルを Error として書き戻さない。
             // 停止処理中に遷移が通らなかった場合は、UI へも古い失敗理由を出さない
-            if (TryTransitionFromLoop(SubscriptionState.Error))
+            if (TryTransitionFromLoop(SubscriptionState.Error, token))
             {
                 ReportStatus($"Error: {LastError}");
             }
@@ -540,7 +651,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
             return;
         }
 
-        if (TryTransitionFromLoop(SubscriptionState.Running))
+        if (TryTransitionFromLoop(SubscriptionState.Running, token))
         {
             ReportStatus("Subscribed.");
         }
@@ -578,6 +689,7 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
     {
         int retryCount = 0;
         long? firstFailureTimestamp = null;
+        int recoveryAttempt = 0;
 
         while (!token.IsCancellationRequested)
         {
@@ -614,7 +726,10 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                     psi.Environment["MCP_PROBE_AUTH_TOKEN"] = tokenValue;
                 }
 
-                await LogAsync($"Launching subscriber for resource: {resourceUri}").ConfigureAwait(false);
+                if (recoveryAttempt == 0)
+                {
+                    await LogAsync($"Launching subscriber for resource: {resourceUri}").ConfigureAwait(false);
+                }
 
                 IProcessInstance process = _processRunner.Start(psi);
                 _activeProcesses[processKey] = process;
@@ -699,11 +814,37 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 finally
                 {
                     _activeProcesses.TryRemove(processKey, out _);
+                    if (token.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            process.Kill(entireProcessTree: true);
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+                    }
+
                     process.Dispose();
                 }
 
-                retryCount = 0;
-                firstFailureTimestamp = null;
+                if (retryCount > 0)
+                {
+                    if (recoveryAttempt > 0)
+                    {
+                        await LogAsync($"[{resourceUri}] Subscription recovered after error.").ConfigureAwait(false);
+                    }
+
+                    if (TryResolveUriErrorFromLoop(resourceUri, token, out bool recoveredToRunning, out string remainingErrorMessage))
+                    {
+                        ReportStatus(recoveredToRunning ? "Subscribed." : $"Error: {remainingErrorMessage}");
+                    }
+
+                    retryCount = 0;
+                    firstFailureTimestamp = null;
+                    recoveryAttempt = 0;
+                }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -712,12 +853,52 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
             }
             catch (Exception ex)
             {
+                if (token.IsCancellationRequested)
+                {
+                    break;
+                }
+
                 retryCount++;
                 firstFailureTimestamp ??= _timeProvider.GetTimestamp();
                 long failureElapsedMs = (long)_timeProvider.GetElapsedTime(firstFailureTimestamp.Value).TotalMilliseconds;
                 string? structuredErrorCode = (ex as SubscriberProcessException)?.ErrorCode;
                 string? diagnosticText = (ex as SubscriberProcessException)?.DiagnosticText;
                 (string friendlyMessage, string tag) = GetErrorInfo(ex.Message, structuredErrorCode, diagnosticText);
+                bool isAuthRequired = tag == _authenticationRequiredErrorTag;
+
+                if (recoveryAttempt > 0)
+                {
+                    // 自動回復待機中の再失敗: 認証エラーへ変化した場合は確定させて停止し、
+                    // それ以外はエラー文言が変化したときだけ表示を更新してバックオフを伸ばす（ログ汚染を防ぐ）。
+                    if (!SubscriptionRetryPolicy.ShouldAutoRecover(tag))
+                    {
+                        if (TryRecordUriErrorFromLoop(resourceUri, friendlyMessage, isAuthRequired, token, out string activeErrorMessage))
+                        {
+                            ReportStatus($"Error: {activeErrorMessage}");
+                        }
+
+                        await LogAsync($"[{resourceUri}] Subscription auto-recovery stopped {tag}: {ex.Message}").ConfigureAwait(false);
+                        break;
+                    }
+
+                    if (TryRecordUriErrorFromLoop(resourceUri, friendlyMessage, authenticationRequired: false, token, out string updatedErrorMessage))
+                    {
+                        ReportStatus($"Error: {updatedErrorMessage}");
+                    }
+
+                    recoveryAttempt++;
+                    int nextRecoveryDelayMs = SubscriptionRetryPolicy.CalculateRecoveryBackoffMs(recoveryAttempt);
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(nextRecoveryDelayMs), _timeProvider, token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
 
                 SubscriptionRetryDecision decision = SubscriptionRetryPolicy.Decide(
                     tag,
@@ -730,16 +911,35 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 {
                     // 停止処理中は Error を書き戻さない（LastError / 状態表示も更新しない）。
                     // 障害の記録はログに残す
-                    if (TryTransitionToErrorFromLoop(friendlyMessage, tag == _authenticationRequiredErrorTag))
+                    if (TryRecordUriErrorFromLoop(resourceUri, friendlyMessage, isAuthRequired, token, out string initialErrorMessage))
                     {
-                        ReportStatus($"Error: {friendlyMessage}");
+                        ReportStatus($"Error: {initialErrorMessage}");
                     }
 
                     string giveUpReason = decision.IsWaitingForDependency
                         ? $"dependency wait budget exceeded after {failureElapsedMs / 1000}s"
                         : "max retries exceeded";
                     await LogAsync($"[{resourceUri}] Subscription loop error ({giveUpReason}) {tag}: {ex.Message}").ConfigureAwait(false);
-                    break;
+
+                    if (!SubscriptionRetryPolicy.ShouldAutoRecover(tag))
+                    {
+                        break;
+                    }
+
+                    recoveryAttempt = 1;
+                    int initialRecoveryDelayMs = SubscriptionRetryPolicy.CalculateRecoveryBackoffMs(recoveryAttempt);
+                    await LogAsync($"[{resourceUri}] Entering auto-recovery mode (initial interval: {initialRecoveryDelayMs / 1000}s, max: {SubscriptionRetryPolicy.MaxRecoveryIntervalMs / 1000}s).").ConfigureAwait(false);
+
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(initialRecoveryDelayMs), _timeProvider, token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    continue;
                 }
 
                 if (decision.IsWaitingForDependency)

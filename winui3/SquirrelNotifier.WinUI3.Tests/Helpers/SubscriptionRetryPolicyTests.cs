@@ -107,4 +107,35 @@ public class SubscriptionRetryPolicyTests
         SubscriptionRetryPolicy.Decide(_connRefused, 1, 0, maxRetries: 5, dependencyWaitBudgetMs: 0)
             .ShouldRetry.Should().BeFalse();
     }
+
+    [Theory]
+    [InlineData("[AUTH_REQUIRED]", false)]
+    [InlineData("[CONN_REFUSED]", true)]
+    [InlineData("[GENERAL_ERROR]", true)]
+    [InlineData("[HTTP_404]", true)]
+    [InlineData("[AUTH_ERROR]", true)]
+    [InlineData("[TLS_CERT_UNTRUSTED]", true)]
+    [InlineData("[DNS_LOOKUP_FAILED]", true)]
+    [InlineData("[UNKNOWN_ERROR]", true)]
+    public void ShouldAutoRecover_ShouldExcludeOnlyAuthenticationRequired(string errorTag, bool expected)
+    {
+        SubscriptionRetryPolicy.ShouldAutoRecover(errorTag).Should().Be(expected);
+    }
+
+    [Theory]
+    // 初回 60 秒から指数バックオフ（60s → 120s → 240s）で増加し、最大 5 分（300s）で頭打ちになること
+    [InlineData(0, 60000)]
+    [InlineData(1, 60000)]
+    [InlineData(2, 120000)]
+    [InlineData(3, 240000)]
+    [InlineData(4, 300000)]
+    [InlineData(5, 300000)]
+    [InlineData(100, 300000)]
+    public void CalculateRecoveryBackoffMs_ShouldUseExponentialBackoffWithFiveMinuteCap(
+        int recoveryAttempt,
+        int expectedDelayMs)
+    {
+        SubscriptionRetryPolicy.CalculateRecoveryBackoffMs(recoveryAttempt)
+            .Should().Be(expectedDelayMs);
+    }
 }
