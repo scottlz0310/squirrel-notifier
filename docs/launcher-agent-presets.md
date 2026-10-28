@@ -77,6 +77,14 @@ session 情報は `%LOCALAPPDATA%\SquirrelNotifier\sessions.json` に保存す�
 - **解決**（`Helpers/CommandPathResolver`）: 既存ファイルへの直接パス指定を最優先し、次に PATH の各ディレクトリを PATHEXT の優先順で探索する。Win32 `CreateProcessW` は拡張子省略時に `.exe` しか暗黙補完しないため、npm / pnpm 経由の `.cmd` shim（例: `codex.cmd`）もここで明示的に解決する（#177）
 - **起動**（`Helpers/AgentProcessStartInfoFactory`）: ネイティブ実行形式は `ArgumentList` で直接起動する。`.cmd` / `.bat` は `cmd.exe /d /s /v:off /c` で明示的にラップし、実行パスと各引数は環境変数を引用符内で一度だけ展開する方式で渡す。cmd.exe の変数展開は展開結果を再解釈しないため、引数に含まれる `%` / `&` / `|` 等のメタ文字が安全に素通しされる（BatBadBut パターンの回避）。引用符・改行を含む引数のみ、cmd.exe の引用状態を破壊しうるため起動前に明示エラーで拒否する
 
+## 無応答監視と自動再開
+
+session resume が有効で、Claude・Codex・agy の標準プリセットに一致する reviewer / reviewed スロットが対象。起動時に open PR の HEAD を固定し、取得できなければ起動しない。構造化 stdout の出力が600秒なく、ツールも動いていない場合はプロセスを停止し、終了を確認して同じ会話を再開する。再開前にも open と HEAD 一致を確認し、設定変更・会話 ID 不在・終了確認失敗では再開しない。
+
+ツール実行中は無進捗と LauncherTimeoutMs の計測を止め、各 tool に30分の上限を適用する。agy の標準引数の `--print-timeout 30m` は監視対象の実行時に `0` として、CLI 側の全体制限を解除する。自動再開は最大2回で、同じ種類の無応答が続けば停止する。LauncherTimeoutMs 自体の予算切れと利用者の中止では再開しない。
+
+Copilot の既定 text 出力とカスタム設定はこの監視の対象外。Copilot の JSON 設定移行、回復失敗時の reviewed への通知と PR コメントは後続作業。
+
 ## codex exec のハング対策
 
 codex 等の非対話 print / exec モードは、プロンプトを引数で受け取っても標準入力の EOF を待って停止することがある（[openai/codex#20919](https://github.com/openai/codex/issues/20919)）。`ReviewLauncherService` は起動直後に標準入力を即座に閉じ、EOF を通知することでこれを回避している。
