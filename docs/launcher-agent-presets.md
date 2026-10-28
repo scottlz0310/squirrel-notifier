@@ -83,7 +83,17 @@ session resume が有効で、Claude・Codex・agy の標準プリセットに�
 
 ツール実行中は無進捗と LauncherTimeoutMs の計測を止め、各 tool に30分の上限を適用する。agy の標準引数の `--print-timeout 30m` は監視対象の実行時に `0` として、CLI 側の全体制限を解除する。自動再開は最大2回で、同じ種類の無応答が続けば停止する。LauncherTimeoutMs 自体の予算切れと利用者の中止では再開しない。
 
-Copilot の既定 text 出力とカスタム設定はこの監視の対象外。Copilot の JSON 設定移行、回復失敗時の reviewed への通知と PR コメントは後続作業。
+Copilot の既定 text 出力とカスタム設定はこの監視の対象外。Copilot の JSON 設定移行は後続作業。
+
+### 回復失敗時の通知
+
+同種の無応答の繰り返し・再開回数の上限・会話 ID 不在で回復を終了すると、reviewer / reviewed のどちらも、同じ PR の既存 reviewed 会話へ状態報告を依頼する。通知では実装・レビュー・マージを指示せず、新規会話は作らない。通知に成功しても元の実行結果は失敗のままにする。通知は1回だけで再帰的に再開せず、通知の失敗でも既存 reviewed 会話 ID を残す。
+
+通知先の会話がない・期限切れ・未対応プリセットの場合、または通知プロセスが失敗・無応答の場合は、PR の open / 固定 HEAD を再確認して `post_runner_escalation` を1回呼び、Squirrel の通常通知へ結果を表示する。HEAD が変わった場合や閉じた場合は投稿しない。利用者が中止した場合も投稿しない。定型コメントの本文と GitHub App 名義は review-raven 側の契約に従う。
+
+`settings.json` に `RunnerEscalationUrl` を明示設定する（例: `https://localhost:8080/mcp/review-raven`）。既定は空で、その場合はコメントを投稿せず設定が必要な旨を Squirrel に表示する。HTTPS または loopback HTTP の URL を使用し、資格情報・query・fragment を含めない。gateway の購読 URL から投稿先を推測しない。`SubscriberCommandPath` の resource-bridge-cli **v0.9.0 以降**と、その投稿先への利用者認証が必要。通常の CLI 認証キャッシュまたは継承した `MCP_PROBE_AUTH_TOKEN` を使い、内部観測のサービス主体トークンは流用しない。
+
+CLI は安全な `.cmd` / `.bat` factory で起動し、`call --args-stdin --json` の stdin へ JSON を渡して EOF を通知する。呼び出し上限は30秒。失敗・認証エラー・結果不明を自動再試行しない。PR・HEAD ごとの投稿試行マーカーを設定ディレクトリの `runner-escalations/` へ送信前に原子的に作成し、アプリを再起動しても同じ HEAD では再投稿しない。マーカー作成後に起動できなかった場合も試行済みとなる。手動で再投稿を判断する場合は、先に GitHub で重複の有無を確認する。会話通知や定型コメントの実経路の E2E は、配備済みの投稿 tool と独立 reviewer を使って別途検証する。
 
 ## codex exec のハング対策
 

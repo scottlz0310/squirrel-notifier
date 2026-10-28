@@ -48,12 +48,14 @@ public class ReviewLauncherServiceTests : IDisposable
         LauncherWorkingDirectoryResolver? workingDirectoryResolver = null,
         SecretMasker? secretMasker = null,
         ISessionResumeStore? sessionResumeStore = null,
-        IGhApiClient? ghApiClient = null)
+        IGhApiClient? ghApiClient = null,
+        IRunnerEscalationReporter? escalationReporter = null,
+        INotificationService? notificationService = null)
     {
         var client = new Mock<IGhApiClient>();
         client.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<string>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(GhApiResult.Success("""{"state":"open","headSha":"0123456789abcdef0123456789abcdef01234567","baseRef":"main"}"""));
-        return new ReviewLauncherService(_settingsService, _loggingService, processRunner, timeProvider, workingDirectoryResolver, secretMasker, sessionResumeStore, ghApiClient ?? client.Object);
+        return new ReviewLauncherService(_settingsService, _loggingService, processRunner, timeProvider, workingDirectoryResolver, secretMasker, sessionResumeStore, ghApiClient ?? client.Object, escalationReporter ?? Mock.Of<IRunnerEscalationReporter>(), notificationService);
     }
 
     private Mock<IProcessInstance> CreateMockProcess(int exitCode, string stdout, string stderr, int delayMs = 0)
@@ -974,7 +976,7 @@ public class ReviewLauncherServiceTests : IDisposable
                 .Returns((CancellationToken token) => token.CanBeCanceled ? Task.Delay(Timeout.Infinite, token) : Task.CompletedTask);
         }
 
-        var processes = new Queue<IProcessInstance>([first.Object, second.Object]);
+        var processes = new Queue<IProcessInstance>([first.Object, second.Object, CreateMockProcess(0, string.Empty, string.Empty).Object]);
         var arguments = new List<IReadOnlyList<string>>();
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
@@ -994,7 +996,7 @@ public class ReviewLauncherServiceTests : IDisposable
 
         LauncherResult result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
         result.Success.Should().Be(!repeatFailure);
-        arguments.Should().HaveCount(2);
+        arguments.Should().HaveCount(repeatFailure && roleName == "Reviewed" ? 3 : 2);
         GetArgumentValue(arguments[0], "--session-id").Should().Be(GetArgumentValue(arguments[1], "--resume"));
         first.Verify(p => p.Kill(true), Times.Once);
         first.Verify(p => p.WaitForExitAsync(CancellationToken.None), Times.Once);
@@ -1058,6 +1060,114 @@ public class ReviewLauncherServiceTests : IDisposable
         clock.Timers.Reader.TryRead(out _).Should().BeFalse();
         client.VerifyNoOtherCalls();
         runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("claude", "Reviewer", "success")]
+    [InlineData("codex", "Reviewer", "success")]
+    [InlineData("agy", "Reviewer", "success")]
+    [InlineData("claude", "Reviewed", "success")]
+    [InlineData("codex", "Reviewed", "success")]
+    [InlineData("agy", "Reviewed", "success")]
+    [InlineData("claude", "Reviewer", "failed")]
+    [InlineData("claude", "Reviewed", "failed")]
+    [InlineData("claude", "Reviewer", "timeout")]
+    [InlineData("claude", "Reviewed", "cancel")]
+    [InlineData("claude", "Reviewer", "missing")]
+    [InlineData("claude", "Reviewer", "moved-before-notify")]
+    [InlineData("claude", "Reviewer", "moved-before-post")]
+    public async Task LaunchAsync_ShouldNotifyExistingReviewedSessionAndEscalateOnce(string presetId, string roleName, string deliveryMode)
+    {
+        ConfigureClientAssignedSettings(presetId);
+        _settingsService.Settings.LauncherTimeoutMs = 1800000;
+        ReviewEvent reviewEvent = CreateReviewEvent("recovery-notification");
+        LauncherRole role = Enum.Parse<LauncherRole>(roleName);
+        var store = new SessionResumeStore(_tempDir);
+        var resolver = new LauncherWorkingDirectoryResolver(_settingsService);
+        Guid reviewedId = Guid.NewGuid();
+        Guid reviewerId = Guid.NewGuid();
+        await store.SaveAsync(reviewEvent, LauncherRole.Reviewer, presetId, resolver.Resolve(reviewEvent, LauncherRole.Reviewer), reviewerId);
+        if (deliveryMode != "missing")
+        {
+            await store.SaveAsync(reviewEvent, LauncherRole.Reviewed, presetId, resolver.Resolve(reviewEvent, LauncherRole.Reviewed), reviewedId);
+        }
+
+        var clock = new LauncherWatchdogTests.ManualClock();
+        Mock<IProcessInstance> first = CreateMockProcess(0, string.Empty, string.Empty);
+        Mock<IProcessInstance> second = CreateMockProcess(0, string.Empty, string.Empty);
+        Mock<IProcessInstance> notification = CreateMockProcess(deliveryMode == "success" ? 0 : 1, string.Empty, string.Empty);
+        foreach (Mock<IProcessInstance> process in new[] { first, second })
+        {
+            process.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                .Returns((CancellationToken token) => token.CanBeCanceled ? Task.Delay(Timeout.Infinite, token) : Task.CompletedTask);
+        }
+
+        if (deliveryMode is "timeout" or "cancel")
+        {
+            notification.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                .Returns((CancellationToken token) => token.CanBeCanceled ? Task.Delay(Timeout.Infinite, token) : Task.CompletedTask);
+        }
+
+        var processes = new Queue<IProcessInstance>([first.Object, second.Object, notification.Object]);
+        var launched = new List<ProcessStartInfo>();
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Callback<ProcessStartInfo>(launched.Add).Returns(() => processes.Dequeue());
+        var reporter = new Mock<IRunnerEscalationReporter>();
+        reporter.Setup(r => r.ReportAsync(reviewEvent, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("PR に対応依頼を投稿しました。");
+        var notifications = new Mock<INotificationService>();
+        var client = new Mock<IGhApiClient>();
+        int reads = 0;
+        client.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<string>(), false, It.IsAny<CancellationToken>())).ReturnsAsync(() =>
+        {
+            reads++;
+            bool moved = (deliveryMode == "moved-before-notify" && reads >= 3) || (deliveryMode == "moved-before-post" && reads >= 5);
+            string head = (moved ? "1" : "0") + "123456789abcdef0123456789abcdef01234567";
+            return GhApiResult.Success($$"""{"state":"open","headSha":"{{head}}","baseRef":"main"}""");
+        });
+        ReviewLauncherService service = CreateLauncher(runner.Object, clock, sessionResumeStore: store, ghApiClient: client.Object, escalationReporter: reporter.Object, notificationService: notifications.Object);
+        Task<LauncherResult> pending = service.LaunchAsync(reviewEvent, role, CancellationToken.None);
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            Action tick = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            clock.Advance(TimeSpan.FromSeconds(600));
+            tick();
+        }
+
+        if (deliveryMode is "timeout" or "cancel")
+        {
+            Action tick = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            if (deliveryMode == "cancel")
+            {
+                service.Cancel();
+            }
+            else
+            {
+                clock.Advance(TimeSpan.FromSeconds(600));
+                tick();
+            }
+        }
+
+        LauncherResult result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+        result.Success.Should().BeFalse();
+        bool escalated = deliveryMode is "failed" or "timeout" or "missing";
+        reporter.Verify(r => r.ReportAsync(reviewEvent, It.IsAny<string>(), It.IsAny<CancellationToken>()), escalated ? Times.Once() : Times.Never());
+        notifications.Verify(n => n.NotifyRunnerEscalation(It.IsAny<string>()), deliveryMode is "success" or "cancel" ? Times.Never() : Times.Once());
+        launched.Should().HaveCount(deliveryMode is "missing" or "moved-before-notify" ? 2 : 3);
+        if (launched.Count == 3)
+        {
+            IReadOnlyList<string> arguments = GetLauncherArguments(launched[2]);
+            arguments.Should().Contain(reviewedId.ToString("D"));
+            arguments.Should().Contain(arg => arg.StartsWith("ランナー通知:", StringComparison.Ordinal));
+            arguments.Should().NotContain(arg => arg.Contains("review-raven-thread-owl-cycle", StringComparison.Ordinal));
+            launched[2].WorkingDirectory.Should().Be(resolver.Resolve(reviewEvent, LauncherRole.Reviewed));
+        }
+
+        if (deliveryMode == "failed")
+        {
+            (await store.TryGetAsync(reviewEvent, LauncherRole.Reviewed, presetId, resolver.Resolve(reviewEvent, LauncherRole.Reviewed))).Status.Should().Be(SessionResumeLookupStatus.Found);
+        }
+
+        service.IsRunning.Should().BeFalse();
     }
 
     private void ConfigureClientAssignedSettings(string presetId = "claude")

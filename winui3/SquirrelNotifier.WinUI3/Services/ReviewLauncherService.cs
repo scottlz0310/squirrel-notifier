@@ -22,6 +22,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private readonly ISessionResumeStore _sessionResumeStore;
     private readonly TimeProvider _timeProvider;
     private readonly LauncherHeadGuard _headGuard;
+    private readonly IRunnerEscalationReporter _escalationReporter;
+    private readonly INotificationService _notificationService;
     private readonly LauncherWorkingDirectoryResolver _workingDirectoryResolver;
     private readonly SecretMasker _secretMasker;
     private readonly object _lock = new();
@@ -64,13 +66,17 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         LauncherWorkingDirectoryResolver? workingDirectoryResolver = null,
         SecretMasker? secretMasker = null,
         ISessionResumeStore? sessionResumeStore = null,
-        IGhApiClient? ghApiClient = null)
+        IGhApiClient? ghApiClient = null,
+        IRunnerEscalationReporter? escalationReporter = null,
+        INotificationService? notificationService = null)
     {
         _settingsService = settingsService;
         _loggingService = loggingService;
         _processRunner = processRunner ?? new ProcessRunner();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _headGuard = new LauncherHeadGuard(ghApiClient ?? new GhApiClient());
+        _escalationReporter = escalationReporter ?? new RunnerEscalationReporter(settingsService);
+        _notificationService = notificationService ?? new NotificationService();
         _workingDirectoryResolver = workingDirectoryResolver ?? new LauncherWorkingDirectoryResolver(settingsService);
         _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
         _sessionResumeStore = sessionResumeStore ?? new SessionResumeStore(settingsService.SettingsDirectory, _timeProvider);
@@ -188,6 +194,17 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                     || attempt.SessionId is not Guid sessionId
                     || recovery.OnFailure(attempt.Timeout) != LauncherRecoveryAction.Resume)
                 {
+                    if (attempt.Outcome == AgentExecutionOutcome.TimedOut
+                        && attempt.Timeout is LauncherWatchdogTimeout.NoProgress or LauncherWatchdogTimeout.Tool)
+                    {
+                        if (!_settingsService.Settings.SessionResumeEnabled || initialSlot != ResolveLauncherSlot(_settingsService.Settings, role))
+                        {
+                            throw new InvalidOperationException("実行中に launcher 設定が変わったため、回復失敗の通知を停止しました。");
+                        }
+
+                        await NotifyRecoveryFailureAsync(session, reviewEvent, role, head!, attempt.Result, cts.Token).ConfigureAwait(false);
+                    }
+
                     session.Complete(attempt.Outcome, attempt.Result);
                     break;
                 }
@@ -210,7 +227,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
         catch (OperationCanceledException)
         {
-            session.Complete(AgentExecutionOutcome.Cancelled, new LauncherResult { Success = false, ErrorMessage = "実行を中止しました。" });
+            session.Complete(AgentExecutionOutcome.Cancelled, new LauncherResult { Success = false, ErrorMessage = "Process cancelled by user." });
         }
         catch (Exception ex)
         {
@@ -228,6 +245,56 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
             RunCompleted?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    private async Task NotifyRecoveryFailureAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, string head, LauncherResult originalResult, CancellationToken cancellationToken)
+    {
+        string message;
+        try
+        {
+            await _headGuard.VerifyAsync(reviewEvent, head, cancellationToken).ConfigureAwait(false);
+            (string CommandPath, string ArgumentsTemplate, string ResumeArgumentsTemplate, string PresetId) slot = ResolveLauncherSlot(_settingsService.Settings, LauncherRole.Reviewed);
+            LauncherLaunchPlan notification = await CreateLaunchPlanAsync(reviewEvent, LauncherRole.Reviewed, cancellationToken).ConfigureAwait(false);
+            bool supported = _settingsService.Settings.SessionResumeEnabled
+                && slot.PresetId != LauncherAgentCatalog.CustomPresetId
+                && notification.IsResume && notification.SessionId is Guid id && id != Guid.Empty
+                && notification.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson;
+            if (supported)
+            {
+                await _headGuard.VerifyAsync(reviewEvent, head, cancellationToken).ConfigureAwait(false);
+                if (slot != ResolveLauncherSlot(_settingsService.Settings, LauncherRole.Reviewed) || !_settingsService.Settings.SessionResumeEnabled)
+                {
+                    throw new InvalidOperationException("通知前に reviewed launcher 設定が変わりました。");
+                }
+
+                string prompt = $"ランナー通知: {reviewEvent.Repository}#{reviewEvent.PrNumber} HEAD {head} の {role} は無応答からの回復に失敗しました。現在の状態と手動確認が必要な旨を利用者へ報告してください。この通知による実装・レビュー・マージ操作は行わないでください。";
+                notification = notification with { NotificationPrompt = prompt };
+                session.PublishStdout("既存の実装側セッションへ回復失敗を通知します。");
+                LauncherAttemptResult delivery = await RunAttemptAsync(session, reviewEvent, LauncherRole.Reviewed, notification, monitored: true, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (delivery.Outcome == AgentExecutionOutcome.Succeeded)
+                {
+                    originalResult.ErrorMessage += " 既存の実装側セッションへ回復失敗を通知しました。";
+                    return;
+                }
+            }
+
+            await _headGuard.VerifyAsync(reviewEvent, head, cancellationToken).ConfigureAwait(false);
+            message = await _escalationReporter.ReportAsync(reviewEvent, head, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            message = $"回復失敗の通知を停止しました: {ProcessOutputSummarizer.Summarize(ex.Message, _secretMasker)}";
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        originalResult.ErrorMessage += " " + message;
+        session.PublishStderr(message);
+        _notificationService.NotifyRunnerEscalation($"{reviewEvent.Repository}#{reviewEvent.PrNumber}: {message}");
     }
 
     private async Task<LauncherAttemptResult> RunAttemptAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, LauncherLaunchPlan plan, bool monitored, CancellationToken cancellationToken)
@@ -285,6 +352,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 plan.ArgumentsTemplate,
                 reviewEvent,
                 plan.SessionId?.ToString("D"));
+            if (plan.NotificationPrompt is string notificationPrompt)
+            {
+                int promptIndex = plan.OutputFormat == LauncherOutputFormat.CodexJson ? args.Count - 1 : args.IndexOf("-p") + 1;
+                args[promptIndex] = notificationPrompt;
+            }
+
             ProcessStartInfo psi = AgentProcessStartInfoFactory.Create(resolvedPath, args);
             psi.WorkingDirectory = workingDirectory;
             if (role == LauncherRole.Reviewer)
@@ -634,7 +707,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
         if (outcome == AgentExecutionOutcome.Failed)
         {
-            if (plan.IsResume)
+            if (plan.IsResume && plan.NotificationPrompt is null)
             {
                 await _sessionResumeStore.RemoveAsync(
                     reviewEvent,
@@ -855,7 +928,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         SessionIdSupply SessionIdSupply,
         LauncherOutputFormat OutputFormat,
         bool IsResume,
-        SessionResumeUnavailableReason? ResumeUnavailableReason);
+        SessionResumeUnavailableReason? ResumeUnavailableReason,
+        string? NotificationPrompt = null);
 
     private sealed class ParsedSessionIdCapture
     {

@@ -11,6 +11,18 @@ namespace SquirrelNotifier.WinUI3.Tests.Services;
 public sealed class NotificationServiceTests
 {
     [Fact]
+    public void NotifyRunnerEscalation_ShouldRaiseNotificationRequested()
+    {
+        var service = new NotificationService();
+        NotificationMessage? received = null;
+        service.NotificationRequested += (_, args) => received = args;
+
+        service.NotifyRunnerEscalation("owner/repo#12 の対応を確認してください。");
+
+        received.Should().BeEquivalentTo(new NotificationMessage("ランナーの回復失敗", "owner/repo#12 の対応を確認してください。"));
+    }
+
+    [Fact]
     public void NotifyReviewEvent_ShouldRaiseReviewEventReceived()
     {
         var service = new NotificationService();

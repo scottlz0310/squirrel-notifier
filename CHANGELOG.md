@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 無応答からの自動回復を終了した場合に、既存の reviewed 会話へ状態報告を依頼する処理を追加した。通知できない場合は明示設定した review-raven の GitHub App へ固定 HEAD の定型コメントを依頼し、Squirrel にも結果を表示する。投稿試行を送信前に保存し、結果不明や再起動後の二重投稿を防ぐ。
 - resume 対応の構造化出力プリセットで、reviewer・reviewed の無進捗600秒と各ツール30分を監視し、PR の HEAD と会話を維持した自動再開を追加した。ツール実行中は launcher の時間予算を停止し、同じ無応答が連続した場合は再開を停止する。
 
 ### Fixed

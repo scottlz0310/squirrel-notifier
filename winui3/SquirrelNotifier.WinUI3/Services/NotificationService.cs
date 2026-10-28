@@ -28,4 +28,9 @@ internal sealed class NotificationService : INotificationService
             this,
             new NotificationMessage("レートリミット解除", $"{label} の制限が解除されました。"));
     }
+
+    public void NotifyRunnerEscalation(string message)
+    {
+        NotificationRequested?.Invoke(this, new NotificationMessage("ランナーの回復失敗", message));
+    }
 }
