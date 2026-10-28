@@ -624,7 +624,7 @@ internal static class Program
                 sessionResumeEnabled,
                 presetId,
                 presetId);
-            _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
+            _launcherService = new ReviewLauncherService(_settingsService, _loggingService, ghApiClient: new FixturePullRequestClient());
         }
 
         private async Task<LauncherResult> LaunchAsync(LauncherRole role, CancellationToken cancellationToken)

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - resume 対応の構造化出力プリセットで、reviewer・reviewed の無進捗600秒と各ツール30分を監視し、PR の HEAD と会話を維持した自動再開を追加した。ツール実行中は launcher の時間予算を停止し、同じ無応答が連続した場合は再開を停止する。
 
+### Fixed
+
+- headless E2E の架空 PR の HEAD 読み取りをテスト用クライアントへ隔離し、resume 無効時に監視と PR 取得を行わないことを両ロールで検証した。
+
 ## [0.20.0] - 2026-10-27
 
 ### Added

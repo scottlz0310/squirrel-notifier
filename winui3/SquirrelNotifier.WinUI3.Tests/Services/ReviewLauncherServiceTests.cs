@@ -1040,6 +1040,26 @@ public class ReviewLauncherServiceTests : IDisposable
         GetArgumentValue(info.Arguments, "--print-timeout").Should().Be(expected);
     }
 
+    [Theory]
+    [InlineData("Reviewer")]
+    [InlineData("Reviewed")]
+    public async Task LaunchAsync_ShouldNotMonitorOrReadHeadWhenResumeDisabled(string roleName)
+    {
+        ConfigureClientAssignedSettings();
+        _settingsService.Settings.SessionResumeEnabled = false;
+        var clock = new LauncherWatchdogTests.ManualClock();
+        var client = new Mock<IGhApiClient>(MockBehavior.Strict);
+        Mock<IProcessInstance> process = CreateMockProcess(0, string.Empty, string.Empty);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object, timeProvider: clock, ghApiClient: client.Object);
+        LauncherResult result = await service.LaunchAsync(CreateReviewEvent("resume-disabled"), Enum.Parse<LauncherRole>(roleName), CancellationToken.None);
+        result.Success.Should().BeTrue();
+        clock.Timers.Reader.TryRead(out _).Should().BeFalse();
+        client.VerifyNoOtherCalls();
+        runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once);
+    }
+
     private void ConfigureClientAssignedSettings(string presetId = "claude")
     {
         LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;

@@ -173,9 +173,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         {
             LauncherLaunchPlan plan = await CreateLaunchPlanAsync(reviewEvent, role, cts.Token).ConfigureAwait(false);
             (string CommandPath, string ArgumentsTemplate, string ResumeArgumentsTemplate, string PresetId) initialSlot = ResolveLauncherSlot(_settingsService.Settings, role);
-            bool monitored = plan.AgentId is not null
+            bool monitored = _settingsService.Settings.SessionResumeEnabled
+                && plan.AgentId is not null
                 && initialSlot.PresetId != LauncherAgentCatalog.CustomPresetId
-                && plan.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson or LauncherOutputFormat.CopilotJson;
+                && plan.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson;
             string? head = monitored ? await _headGuard.ReadOpenHeadAsync(reviewEvent, cts.Token).ConfigureAwait(false) : null;
             var recovery = new LauncherRecoveryPolicy();
             while (true)
