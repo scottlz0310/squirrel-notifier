@@ -521,6 +521,11 @@ internal static class ContractE2ERunner
             ReviewEventReceived?.Invoke(this, reviewEvent);
         }
 
+        public void NotifyRunnerEscalation(string message)
+        {
+            NotificationRequested?.Invoke(this, new NotificationMessage("fixture", message));
+        }
+
         public void NotifyRateLimitReset(string label)
         {
             NotificationRequested?.Invoke(this, new NotificationMessage("fixture", label));

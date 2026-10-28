@@ -53,7 +53,7 @@ public partial class App : Application
         }
 
         _subscriptionService = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, cacheService: _cacheService);
-        _launcherService = new ReviewLauncherService(_settingsService, _loggingService);
+        _launcherService = new ReviewLauncherService(_settingsService, _loggingService, notificationService: _notificationService);
         _autoUpdateService = new AutoUpdateService(_loggingService);
         _pullRequestStatusClient = new GitHubPullRequestStatusClient();
         _reviewEventCleanupCoordinator = new ReviewEventCleanupCoordinator(

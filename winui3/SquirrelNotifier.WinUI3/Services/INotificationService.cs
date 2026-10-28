@@ -9,6 +9,8 @@ internal interface INotificationService
 
     void NotifyRateLimitReset(string label);
 
+    void NotifyRunnerEscalation(string message);
+
     event System.EventHandler<ReviewEvent>? ReviewEventReceived;
 
     event System.EventHandler<NotificationMessage>? NotificationRequested;

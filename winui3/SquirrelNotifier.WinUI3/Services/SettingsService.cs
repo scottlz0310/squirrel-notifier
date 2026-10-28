@@ -627,6 +627,8 @@ internal sealed class AppSettings
 
     public string SubscriberArguments { get; set; } = string.Empty;
 
+    public string RunnerEscalationUrl { get; set; } = string.Empty;
+
     public string GatewayUrl { get; set; } = "http://localhost:3000";
 
     // review-raven への観測の送信（squirrel-notifier#497 の S1）。既定は無効。
