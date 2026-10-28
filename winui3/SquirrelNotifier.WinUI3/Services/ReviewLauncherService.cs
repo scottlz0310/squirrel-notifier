@@ -177,11 +177,6 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 && initialSlot.PresetId != LauncherAgentCatalog.CustomPresetId
                 && plan.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson or LauncherOutputFormat.CopilotJson;
             string? head = monitored ? await _headGuard.ReadOpenHeadAsync(reviewEvent, cts.Token).ConfigureAwait(false) : null;
-            if (monitored && plan.OutputFormat == LauncherOutputFormat.AgyStreamJson)
-            {
-                plan = plan with { ArgumentsTemplate = plan.ArgumentsTemplate.Replace("--print-timeout 30m", "--print-timeout 0", StringComparison.Ordinal) };
-            }
-
             var recovery = new LauncherRecoveryPolicy();
             while (true)
             {
@@ -555,6 +550,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 outputFormat,
                 false,
                 SessionResumeUnavailableReason.UnsupportedPreset);
+        }
+
+        if (presetId != LauncherAgentCatalog.CustomPresetId && capability.OutputFormat == LauncherOutputFormat.AgyStreamJson)
+        {
+            argumentsTemplate = argumentsTemplate.Replace("--print-timeout 30m", "--print-timeout 0", StringComparison.Ordinal);
+            resumeArgumentsTemplate = resumeArgumentsTemplate.Replace("--print-timeout 30m", "--print-timeout 0", StringComparison.Ordinal);
         }
 
         string workingDirectory = _workingDirectoryResolver.Resolve(reviewEvent, role);

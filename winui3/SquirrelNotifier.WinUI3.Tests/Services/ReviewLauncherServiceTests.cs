@@ -1028,6 +1028,18 @@ public class ReviewLauncherServiceTests : IDisposable
         runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData(true, "0")]
+    [InlineData(false, "30m")]
+    public async Task GetLaunchInfoAsync_ShouldExposeEffectiveAgyTimeout(bool enabled, string expected)
+    {
+        ConfigureParsedOutputSettings("agy");
+        _settingsService.Settings.SessionResumeEnabled = enabled;
+        ReviewLauncherService service = CreateLauncher();
+        LauncherLaunchInfo info = await service.GetLaunchInfoAsync(CreateReviewEvent("agy-timeout"), LauncherRole.Reviewer);
+        GetArgumentValue(info.Arguments, "--print-timeout").Should().Be(expected);
+    }
+
     private void ConfigureClientAssignedSettings(string presetId = "claude")
     {
         LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
