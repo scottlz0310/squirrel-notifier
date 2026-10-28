@@ -51,6 +51,9 @@ internal enum LauncherOutputFormat
 
     /// <summary>Antigravity CLI の --output-format stream-json.</summary>
     AgyStreamJson,
+
+    /// <summary>Copilot CLI の --output-format json.</summary>
+    CopilotJson,
 }
 
 /// <summary>

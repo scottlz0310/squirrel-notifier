@@ -42,6 +42,20 @@ public class ReviewLauncherServiceTests : IDisposable
         }
     }
 
+    private ReviewLauncherService CreateLauncher(
+        IProcessRunner? processRunner = null,
+        TimeProvider? timeProvider = null,
+        LauncherWorkingDirectoryResolver? workingDirectoryResolver = null,
+        SecretMasker? secretMasker = null,
+        ISessionResumeStore? sessionResumeStore = null,
+        IGhApiClient? ghApiClient = null)
+    {
+        var client = new Mock<IGhApiClient>();
+        client.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<string>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GhApiResult.Success("""{"state":"open","headSha":"0123456789abcdef0123456789abcdef01234567","baseRef":"main"}"""));
+        return new ReviewLauncherService(_settingsService, _loggingService, processRunner, timeProvider, workingDirectoryResolver, secretMasker, sessionResumeStore, ghApiClient ?? client.Object);
+    }
+
     private Mock<IProcessInstance> CreateMockProcess(int exitCode, string stdout, string stderr, int delayMs = 0)
     {
         var mockProcess = new Mock<IProcessInstance>();
@@ -117,7 +131,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
             .Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act
         LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
@@ -186,7 +200,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
             .Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
 
@@ -218,7 +232,7 @@ public class ReviewLauncherServiceTests : IDisposable
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act & Assert
         Task<LauncherResult> firstRunTask = service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
@@ -258,7 +272,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback(() => processStarted.SetResult())
             .Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
         using var cts = new CancellationTokenSource();
 
         // Act
@@ -297,7 +311,7 @@ public class ReviewLauncherServiceTests : IDisposable
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act
         LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
@@ -337,7 +351,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback<ProcessStartInfo>(psi => capturedPsi = psi)
             .Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act
         await service.LaunchAsync(reviewEvent, role, CancellationToken.None);
@@ -373,7 +387,7 @@ public class ReviewLauncherServiceTests : IDisposable
         ConfigureSettings();
         _settingsService.UpdateRepositoryCheckoutMappings(new Dictionary<string, string>());
         var mockRunner = new Mock<IProcessRunner>();
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewed, CancellationToken.None);
 
@@ -391,9 +405,7 @@ public class ReviewLauncherServiceTests : IDisposable
         Mock<IProcessInstance> mockProcess = CreateMockProcess(17, string.Empty, $"first failure {secret}\nsecond failure");
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
-        var service = new ReviewLauncherService(
-            _settingsService,
-            _loggingService,
+        ReviewLauncherService service = CreateLauncher(
             mockRunner.Object,
             secretMasker: new SecretMasker([secret]));
 
@@ -426,7 +438,7 @@ public class ReviewLauncherServiceTests : IDisposable
             "unknown skill: thread-owl-pr-reviewer");
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object);
 
         LauncherResult result = await service.LaunchAsync(
             CreateReviewEvent("skill-failure"),
@@ -463,7 +475,7 @@ public class ReviewLauncherServiceTests : IDisposable
             reviewedCmd: "reviewed-cmd", reviewedArgs: "--reviewed-arg");
 
         var mockRunner = new Mock<IProcessRunner>();
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act
         string commandLine = await service.BuildCommandLineAsync(reviewEvent, role);
@@ -492,7 +504,7 @@ public class ReviewLauncherServiceTests : IDisposable
             reviewerArgs: "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --verbose --output-format stream-json");
 
         var mockRunner = new Mock<IProcessRunner>();
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act
         string commandLine = await service.BuildCommandLineAsync(reviewEvent, LauncherRole.Reviewer);
@@ -519,7 +531,7 @@ public class ReviewLauncherServiceTests : IDisposable
         reviewEvent.Reason = "opened";
         reviewEvent.PrNumber = 123;
         reviewEvent.PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/123";
-        var service = new ReviewLauncherService(_settingsService, _loggingService, new Mock<IProcessRunner>().Object);
+        ReviewLauncherService service = CreateLauncher(new Mock<IProcessRunner>().Object);
 
         string commandLine = await service.BuildCommandLineAsync(reviewEvent, role);
 
@@ -551,9 +563,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback<ProcessStartInfo>(psi => capturedArguments.Add(GetLauncherArguments(psi)))
             .Returns(() => processes.Dequeue());
 
-        var service = new ReviewLauncherService(
-            _settingsService,
-            _loggingService,
+        ReviewLauncherService service = CreateLauncher(
             runner.Object,
             sessionResumeStore: store);
         ReviewEvent reviewEvent = CreateReviewEvent("client-assigned-transition");
@@ -600,7 +610,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback<ProcessStartInfo>(psi => capturedArguments = GetLauncherArguments(psi))
             .Returns(process.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
 
         LauncherResult result = await service.LaunchAsync(
             CreateReviewEvent($"client-assigned-miss-{status}"),
@@ -634,7 +644,7 @@ public class ReviewLauncherServiceTests : IDisposable
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Callback(() => processStarted.SetResult())
             .Returns(process.Object);
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
         using var cancellation = new CancellationTokenSource();
 
         Task<LauncherResult> launch = service.LaunchAsync(
@@ -664,7 +674,7 @@ public class ReviewLauncherServiceTests : IDisposable
         Mock<IProcessInstance> process = CreateMockProcess(17, string.Empty, "failed");
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
 
         LauncherResult result = await service.LaunchAsync(
             CreateReviewEvent("client-assigned-failed"),
@@ -699,7 +709,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback<ProcessStartInfo>(psi => capturedArguments = GetLauncherArguments(psi))
             .Returns(process.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
 
         LauncherResult result = await service.LaunchAsync(CreateReviewEvent("resume-disabled"), LauncherRole.Reviewer, CancellationToken.None);
 
@@ -726,7 +736,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback<ProcessStartInfo>(psi => capturedArguments = GetLauncherArguments(psi))
             .Returns(process.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
 
         ReviewEvent reviewEvent = CreateReviewEvent("unsupported-custom");
         List<string> expectedArguments = LauncherArgumentBuilder.BuildArguments(
@@ -770,7 +780,7 @@ public class ReviewLauncherServiceTests : IDisposable
             .Callback<ProcessStartInfo>(psi => capturedArguments.Add(GetLauncherArguments(psi)))
             .Returns(() => processes.Dequeue());
         var store = new RecordingSessionResumeStore();
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
         ReviewEvent reviewEvent = CreateReviewEvent($"parsed-session-{presetId}");
 
         LauncherResult first = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
@@ -798,9 +808,7 @@ public class ReviewLauncherServiceTests : IDisposable
         Mock<IProcessInstance> process = CreateMockProcess(0, output, string.Empty);
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        var service = new ReviewLauncherService(
-            _settingsService,
-            _loggingService,
+        ReviewLauncherService service = CreateLauncher(
             runner.Object,
             sessionResumeStore: new RecordingSessionResumeStore());
 
@@ -838,7 +846,7 @@ public class ReviewLauncherServiceTests : IDisposable
         Mock<IProcessInstance> process = CreateMockProcess(0, output, string.Empty);
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
 
         LauncherResult result = await service.LaunchAsync(
             CreateReviewEvent("parsed-resume-disabled"),
@@ -860,7 +868,7 @@ public class ReviewLauncherServiceTests : IDisposable
         Mock<IProcessInstance> process = CreateMockProcess(0, output, string.Empty);
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
 
         LauncherResult result = await service.LaunchAsync(
             CreateReviewEvent("parsed-session-invalid"),
@@ -891,9 +899,7 @@ public class ReviewLauncherServiceTests : IDisposable
         Mock<IProcessInstance> process = CreateMockProcess(0, "agent-output", string.Empty);
         var runner = new Mock<IProcessRunner>();
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
-        var service = new ReviewLauncherService(
-            _settingsService,
-            _loggingService,
+        ReviewLauncherService service = CreateLauncher(
             runner.Object,
             sessionResumeStore: store);
 
@@ -934,7 +940,7 @@ public class ReviewLauncherServiceTests : IDisposable
         runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Callback<ProcessStartInfo>(psi => capturedArguments = GetLauncherArguments(psi))
             .Returns(process.Object);
-        var service = new ReviewLauncherService(_settingsService, _loggingService, runner.Object, sessionResumeStore: store);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
 
         string commandLine = await service.BuildCommandLineAsync(reviewEvent, LauncherRole.Reviewer);
         LauncherLaunchInfo resolved = await service.GetLaunchInfoAsync(reviewEvent, LauncherRole.Reviewer);
@@ -945,6 +951,80 @@ public class ReviewLauncherServiceTests : IDisposable
         capturedArguments.Should().NotBeNull();
         capturedArguments!.Should().ContainInOrder("--resume", sessionId.ToString("D"));
         resolved.Arguments.Should().Equal(capturedArguments);
+        runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Reviewer", false)]
+    [InlineData("Reviewed", false)]
+    [InlineData("Reviewer", true)]
+    [InlineData("Reviewed", true)]
+    public async Task LaunchAsync_ShouldResumeSameSessionAndStopOnRepeatedStall(string roleName, bool repeatFailure)
+    {
+        ConfigureClientAssignedSettings();
+        _settingsService.Settings.LauncherTimeoutMs = 1800000;
+        var clock = new LauncherWatchdogTests.ManualClock();
+        Mock<IProcessInstance> first = CreateMockProcess(0, string.Empty, string.Empty);
+        Mock<IProcessInstance> second = CreateMockProcess(0, string.Empty, string.Empty);
+        first.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken token) => token.CanBeCanceled ? Task.Delay(Timeout.Infinite, token) : Task.CompletedTask);
+        if (repeatFailure)
+        {
+            second.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+                .Returns((CancellationToken token) => token.CanBeCanceled ? Task.Delay(Timeout.Infinite, token) : Task.CompletedTask);
+        }
+
+        var processes = new Queue<IProcessInstance>([first.Object, second.Object]);
+        var arguments = new List<IReadOnlyList<string>>();
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(info => arguments.Add(GetLauncherArguments(info)))
+            .Returns(() => processes.Dequeue());
+        ReviewLauncherService service = CreateLauncher(runner.Object, timeProvider: clock);
+        Task<LauncherResult> pending = service.LaunchAsync(CreateReviewEvent("stall-resume"), Enum.Parse<LauncherRole>(roleName), CancellationToken.None);
+        Action tick = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        clock.Advance(TimeSpan.FromSeconds(600));
+        tick();
+        if (repeatFailure)
+        {
+            tick = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            clock.Advance(TimeSpan.FromSeconds(600));
+            tick();
+        }
+
+        LauncherResult result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+        result.Success.Should().Be(!repeatFailure);
+        arguments.Should().HaveCount(2);
+        GetArgumentValue(arguments[0], "--session-id").Should().Be(GetArgumentValue(arguments[1], "--resume"));
+        first.Verify(p => p.Kill(true), Times.Once);
+        first.Verify(p => p.WaitForExitAsync(CancellationToken.None), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("closed", "0123456789abcdef0123456789abcdef01234567")]
+    [InlineData("open", "1123456789abcdef0123456789abcdef01234567")]
+    public async Task LaunchAsync_ShouldNotResumeClosedOrMovedPullRequest(string state, string nextHead)
+    {
+        ConfigureClientAssignedSettings();
+        _settingsService.Settings.LauncherTimeoutMs = 1800000;
+        var clock = new LauncherWatchdogTests.ManualClock();
+        var client = new Mock<IGhApiClient>();
+        client.SetupSequence(x => x.GetAsync(It.IsAny<string>(), It.IsAny<string>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GhApiResult.Success("""{"state":"open","headSha":"0123456789abcdef0123456789abcdef01234567","baseRef":"main"}"""))
+            .ReturnsAsync(GhApiResult.Success($$"""{"state":"{{state}}","headSha":"{{nextHead}}","baseRef":"main"}"""));
+        Mock<IProcessInstance> process = CreateMockProcess(0, string.Empty, string.Empty);
+        process.Setup(p => p.WaitForExitAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken token) => token.CanBeCanceled ? Task.Delay(Timeout.Infinite, token) : Task.CompletedTask);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object, timeProvider: clock, ghApiClient: client.Object);
+        Task<LauncherResult> pending = service.LaunchAsync(CreateReviewEvent("head-guard"), LauncherRole.Reviewer, CancellationToken.None);
+        Action tick = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        clock.Advance(TimeSpan.FromSeconds(600));
+        tick();
+        LauncherResult result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("PR");
         runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once);
     }
 
@@ -1084,7 +1164,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object, new FixedTimeProvider());
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object, new FixedTimeProvider());
 
         // Act
         AgentExecutionSession session = service.StartSession(CreateReviewEvent(), LauncherRole.Reviewer, CancellationToken.None);
@@ -1147,7 +1227,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object, new FixedTimeProvider());
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object, new FixedTimeProvider());
 
         // Act
         AgentExecutionSession session = service.StartSession(CreateReviewEvent(), LauncherRole.Reviewer, CancellationToken.None);
@@ -1195,7 +1275,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
         using var cts = new CancellationTokenSource();
 
         // Act
@@ -1232,7 +1312,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act
         AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-cancel-method"), LauncherRole.Reviewer, CancellationToken.None);
@@ -1268,7 +1348,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act: StartSession が戻った直後に同期的に Cancel する
         AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-cancel-before-start"), LauncherRole.Reviewer, CancellationToken.None);
@@ -1301,7 +1381,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act
         AgentExecutionSession session = service.StartSession(CreateReviewEvent("test-stream-timeout"), LauncherRole.Reviewer, CancellationToken.None);
@@ -1331,7 +1411,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
 
         // Act: 1 本目の実行中に 2 本目のセッションを開始する
         Task<LauncherResult> firstRun = service.LaunchAsync(CreateReviewEvent("test-stream-busy-1"), LauncherRole.Reviewer, CancellationToken.None);
@@ -1373,7 +1453,7 @@ public class ReviewLauncherServiceTests : IDisposable
             mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(CreateMockProcess(exitCode, "", "").Object);
         }
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
         var raised = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         int raisedCount = 0;
         service.RunCompleted += (_, _) =>
@@ -1399,7 +1479,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Returns(CreateMockProcess(0, "", "", delayMs: 500).Object);
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
         int raisedCount = 0;
         service.RunCompleted += (_, _) => Interlocked.Increment(ref raisedCount);
 
@@ -1432,7 +1512,7 @@ public class ReviewLauncherServiceTests : IDisposable
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
             .Callback<ProcessStartInfo>(_ => whileRunning = service!.IsReviewerRunningFor(repository, prNumber))
             .Returns(CreateMockProcess(0, "", "").Object);
-        service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        service = CreateLauncher(mockRunner.Object);
 
         await service.LaunchAsync(CreateReviewEvent("test-running-for"), Enum.Parse<LauncherRole>(roleName), CancellationToken.None);
 
@@ -1475,7 +1555,7 @@ public class ReviewLauncherServiceTests : IDisposable
         var mockRunner = new Mock<IProcessRunner>();
         mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
 
-        var service = new ReviewLauncherService(_settingsService, _loggingService, mockRunner.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
         LauncherResult result = await service.LaunchAsync(
             CreateReviewEvent("test-bom-encoding"),
             LauncherRole.Reviewer,

@@ -21,6 +21,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private readonly IProcessRunner _processRunner;
     private readonly ISessionResumeStore _sessionResumeStore;
     private readonly TimeProvider _timeProvider;
+    private readonly LauncherHeadGuard _headGuard;
     private readonly LauncherWorkingDirectoryResolver _workingDirectoryResolver;
     private readonly SecretMasker _secretMasker;
     private readonly object _lock = new();
@@ -62,12 +63,14 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         TimeProvider? timeProvider = null,
         LauncherWorkingDirectoryResolver? workingDirectoryResolver = null,
         SecretMasker? secretMasker = null,
-        ISessionResumeStore? sessionResumeStore = null)
+        ISessionResumeStore? sessionResumeStore = null,
+        IGhApiClient? ghApiClient = null)
     {
         _settingsService = settingsService;
         _loggingService = loggingService;
         _processRunner = processRunner ?? new ProcessRunner();
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _headGuard = new LauncherHeadGuard(ghApiClient ?? new GhApiClient());
         _workingDirectoryResolver = workingDirectoryResolver ?? new LauncherWorkingDirectoryResolver(settingsService);
         _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
         _sessionResumeStore = sessionResumeStore ?? new SessionResumeStore(settingsService.SettingsDirectory, _timeProvider);
@@ -165,18 +168,80 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
     private async Task RunSessionAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, CancellationTokenSource cts, CancellationToken cancellationToken)
     {
-        // StartSession の fire-and-forget 呼び出し元へ確実に制御を返すため、最初に一度
-        // スケジューラを経由する。LogAsync が書き込む File.AppendAllTextAsync は OS
-        // キャッシュにヒットすると同期的に完了することがあり、その場合コンパイラの
-        // 完了済みタスク最適化により、これ以降の同期区間が StartSession の呼び出しスレッド上で
-        // プロセス起動直前まで進んでしまう。これにより「StartSession 直後の Cancel()」（開始前
-        // レース、#143）がプロセス起動チェックに間に合わないことがあった.
         await Task.Yield();
+        try
+        {
+            LauncherLaunchPlan plan = await CreateLaunchPlanAsync(reviewEvent, role, cts.Token).ConfigureAwait(false);
+            (string CommandPath, string ArgumentsTemplate, string ResumeArgumentsTemplate, string PresetId) initialSlot = ResolveLauncherSlot(_settingsService.Settings, role);
+            bool monitored = plan.AgentId is not null
+                && initialSlot.PresetId != LauncherAgentCatalog.CustomPresetId
+                && plan.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson or LauncherOutputFormat.CopilotJson;
+            string? head = monitored ? await _headGuard.ReadOpenHeadAsync(reviewEvent, cts.Token).ConfigureAwait(false) : null;
+            if (monitored && plan.OutputFormat == LauncherOutputFormat.AgyStreamJson)
+            {
+                plan = plan with { ArgumentsTemplate = plan.ArgumentsTemplate.Replace("--print-timeout 30m", "--print-timeout 0", StringComparison.Ordinal) };
+            }
 
+            var recovery = new LauncherRecoveryPolicy();
+            while (true)
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                LauncherAttemptResult attempt = await RunAttemptAsync(session, reviewEvent, role, plan, monitored, cts.Token).ConfigureAwait(false);
+                if (attempt.Timeout is not (LauncherWatchdogTimeout.NoProgress or LauncherWatchdogTimeout.Tool)
+                    || attempt.Outcome != AgentExecutionOutcome.TimedOut
+                    || attempt.SessionId is not Guid sessionId
+                    || recovery.OnFailure(attempt.Timeout) != LauncherRecoveryAction.Resume)
+                {
+                    session.Complete(attempt.Outcome, attempt.Result);
+                    break;
+                }
+
+                await _headGuard.VerifyAsync(reviewEvent, head!, cts.Token).ConfigureAwait(false);
+                if (!_settingsService.Settings.SessionResumeEnabled || initialSlot != ResolveLauncherSlot(_settingsService.Settings, role))
+                {
+                    throw new InvalidOperationException("実行中に launcher 設定が変わったため、自動再開を停止しました。");
+                }
+
+                string resumeTemplate = initialSlot.ResumeArgumentsTemplate;
+                if (plan.OutputFormat == LauncherOutputFormat.AgyStreamJson)
+                {
+                    resumeTemplate = resumeTemplate.Replace("--print-timeout 30m", "--print-timeout 0", StringComparison.Ordinal);
+                }
+
+                plan = plan with { ArgumentsTemplate = resumeTemplate, SessionId = sessionId, IsResume = true, ResumeUnavailableReason = null };
+                session.PublishStdout("無応答を検知したため、同じセッションを再開します。");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            session.Complete(AgentExecutionOutcome.Cancelled, new LauncherResult { Success = false, ErrorMessage = "実行を中止しました。" });
+        }
+        catch (Exception ex)
+        {
+            session.Complete(AgentExecutionOutcome.Failed, new LauncherResult { Success = false, ErrorMessage = ex.Message });
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                _activeCts?.Dispose();
+                _activeCts = null;
+                _activeReviewerEvent = null;
+                _isRunning = false;
+            }
+
+            RunCompleted?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private async Task<LauncherAttemptResult> RunAttemptAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, LauncherLaunchPlan plan, bool monitored, CancellationToken cancellationToken)
+    {
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        LauncherWatchdog? watchdog = null;
+        LauncherWatchdogTimeout timeout = LauncherWatchdogTimeout.None;
         Task<string>? stdoutTask = null;
         Task<string>? stderrTask = null;
         var parsedSessionId = new ParsedSessionIdCapture();
-        LauncherLaunchPlan? plan = null;
         bool processStarted = false;
         AgentExecutionOutcome outcome;
         LauncherResult result;
@@ -193,7 +258,11 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             cts.CancelAfter(timeoutMs);
             CancellationToken combinedToken = cts.Token;
 
-            plan = await CreateLaunchPlanAsync(reviewEvent, role, combinedToken).ConfigureAwait(false);
+            if (monitored)
+            {
+                cts.CancelAfter(Timeout.InfiniteTimeSpan);
+            }
+
             if (plan.ResumeUnavailableReason is SessionResumeUnavailableReason unavailableReason)
             {
                 await LogAsync(SessionResumeMessageFormatter.BuildUnavailable(unavailableReason)).ConfigureAwait(false);
@@ -264,6 +333,14 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             // codex exec 等の非対話モードは、プロンプトを引数で受け取っても stdin の EOF を
             // 待って停止することがあるため、標準入力を即座に閉じて EOF を通知する.
             _activeProcess.StandardInput.Close();
+            if (monitored)
+            {
+                watchdog = new LauncherWatchdog(_timeProvider, TimeSpan.FromMilliseconds(timeoutMs), TimeSpan.FromSeconds(600), TimeSpan.FromMinutes(30), reason =>
+                {
+                    timeout = reason;
+                    cts.Cancel();
+                });
+            }
 
             // 実行中の逐次配信（#143）: 終了後一括の ReadToEndAsync ではなく行単位で読み取り、
             // stdout / stderr の各ストリーム内の順序を維持したままセッションへ流す。
@@ -273,6 +350,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 session,
                 plan.OutputFormat,
                 parsedSessionId,
+                watchdog is null ? null : line => watchdog.Observe(line, plan.OutputFormat),
                 combinedToken);
             stderrTask = PumpStderrAsync(_activeProcess.StandardError, session, combinedToken);
 
@@ -306,15 +384,15 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 Stderr = stderr,
                 ErrorMessage = errorMessage,
             };
-            await CompleteSessionAsync(
-                session,
+            return await CompleteSessionAsync(
                 reviewEvent,
                 role,
                 plan,
                 parsedSessionId,
                 outcome,
                 result,
-                processStarted).ConfigureAwait(false);
+                processStarted,
+                timeout).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -330,6 +408,11 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             await LogAsync($"Review process was {reason}.").ConfigureAwait(false);
 
             KillActiveProcess();
+            if (timeout is LauncherWatchdogTimeout.NoProgress or LauncherWatchdogTimeout.Tool && _activeProcess is not null)
+            {
+                await _activeProcess.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            }
+
             await WaitForPumpsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
 
             outcome = cancelledByUser ? AgentExecutionOutcome.Cancelled : AgentExecutionOutcome.TimedOut;
@@ -338,21 +421,22 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 Success = false,
                 ErrorMessage = $"Review process was {reason}.",
             };
-            await CompleteSessionAsync(
-                session,
+            return await CompleteSessionAsync(
                 reviewEvent,
                 role,
                 plan,
                 parsedSessionId,
                 outcome,
                 result,
-                processStarted).ConfigureAwait(false);
+                processStarted,
+                timeout).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             await LogAsync($"Failed to run review process: {ex.Message}").ConfigureAwait(false);
 
             KillActiveProcess();
+
             await WaitForPumpsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
 
             outcome = AgentExecutionOutcome.Failed;
@@ -361,41 +445,39 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 Success = false,
                 ErrorMessage = ex.Message,
             };
-            await CompleteSessionAsync(
-                session,
+            return await CompleteSessionAsync(
                 reviewEvent,
                 role,
                 plan,
                 parsedSessionId,
                 outcome,
                 result,
-                processStarted).ConfigureAwait(false);
+                processStarted,
+                timeout).ConfigureAwait(false);
         }
         finally
         {
+            cts.Cancel();
+            await WaitForPumpsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+            watchdog?.Dispose();
+            cts.Dispose();
             lock (_lock)
             {
                 _activeProcess?.Dispose();
                 _activeProcess = null;
-                _activeCts?.Dispose();
-                _activeCts = null;
-                _activeReviewerEvent = null;
-                _isRunning = false;
             }
-
-            RunCompleted?.Invoke(this, EventArgs.Empty);
         }
     }
 
-    private async Task CompleteSessionAsync(
-        AgentExecutionSession session,
+    private async Task<LauncherAttemptResult> CompleteSessionAsync(
         ReviewEvent reviewEvent,
         LauncherRole role,
         LauncherLaunchPlan? plan,
         ParsedSessionIdCapture parsedSessionId,
         AgentExecutionOutcome outcome,
         LauncherResult result,
-        bool processStarted)
+        bool processStarted,
+        LauncherWatchdogTimeout timeout)
     {
         try
         {
@@ -423,8 +505,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             result.ErrorMessage = message;
         }
 
-        session.Complete(outcome, result);
+        return new LauncherAttemptResult(outcome, result, plan?.SessionId ?? parsedSessionId.SessionId, timeout);
     }
+
+    private sealed record LauncherAttemptResult(AgentExecutionOutcome Outcome, LauncherResult Result, Guid? SessionId, LauncherWatchdogTimeout Timeout);
 
     private async Task<LauncherLaunchPlan> CreateLaunchPlanAsync(
         ReviewEvent reviewEvent,
@@ -622,15 +706,30 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         AgentExecutionSession session,
         LauncherOutputFormat outputFormat,
         ParsedSessionIdCapture parsedSessionId,
+        Action<string>? observeOutput,
         CancellationToken cancellationToken)
     {
         var lines = new List<string>();
+        var copilotExtractor = new CopilotJsonEventExtractor();
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
         {
             // reader は Latin1 で開かれている。パース前に実際のエンコーディングへ復元する（#231）。
             // ただし先頭の UTF-8 BOM により StreamReader が UTF-8 へ切り替わった場合は既にデコード済み（#252）
             bool isLatin1 = reader.CurrentEncoding.CodePage == Encoding.Latin1.CodePage;
             string line = isLatin1 ? ProcessOutputDecoder.Decode(rawLine) : rawLine;
+            observeOutput?.Invoke(line);
+            if (outputFormat == LauncherOutputFormat.CopilotJson)
+            {
+                string? text = copilotExtractor.Extract(line);
+                if (!string.IsNullOrEmpty(text))
+                {
+                    lines.Add(text);
+                    session.PublishStdout(text);
+                }
+
+                continue;
+            }
+
             lines.Add(line);
 
             if (ProgressEventParser.TryParse(line, out AgentProgressEvent? progress))

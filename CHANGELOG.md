@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- resume 対応の構造化出力プリセットで、reviewer・reviewed の無進捗600秒と各ツール30分を監視し、PR の HEAD と会話を維持した自動再開を追加した。ツール実行中は launcher の時間予算を停止し、同じ無応答が連続した場合は再開を停止する。
+
 ## [0.20.0] - 2026-10-27
 
 ### Added
