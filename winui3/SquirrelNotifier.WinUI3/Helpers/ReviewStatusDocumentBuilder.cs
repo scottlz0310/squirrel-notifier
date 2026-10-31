@@ -114,7 +114,8 @@ internal static class ReviewStatusDocumentBuilder
             holdSince?.UtcDateTime,
             queuePosition,
             entry.Outcome is ReviewerOutcome outcome ? DescribeOutcome(outcome) : null,
-            entry.ExitCode);
+            entry.ExitCode,
+            holdReason == "autoPause" ? entry.AutoPause : null);
     }
 
     /// <summary>

@@ -27,15 +27,18 @@ internal sealed class ReviewCycleStateChangedEventArgs : EventArgs
 /// <summary>reviewer の起動を見送って保留したことの観測（#462）.</summary>
 internal sealed class ReviewHoldObservedEventArgs : EventArgs
 {
-    public ReviewHoldObservedEventArgs(ReviewEvent reviewEvent, ReviewHoldKind kind)
+    public ReviewHoldObservedEventArgs(ReviewEvent reviewEvent, ReviewHoldKind kind, ReviewAutoPauseInfo? autoPause = null)
     {
         ReviewEvent = reviewEvent ?? throw new ArgumentNullException(nameof(reviewEvent));
         Kind = kind;
+        AutoPause = autoPause;
     }
 
     public ReviewEvent ReviewEvent { get; }
 
     public ReviewHoldKind Kind { get; }
+
+    public ReviewAutoPauseInfo? AutoPause { get; }
 }
 
 /// <summary>
@@ -202,13 +205,14 @@ internal sealed class ReviewCycleCoordinator
     /// <summary>reviewer の起動を見送って保留したことを通知する（#462）.</summary>
     /// <param name="reviewEvent">保留したレビューイベント.</param>
     /// <param name="kind">保留の理由.</param>
-    public void ObserveHold(ReviewEvent reviewEvent, ReviewHoldKind kind)
+    /// <param name="autoPause">Auto-Pauseの判定に使用した観測値.</param>
+    public void ObserveHold(ReviewEvent reviewEvent, ReviewHoldKind kind, ReviewAutoPauseInfo? autoPause = null)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
 
         try
         {
-            HoldObserved?.Invoke(this, new ReviewHoldObservedEventArgs(reviewEvent, kind));
+            HoldObserved?.Invoke(this, new ReviewHoldObservedEventArgs(reviewEvent, kind, autoPause));
         }
         catch (Exception ex)
         {

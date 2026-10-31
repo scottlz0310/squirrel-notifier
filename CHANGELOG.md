@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- review-status.jsonの起動待ちautoPauseへ、判定対象agent/枠・使用率・閾値・観測時刻・リセット予定を省略可能な項目として公開する。待機理由が同じでも根拠の変化を反映し、別eventや実行中/終了へは流用しない。gateや自動解除/起動の条件は変更しない。
+
+
 ### Changed
 
 - リリース共通workflowをrelease-automate v3.2.1へ更新し、準備時の比較元に対象版以上の旧系列タグを選ばない修正を取り込んだ。

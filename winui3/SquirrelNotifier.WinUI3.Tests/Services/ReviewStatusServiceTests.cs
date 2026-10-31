@@ -24,6 +24,54 @@ public sealed class ReviewStatusServiceTests : IDisposable
     private SubscriptionState _subscriptionState = SubscriptionState.Running;
     private bool _authenticationRequired;
 
+    [Fact]
+    public async Task ApplyHoldAsync_ShouldRefreshAutoPauseDetailsWithoutMovingHoldSince()
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent reviewEvent = CreateReviewEvent("event-paused");
+        await service.ApplyStateAsync(reviewEvent, CreateState(lastEventId: reviewEvent.EventId));
+        ReviewAutoPauseInfo first = new("agy", "3p-weekly", 96, 95, _initialTime.UtcDateTime, null);
+        await service.ApplyHoldAsync(reviewEvent, ReviewHoldKind.AutoPause, first);
+        _timeProvider.UtcNow = _initialTime.AddMinutes(1);
+        ReviewAutoPauseInfo updated = first with { UsedPercentage = 98, ObservedAt = _timeProvider.UtcNow.UtcDateTime, ResetAt = _initialTime.AddMinutes(10).UtcDateTime };
+
+        await service.ApplyHoldAsync(reviewEvent, ReviewHoldKind.AutoPause, updated);
+
+        JsonNode item = (await ReadStatusAsync())["items"]![0]!;
+        item["autoPause"]!["usedPercentage"]!.GetValue<double>().Should().Be(98);
+        item["autoPause"]!["resetAt"]!.GetValue<string>().Should().Be("2026-10-01T01:10:00Z");
+        item["holdSince"]!.GetValue<string>().Should().Be("2026-10-01T01:00:00Z");
+
+        await service.ApplyHoldAsync(reviewEvent, ReviewHoldKind.Busy);
+        (await ReadStatusAsync())["items"]![0]!["autoPause"].Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ApplyStateAsync_ShouldKeepAutoPauseDetailsBoundToTheObservedEvent(bool sameEvent)
+    {
+        ReviewStatusService service = CreateService();
+        ReviewEvent first = CreateReviewEvent("event-first");
+        await service.ApplyStateAsync(first, CreateState(lastEventId: first.EventId));
+        ReviewAutoPauseInfo details = new("agy", "3p-weekly", 96, 95, _initialTime.UtcDateTime, null);
+        await service.ApplyHoldAsync(first, ReviewHoldKind.AutoPause, details);
+        ReviewEvent next = sameEvent ? first : CreateReviewEvent("event-next");
+
+        await service.ApplyStateAsync(next, CreateState(lastEventId: next.EventId));
+
+        JsonNode? published = (await ReadStatusAsync())["items"]![0]!["autoPause"];
+        if (sameEvent)
+        {
+            published!["agentId"]!.GetValue<string>().Should().Be("agy");
+            published["resetAt"].Should().BeNull();
+        }
+        else
+        {
+            published.Should().BeNull();
+        }
+    }
+
     public ReviewStatusServiceTests()
     {
         _loggingService = new LoggingService(LogDirectory);
@@ -342,8 +390,10 @@ public sealed class ReviewStatusServiceTests : IDisposable
 
     // A の実行中に、次の event（B）が busy で保留されると、その時点では B の起動待ちの項目が無い。
     // A の終了後に B が起動待ちになるとき、実行中に観測した保留の理由と待ち順を引き継ぐ
-    [Fact]
-    public async Task ApplyHoldAsync_ShouldCarryHoldOfNextEventToWaitingStateAfterRunningCompletes()
+    [Theory]
+    [InlineData(false, "busy")]
+    [InlineData(true, "autoPause")]
+    public async Task ApplyHoldAsync_ShouldCarryHoldOfNextEventToWaitingStateAfterRunningCompletes(bool isAutoPause, string expectedReason)
     {
         ReviewStatusService service = CreateService();
         ReviewEvent eventA = CreateReviewEvent("event-a", reason: "opened");
@@ -368,8 +418,13 @@ public sealed class ReviewStatusServiceTests : IDisposable
                 activeAgent: "codex",
                 updatedAt: _timeProvider.UtcNow));
         _timeProvider.UtcNow = _initialTime.AddMinutes(5);
-        await service.ApplyHoldAsync(eventB, ReviewHoldKind.Busy);
+        ReviewHoldKind kind = isAutoPause ? ReviewHoldKind.AutoPause : ReviewHoldKind.Busy;
+        ReviewAutoPauseInfo? details = isAutoPause
+            ? new("agy", "3p-weekly", 96, 95, _timeProvider.UtcNow.UtcDateTime, null)
+            : null;
+        await service.ApplyHoldAsync(eventB, kind, details);
         (await ReadStatusAsync())["items"]!.AsArray().Should().ContainSingle().Which!["state"]!.GetValue<string>().Should().Be("running");
+        (await ReadStatusAsync())["items"]![0]!["autoPause"].Should().BeNull();
 
         _timeProvider.UtcNow = _initialTime.AddMinutes(10);
         await service.ApplyStateAsync(
@@ -391,7 +446,16 @@ public sealed class ReviewStatusServiceTests : IDisposable
         waiting["state"]!.GetValue<string>().Should().Be("waiting");
         waiting["eventId"]!.GetValue<string>().Should().Be("event-b");
         waiting["round"]!.GetValue<int>().Should().Be(2);
-        waiting["holdReason"]!.GetValue<string>().Should().Be("busy");
+        waiting["holdReason"]!.GetValue<string>().Should().Be(expectedReason);
+        if (details is not null)
+        {
+            waiting["autoPause"]!["agentId"]!.GetValue<string>().Should().Be(details.AgentId);
+            waiting["autoPause"]!["usedPercentage"]!.GetValue<double>().Should().Be(details.UsedPercentage);
+        }
+        else
+        {
+            waiting["autoPause"].Should().BeNull();
+        }
         waiting["holdSince"]!.GetValue<string>().Should().Be("2026-10-01T01:05:00Z");
         waiting["queuePosition"]!.GetValue<int>().Should().Be(1);
         status["recent"]![0]!["eventId"]!.GetValue<string>().Should().Be("event-a");

@@ -198,11 +198,11 @@ internal sealed class ReviewStatusService
         return UpdateAsync(() => ApplyState(reviewEvent, state, exitCode));
     }
 
-    internal Task ApplyHoldAsync(ReviewEvent reviewEvent, ReviewHoldKind kind)
+    internal Task ApplyHoldAsync(ReviewEvent reviewEvent, ReviewHoldKind kind, ReviewAutoPauseInfo? autoPause = null)
     {
         ArgumentNullException.ThrowIfNull(reviewEvent);
 
-        return UpdateAsync(() => ApplyHold(reviewEvent, kind));
+        return UpdateAsync(() => ApplyHold(reviewEvent, kind, autoPause));
     }
 
     internal Task RemoveEventsAsync(IReadOnlyCollection<string> eventIds)
@@ -235,7 +235,7 @@ internal sealed class ReviewStatusService
 
     private static DateTimeOffset ToUtc(DateTime time) => new DateTimeOffset(time).ToUniversalTime();
 
-    private readonly record struct HoldObservation(ReviewHoldKind Kind, DateTimeOffset Since);
+    private readonly record struct HoldObservation(ReviewHoldKind Kind, DateTimeOffset Since, ReviewAutoPauseInfo? AutoPause);
 
     private bool ApplyState(ReviewEvent reviewEvent, ReviewCycleState state, int? exitCode)
     {
@@ -276,10 +276,12 @@ internal sealed class ReviewStatusService
                 ReviewStatusEntry? previousWait = existing is { State: ReviewStatusState.Waiting } ? existing : null;
                 ReviewHoldKind? hold = previousWait?.Hold;
                 DateTimeOffset? holdSince = previousWait?.HoldSince;
+                ReviewAutoPauseInfo? autoPause = previousWait?.EventId == eventId ? previousWait.AutoPause : null;
                 if (_holds.TryGetValue(eventId, out HoldObservation observed))
                 {
                     hold = observed.Kind;
                     holdSince = observed.Since;
+                    autoPause = observed.AutoPause;
                 }
 
                 if (previousWait is not null && previousWait.EventId != eventId)
@@ -298,7 +300,8 @@ internal sealed class ReviewStatusService
                     ToUtc(reviewEvent.ReceivedTime),
                     Hold: hold,
                     HoldSince: holdSince,
-                    Cycle: CycleOf(eventId));
+                    Cycle: CycleOf(eventId),
+                    AutoPause: autoPause);
                 return true;
 
             case ReviewCycleStatus.ReviewerRunning:
@@ -377,7 +380,7 @@ internal sealed class ReviewStatusService
         }
     }
 
-    private bool ApplyHold(ReviewEvent reviewEvent, ReviewHoldKind kind)
+    private bool ApplyHold(ReviewEvent reviewEvent, ReviewHoldKind kind, ReviewAutoPauseInfo? autoPause)
     {
         if (_removedEventIds.Contains(reviewEvent.EventId))
         {
@@ -389,7 +392,8 @@ internal sealed class ReviewStatusService
 
         // 保留し始めた時刻は、理由が変わっても保つ（待ち順は、保留し始めた順）
         DateTimeOffset since = _holds.TryGetValue(reviewEvent.EventId, out HoldObservation previous) ? previous.Since : now;
-        _holds[reviewEvent.EventId] = new HoldObservation(kind, since);
+        ReviewAutoPauseInfo? details = kind == ReviewHoldKind.AutoPause ? autoPause : null;
+        _holds[reviewEvent.EventId] = new HoldObservation(kind, since, details);
 
         // 起動待ちの項目に反映するのは、その event の項目だけ。実行中の PR の次の event の保留は、実行が終わって
         // 起動待ちになる時点（ApplyState）で反映する。古い event の遅れた通知で、新しい event の項目を書き換えない
@@ -397,12 +401,12 @@ internal sealed class ReviewStatusService
         if (!_current.TryGetValue(key, out ReviewStatusEntry? entry)
             || entry.State != ReviewStatusState.Waiting
             || entry.EventId != reviewEvent.EventId
-            || entry.Hold == kind)
+            || (entry.Hold == kind && entry.AutoPause == details))
         {
             return false;
         }
 
-        _current[key] = entry with { Hold = kind, HoldSince = entry.HoldSince ?? since };
+        _current[key] = entry with { Hold = kind, HoldSince = entry.HoldSince ?? since, AutoPause = details };
         return true;
     }
 
@@ -439,7 +443,7 @@ internal sealed class ReviewStatusService
         => _ = ApplyStateAsync(e.ReviewEvent, e.State, e.ExitCode);
 
     private void OnHoldObserved(object? sender, ReviewHoldObservedEventArgs e)
-        => _ = ApplyHoldAsync(e.ReviewEvent, e.Kind);
+        => _ = ApplyHoldAsync(e.ReviewEvent, e.Kind, e.AutoPause);
 
     private void OnReviewEventsRemoved(object? sender, ReviewEventsRemovedEventArgs e)
         => _ = RemoveEventsAsync(e.EventIds);
