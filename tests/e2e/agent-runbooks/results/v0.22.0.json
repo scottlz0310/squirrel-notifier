@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "version": "0.22.0",
+  "testedCommit": "3de1542267e3861b8cefafe4d2e1c8a08b7eea1d",
+  "productVersion": "0.22.0+3de1542267e3861b8cefafe4d2e1c8a08b7eea1d",
+  "executedAt": "2026-10-31T22:10:49.0421197Z",
+  "executor": {
+    "agent": "codex",
+    "model": "GPT-6",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Pro 10.0.26300",
+    "notes": "利用者が独立委任した、今回の製品実装・準備PR作成を担当していない検証エージェント。PowerShell 7.6.9・.NET SDK 10.0.403の実対話デスクトップ。現行のStart-RunbookEnvironment.ps1/Invoke-RunbookUia.ps1/Stop-RunbookEnvironment.ps1をpwsh -Fileの別プロセスで実行。初回に対象HEADをbuild（4プロジェクトすべて警告0・エラー0）、後続は同一ProductVersion照合でSkipBuild。durationSecondsはrun.json.startedAtからisolation.json.stoppedAtまでの切上げでbuild時間を除外。各外部操作40〜60秒、初回起動300秒上限。ボタンは実マウスClick、UIA操作前後の対象PID/Path/Responding確認32件すべてtrue。3シナリオすべて初回成功、失敗・再実行・flakyなし。全runでisolated=true・realSettingsUnchanged=true、fixture残留0。常駐PID41184（Downloads/SquirrelNotifier-Setup-0.21.0-x64のexe）は停止・変更せず継続稼働。実設定のSHA256は全run開始時と終了後で一致。本番gateway/queue/PR/資格情報への書込みなし。過去版の結果は流用せず、証跡は今回のartifacts/runbook-v0.22.0に保存。"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 10,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070924-isolated-launch\\evidence\\uia.jsonl",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed.。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070924-isolated-launch\\evidence\\process-files.json",
+          "summary": "検証PID22604のPathはrun.appPathと一致。常駐PID41184はDownloadsの0.21.0 exeから別プロセスで継続稼働、Responding=true。隔離settings.jsonとlogs/winui3.logが存在。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070924-isolated-launch\\evidence\\responding.jsonl",
+          "summary": "各UIA操作前後に対象PID・exe Path一致・Responding=trueを確認。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070924-isolated-launch\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。終了後のプロセス検査でfixture残留0。"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 18,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070934-review-event-flow\\evidence\\uia.jsonl",
+          "summary": "TitleText=opened: fixture-owner/fixture-repository#307に完全一致。一覧に#307/#308/#309の3件。#307のLaunchReviewerButtonを実Clickし、reviewer 実行完了を確認。"
+        },
+        {
+          "kind": "observation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070934-review-event-flow\\observations\\launcher.jsonl",
+          "summary": "1件。arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectory=dataRoot/launcher-workspace/reviewer/fixture-owner/fixture-repository/307。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070934-review-event-flow\\data\\logs\\winui3.log",
+          "summary": "Review process finished. ExitCode=0 と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました を確認。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070934-review-event-flow\\evidence\\responding.jsonl",
+          "summary": "各UIA操作前後に対象PID・exe Path一致・Responding=trueを確認。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070934-review-event-flow\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。終了後のプロセス検査でfixture残留0。"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 21,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070953-register-while-stopped\\evidence\\uia.jsonl",
+          "summary": "停止後StartButton有効。PrReferenceBoxを設定し800ms待機後に同じ入力値を読戻し、EnqueueReviewButtonを実Click。PrimaryButton=購読を開始して登録を実Clickし、再開後StopButton有効。"
+        },
+        {
+          "kind": "observation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070953-register-while-stopped\\observations\\subscriber.jsonl",
+          "summary": "mode=callはちょうど1件。--tool enqueue_review、--url=http://127.0.0.1:64880/（run.gatewayUrl一致）、--args={owner:fixture-owner,repo:fixture-repository,prNumber:320,reason:opened}、exitCode=0。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070953-register-while-stopped\\data\\logs\\winui3.log",
+          "summary": "購読再開のState: Running → Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened) → enqueue_review call finished. ExitCode=0 の順序を確認。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070953-register-while-stopped\\evidence\\responding.jsonl",
+          "summary": "各UIA操作前後に対象PID・exe Path一致・Responding=trueを確認。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.22.0\\20261101-070953-register-while-stopped\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。終了後のプロセス検査でfixture残留0。"
+        }
+      ],
+      "flaky": []
+    }
+  ]
+}
