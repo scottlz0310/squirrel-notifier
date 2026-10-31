@@ -62,6 +62,7 @@ internal enum ReviewerOutcome
 /// <param name="Outcome">プロセスの終了結果.</param>
 /// <param name="ExitCode">プロセスの終了コード.</param>
 /// <param name="Cycle">review-raven の依頼 cycle との対応。review-raven 経由の候補にだけ付き、公開状態には載せない.</param>
+/// <param name="AutoPause">Auto-Pauseを判断した枠の観測値.</param>
 internal sealed record ReviewStatusEntry(
     string Key,
     string Repository,
@@ -78,7 +79,23 @@ internal sealed record ReviewStatusEntry(
     DateTimeOffset? HoldSince = null,
     ReviewerOutcome? Outcome = null,
     int? ExitCode = null,
-    ReviewCycleRef? Cycle = null);
+    ReviewCycleRef? Cycle = null,
+    ReviewAutoPauseInfo? AutoPause = null);
+
+/// <summary>Auto-Pauseの判定に使用した枠の観測値。リセット予定は解除の保証ではない.</summary>
+/// <param name="AgentId">レートリミットのagent ID.</param>
+/// <param name="LimitId">判定対象の枠ID.</param>
+/// <param name="UsedPercentage">観測した使用率.</param>
+/// <param name="ThresholdPercentage">停止判定の閾値.</param>
+/// <param name="ObservedAt">根拠を観測したUTC時刻.</param>
+/// <param name="ResetAt">リセット予定のUTC時刻。取得できない場合はnull.</param>
+internal sealed record ReviewAutoPauseInfo(
+    [property: JsonPropertyName("agentId")] string AgentId,
+    [property: JsonPropertyName("limitId")] string LimitId,
+    [property: JsonPropertyName("usedPercentage")] double UsedPercentage,
+    [property: JsonPropertyName("thresholdPercentage")] double ThresholdPercentage,
+    [property: JsonPropertyName("observedAt")] DateTime ObservedAt,
+    [property: JsonPropertyName("resetAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTime? ResetAt);
 
 /// <summary>アプリ全体の観測（購読の状態など）。<c>review-status.json</c> の元になる.</summary>
 /// <param name="AppVersion">アプリの版.</param>
@@ -132,4 +149,5 @@ internal sealed record ReviewStatusItem(
     [property: JsonPropertyName("holdSince"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTime? HoldSince,
     [property: JsonPropertyName("queuePosition"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QueuePosition,
     [property: JsonPropertyName("outcome"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Outcome,
-    [property: JsonPropertyName("exitCode"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ExitCode);
+    [property: JsonPropertyName("exitCode"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ExitCode,
+    [property: JsonPropertyName("autoPause"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReviewAutoPauseInfo? AutoPause = null);

@@ -150,3 +150,24 @@ Squirrel Notifier は、reviewer の**起動待ち・実行中・終了**の状�
 - 状態が変わるたびに、全体を書き直す。`.tmp` に書いてから置換するため、読み取り側が不完全な JSON を読むことはない。
 - 読み取り側は `FileShare.Delete` を付けずに開いていても、置換は短い間隔で数回再試行する。読み取りは開いてすぐ閉じること。
 - マージ・クローズ済みの PR の自動削除（Recent review events の整理）で、その PR の項目を落とす。
+
+## Auto-Pauseの詳細（省略可能な追加）
+
+schemaVersion 1のまま、waitingかつholdReason=autoPauseのitemsにだけ、次のautoPauseを追加できる。既存consumerは未知項目を無視できる。旧版や根拠を取得できない場合はobject自体を省略し、使用率0や解除済みと解釈しない。
+
+```json
+{
+  "autoPause": {
+    "agentId": "agy",
+    "limitId": "3p-weekly",
+    "usedPercentage": 96,
+    "thresholdPercentage": 95,
+    "observedAt": "2026-11-01T01:00:00Z",
+    "resetAt": "2026-11-01T01:10:00Z"
+  }
+}
+```
+
+agentIdは判定対象のレートリミットagentで、実行時のプリセットIDを示す既存agentとは区別する。limitIdは枠のID。使用率/閾値はnumber、時刻はUTC。resetAtは取得できないとき省略する。観測値なので現在の残量を保証せず、resetAtも解除時刻の保証ではない。自動解除には、従来どおりfreshなsnapshotで使用率が閾値未満になったことの確認が必要。
+
+根拠が更新された場合は同じevent/holdReasonでも書き直すが、holdSinceと待ち順は保つ。別eventの根拠を引き継がず、busy/manual/ciPending、実行中、終了には詳細を載せない。公開するのは上記の識別子・数値・時刻だけで、元のstatuslineやログ本文は載せない。statusline-summary.jsonと内部の観測配送契約は変更しない。

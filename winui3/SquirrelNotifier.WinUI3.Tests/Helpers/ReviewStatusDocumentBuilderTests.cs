@@ -13,6 +13,31 @@ public sealed class ReviewStatusDocumentBuilderTests
     private static readonly DateTimeOffset _now = new(2026, 10, 1, 3, 0, 0, TimeSpan.Zero);
 
     [Theory]
+    [InlineData("AutoPause", true)]
+    [InlineData("Busy", false)]
+    [InlineData("CiPending", false)]
+    public void Build_ShouldPublishAutoPauseDetailsOnlyForAutoPause(string hold, bool expected)
+    {
+        ReviewAutoPauseInfo details = new("agy", "3p-weekly", 96, 95, _now.UtcDateTime, _now.AddMinutes(10).UtcDateTime);
+        ReviewStatusEntry entry = Waiting("owner/repo", 1, hold: Enum.Parse<ReviewHoldKind>(hold)) with { AutoPause = details };
+
+        ReviewStatusItem item = Build([entry]).Items.Single();
+
+        item.AutoPause.Should().Be(expected ? details : null);
+    }
+
+    [Fact]
+    public void Build_ShouldOmitAutoPauseDetailsAfterStartingOrFinishing()
+    {
+        ReviewAutoPauseInfo details = new("agy", "3p-weekly", 96, 95, _now.UtcDateTime, null);
+        ReviewStatusDocument document = Build(
+            [Running("owner/running", 1) with { AutoPause = details }, Finished("owner/finished", 2, _now) with { AutoPause = details }]);
+
+        document.Items.Single().AutoPause.Should().BeNull();
+        document.Recent.Single().AutoPause.Should().BeNull();
+    }
+
+    [Theory]
     [InlineData("scottlz0310/Mcp-Docker", 340, "scottlz0310/mcp-docker#340")]
     [InlineData("  Owner/Repo  ", 7, "owner/repo#7")]
     [InlineData("owner/repo", 1, "owner/repo#1")]

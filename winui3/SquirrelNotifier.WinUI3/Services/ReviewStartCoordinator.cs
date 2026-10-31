@@ -481,15 +481,22 @@ internal sealed class ReviewStartCoordinator
         return HoldAsync(
             reviewEvent,
             ReviewHoldKind.AutoPause,
-            $"Auto-Pause 中のため（{pausedLimit.BuildReasonText()}）。解除後に自動起動します");
+            $"Auto-Pause 中のため（{pausedLimit.BuildReasonText()}）。解除後に自動起動します",
+            new ReviewAutoPauseInfo(
+                pausedLimit.AgentId,
+                pausedLimit.LimitId,
+                pausedLimit.UsedPercentage,
+                AutoPauseGate.PauseThresholdPercentage,
+                pausedLimit.ObservedAt.UtcDateTime,
+                pausedLimit.ResetAt?.UtcDateTime));
     }
 
-    private Task HoldAsync(ReviewEvent reviewEvent, ReviewHoldKind kind, string reasonText)
+    private Task HoldAsync(ReviewEvent reviewEvent, ReviewHoldKind kind, string reasonText, ReviewAutoPauseInfo? autoPause = null)
     {
         PendingReviewStartChange change = _pendingQueue.AddOrReplace(reviewEvent);
 
         // 保留の理由は、再評価で同じ理由に戻る（Ignored）場合も含めて、公開状態へ伝える（#462）
-        _reviewCycleCoordinator?.ObserveHold(reviewEvent, kind);
+        _reviewCycleCoordinator?.ObserveHold(reviewEvent, kind, autoPause);
         return change switch
         {
             PendingReviewStartChange.Added => _loggingService.WriteAsync(

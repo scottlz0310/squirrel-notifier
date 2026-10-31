@@ -67,7 +67,8 @@ internal sealed record AutoPauseDecision(AutoPauseStatus Status, AutoPausedLimit
 /// </remarks>
 internal sealed class AutoPauseGate
 {
-    private const double _pauseThresholdPercentage = 95;
+    /// <summary>公開する判定根拠と実際のgateで同じ閾値を使用する.</summary>
+    internal const double PauseThresholdPercentage = 95;
 
     private readonly TimeProvider _timeProvider;
     private readonly Dictionary<(string AgentId, LauncherRole Role), AutoPausedLimit> _pausedByTarget = new();
@@ -140,7 +141,7 @@ internal sealed class AutoPauseGate
             return KeepCurrentState(target);
         }
 
-        if (usedPercentage >= _pauseThresholdPercentage)
+        if (usedPercentage >= PauseThresholdPercentage)
         {
             AutoPausedLimit paused = new(agentId, worst.Id, worst.Label, usedPercentage, worst.ResetAt, snapshot.ObservedAt);
             bool changed = !_pausedByTarget.TryGetValue(target, out AutoPausedLimit? current) || current != paused;

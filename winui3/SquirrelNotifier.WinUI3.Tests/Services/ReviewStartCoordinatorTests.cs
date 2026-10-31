@@ -589,6 +589,10 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             _ => Task.FromResult(true));
 
         holds.Should().ContainSingle().Which.Kind.Should().Be(ReviewHoldKind.AutoPause);
+        holds[0].AutoPause.Should().NotBeNull();
+        holds[0].AutoPause!.AgentId.Should().Be(_pausedAgentId);
+        holds[0].AutoPause!.UsedPercentage.Should().Be(96);
+        holds[0].AutoPause!.ThresholdPercentage.Should().Be(AutoPauseGate.PauseThresholdPercentage);
     }
 
     [Fact]
