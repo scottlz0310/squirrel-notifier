@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "version": "0.21.0",
+  "testedCommit": "2ad2af6c0f6ebb0a09f1c5c57f9443f4038c9c24",
+  "productVersion": "0.21.0+2ad2af6c0f6ebb0a09f1c5c57f9443f4038c9c24",
+  "executedAt": "2026-10-31T01:25:51.9521058Z",
+  "executor": {
+    "agent": "codex",
+    "model": "GPT-6",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Pro 10.0.26300",
+    "notes": "利用者の明示委任を受けた、実装・準備PR作成をしていない独立エージェント。PowerShell 7・.NET SDK 10.0.403の実対話デスクトップ。既存Start/Invoke-RunbookUia/Stopスクリプトをpwsh -Fileの別プロセスから使用。初回に対象HEADをbuild（警告0・エラー0）、後続は同じProductVersionを検証してSkipBuild。durationSecondsは各run.jsonのstartedAtからisolation.jsonのstoppedAtまでを切上げ、build時間と試行間の調査待機を除外。ボタンは実マウスClick。UIA操作前後の対象PID/Path/Responding確認45件すべてtrue。全4試行でisolated=true・realSettingsUnchanged=true、最終fixture残留0。常駐PID6356は停止・設定変更せず、終了後も同じexeでResponding=true。本番gateway/queue/PRへの書込みなし。証跡はartifacts/runbook-v0.21.0（ignored）。"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 43,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102226-isolated-launch\\evidence\\uia.jsonl",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed.。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102226-isolated-launch\\evidence\\process-files.json",
+          "summary": "検証PID5504のPathはrun.appPathと一致、常駐PID6356は別exeでResponding=true。隔離settings.jsonとlogs/winui3.logが存在。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102226-isolated-launch\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]。Stopが孤立dummy subscriber PID15588を終了し、leftovers.jsonで残留0。"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 18,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102310-review-event-flow\\evidence\\uia.jsonl",
+          "summary": "TitleText=re-review-requested: third-owner/third-repository#309に完全一致。一覧に#307/#308/#309の3件。#307のLaunchReviewerButtonをClickしreviewer 実行完了を確認。"
+        },
+        {
+          "kind": "observation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102310-review-event-flow\\observations\\launcher.jsonl",
+          "summary": "1件。arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectory=dataRoot/launcher-workspace/reviewer/fixture-owner/fixture-repository/307。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102310-review-event-flow\\data\\logs\\winui3.log",
+          "summary": "Review process finished. ExitCode=0 と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました を確認。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102310-review-event-flow\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]。leftovers.jsonで残留0。"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 2,
+      "durationSeconds": 65,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102447-register-while-stopped\\evidence\\uia.jsonl",
+          "summary": "停止後StartButton有効。PrReferenceBoxを設定・読戻し後EnqueueReviewButtonを実Click。PrimaryButton=購読を開始して登録を実Clickし、再開後StopButton有効。"
+        },
+        {
+          "kind": "observation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102447-register-while-stopped\\observations\\subscriber.jsonl",
+          "summary": "mode=callはちょうど1件、--tool enqueue_review、--url=http://127.0.0.1:63698/（run.gatewayUrl一致）、--args={owner:fixture-owner,repo:fixture-repository,prNumber:320,reason:opened}、exitCode=0。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102447-register-while-stopped\\data\\logs\\winui3.log",
+          "summary": "10:25:06 State: Running → 10:25:07 Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened) → enqueue_review call finished. ExitCode=0 の順を確認。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102447-register-while-stopped\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]。leftovers.jsonで残留0。"
+        },
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102329-register-while-stopped\\evidence\\uia.jsonl",
+          "summary": "初回失敗を保持。PrimaryButtonが30秒以内に見つからず、foregroundWindow=35128 clp2cfg/src/app.rs at main · scottlz0310/clp2cfg - Google Chrome、processWindows=[Squirrel Notifier]。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.21.0\\20261031-102329-register-while-stopped\\evidence\\isolation.json",
+          "summary": "初回失敗後もisolated=true、realSettingsUnchanged=true、findings=[]、残留0。"
+        }
+      ],
+      "flaky": [
+        "初回はEnqueueReviewButton Click後、PrimaryButtonが30秒以内に見つからず失敗。失敗時の前面はPID35128 Google Chromeで、検証用アプリは各操作前後Responding=true。ログはStoppedまで、enqueue記録なし。フォーカス移動の因果は未確定。隔離環境を後始末し、入力後800ms待機とPrReferenceBox読戻しを追加した別runで限定再実行、2回目は確認ダイアログ・購読再開・enqueue1件を証跡で確認。製品および既存runbookソースは変更していない。"
+      ]
+    }
+  ]
+}
