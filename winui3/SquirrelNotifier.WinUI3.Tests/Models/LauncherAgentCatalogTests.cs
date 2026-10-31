@@ -47,7 +47,7 @@ public class LauncherAgentCatalogTests
     [InlineData("claude", "ClaudeStreamJson")]
     [InlineData("codex", "CodexJson")]
     [InlineData("agy", "AgyStreamJson")]
-    [InlineData("copilot", "Text")]
+    [InlineData("copilot", "CopilotJson")]
     public void All_ShouldMapExpectedOutputFormat(string presetId, string expectedFormat)
     {
         LauncherAgentDefinition? definition = LauncherAgentCatalog.Find(presetId);
