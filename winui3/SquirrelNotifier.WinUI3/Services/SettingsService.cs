@@ -233,6 +233,21 @@ internal sealed class SettingsService
             SaveSettings();
         }
 
+        // tool の開始・終了を監視できるよう、Copilot の旧標準設定を通常・再開の組で移行する。
+        // どちらかが自由編集されているスロットは変更しない。
+        if (!_settings.CopilotJsonOutputMigrated)
+        {
+            MigrateLauncherSkillPrompt(
+                command: "copilot",
+                legacyReviewerArguments: "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
+                legacyReviewedArguments: "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
+                legacyReviewerResumeArguments: "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --session-id {sessionId}",
+                legacyReviewedResumeArguments: "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --session-id {sessionId}");
+
+            _settings.CopilotJsonOutputMigrated = true;
+            SaveSettings();
+        }
+
         // #305 より前の settings.json には resume テンプレートが無い。command / 通常引数が
         // 現行プリセットと完全一致するスロットだけを補完し、自由編集された設定は空のまま保つ。
         if (!_settings.LauncherResumeTemplatesMigrated)
@@ -686,6 +701,8 @@ internal sealed class AppSettings
 
     // agy の session ID 抽出対応（#306、stream-json 化）を既存の未変更プリセットへ適用する migration
     public bool AgyStreamJsonMigrated { get; set; }
+
+    public bool CopilotJsonOutputMigrated { get; set; }
 
     // launcher の MCP 全文プロンプトを正式 skill 呼び出しへ移行する一回限り migration（#353）
     public bool LauncherSkillPromptMigrated { get; set; }

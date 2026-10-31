@@ -15,7 +15,7 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 | `claude` | `claude` | `-p "/thread-owl-pr-reviewer ..." --verbose --output-format stream-json` のようなスキル呼び出し。stream-json は progress event の逐次取得用で、`-p` との併用時は CLI 仕様で `--verbose` が必須（[docs/progress-event-contract.md](progress-event-contract.md) 参照） | `claude-code` |
 | `codex` | `codex` | reviewer は `exec --skip-git-repo-check --json "$thread-owl-pr-reviewer ..."`、reviewed は `exec --json "$review-raven-thread-owl-cycle ..."`。codex の skill 呼び出し構文は `$` で始まる | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
 | `agy` | `agy` | `--print-timeout 30m --output-format stream-json -p "/thread-owl-pr-reviewer ..."` または `"/review-raven-thread-owl-cycle ..."` | `agy` |
-| `copilot` | `copilot` | `-p "/thread-owl-pr-reviewer ..."` または `"/review-raven-thread-owl-cycle ..."` | `null`（レートリミット取得手段が無い） |
+| `copilot` | `copilot` | `-p "/thread-owl-pr-reviewer ..." --output-format json` または `-p "/review-raven-thread-owl-cycle ..." --output-format json` | `null`（レートリミット取得手段が無い） |
 
 全プリセットが正式 skill 名をプロンプトの先頭で呼び出す（codex は `$`、他は `/` プレフィックス）。skill 本体の配布・更新と MCP 接続設定は Mcp-Docker の責務であり、squirrel-notifier は起動テンプレートだけを管理する。skill が未配布、または CLI が skill 呼び出しに未対応の場合は、起動プロセスの stderr と失敗メッセージに原因を残す。
 
@@ -79,11 +79,11 @@ session 情報は `%LOCALAPPDATA%\SquirrelNotifier\sessions.json` に保存す�
 
 ## 無応答監視と自動再開
 
-session resume が有効で、Claude・Codex・agy の標準プリセットに一致する reviewer / reviewed スロットが対象。起動時に open PR の HEAD を固定し、取得できなければ起動しない。構造化 stdout の出力が600秒なく、ツールも動いていない場合はプロセスを停止し、終了を確認して同じ会話を再開する。再開前にも open と HEAD 一致を確認し、設定変更・会話 ID 不在・終了確認失敗では再開しない。
+session resume が有効で、Claude・Codex・agy・Copilot の標準プリセットに一致する reviewer / reviewed スロットが対象。起動時に open PR の HEAD を固定し、取得できなければ起動しない。構造化 stdout の出力が600秒なく、ツールも動いていない場合はプロセスを停止し、終了を確認して同じ会話を再開する。再開前にも open と HEAD 一致を確認し、設定変更・会話 ID 不在・終了確認失敗では再開しない。
 
 ツール実行中は無進捗と LauncherTimeoutMs の計測を止め、各 tool に30分の上限を適用する。agy の標準引数の `--print-timeout 30m` は監視対象の実行時に `0` として、CLI 側の全体制限を解除する。自動再開は最大2回で、同じ種類の無応答が続けば停止する。LauncherTimeoutMs 自体の予算切れと利用者の中止では再開しない。
 
-Copilot の既定 text 出力とカスタム設定はこの監視の対象外。Copilot の JSON 設定移行は後続作業。
+Copilot の標準プリセットも JSONL 出力で監視する。`CopilotJsonOutputMigrated` により、旧標準の通常引数・再開引数が両方一致するスロットだけを一度移行する。どちらかが自由編集された設定は保持し、構造化出力を推測しない。表示には assistant の文章だけを使い、delta と最終メッセージの重複やツール引数の表示を避ける。
 
 ### 回復失敗時の通知
 

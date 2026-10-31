@@ -80,7 +80,7 @@ internal static class LauncherSessionResumePolicy
                 SessionIdSupply.ClientAssigned,
                 commandMatch.Id,
                 commandMatch.NewSessionArgumentsTemplate,
-                commandMatch.OutputFormat);
+                LauncherOutputFormat.Text);
         }
 
         // 任意 CLI の新規 session ID 指定方法は推測できない。通常引数にも placeholder が

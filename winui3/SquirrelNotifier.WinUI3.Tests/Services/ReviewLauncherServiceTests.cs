@@ -830,6 +830,31 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task StartSession_ShouldPublishCopilotTextWithoutRepeatingFinalMessage()
+    {
+        ConfigureClientAssignedSettings("copilot");
+        const string output = """
+            {"type":"tool.execution_start","data":{"toolCallId":"one","arguments":"機密の引数"}}
+            {"type":"tool.execution_complete","data":{"toolCallId":"one"}}
+            {"type":"assistant.message_delta","data":{"messageId":"answer","deltaContent":"レビュー本文"}}
+            {"type":"assistant.message","data":{"messageId":"answer","content":"レビュー本文"}}
+            """;
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(CreateMockProcess(0, output, string.Empty).Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object);
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent("copilot-human-log"), LauncherRole.Reviewer, CancellationToken.None);
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent executionEvent in session.ReadEventsAsync())
+        {
+            events.Add(executionEvent);
+        }
+
+        (await session.Completion).Success.Should().BeTrue();
+        events.Count(e => e.Kind == AgentExecutionEventKind.Stdout && e.Text == "レビュー本文").Should().Be(1);
+        events.Should().NotContain(e => e.Text != null && (e.Text.Contains("機密の引数", StringComparison.Ordinal) || e.Text.Contains("assistant.message", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task LaunchAsync_ShouldNotReadOrWriteStoreWhenParsedOutputResumeIsDisabled()
     {
         ConfigureParsedOutputSettings("codex");
@@ -957,13 +982,17 @@ public class ReviewLauncherServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Reviewer", false)]
-    [InlineData("Reviewed", false)]
-    [InlineData("Reviewer", true)]
-    [InlineData("Reviewed", true)]
-    public async Task LaunchAsync_ShouldResumeSameSessionAndStopOnRepeatedStall(string roleName, bool repeatFailure)
+    [InlineData("claude", "Reviewer", false)]
+    [InlineData("claude", "Reviewed", false)]
+    [InlineData("claude", "Reviewer", true)]
+    [InlineData("claude", "Reviewed", true)]
+    [InlineData("copilot", "Reviewer", false)]
+    [InlineData("copilot", "Reviewed", false)]
+    [InlineData("copilot", "Reviewer", true)]
+    [InlineData("copilot", "Reviewed", true)]
+    public async Task LaunchAsync_ShouldResumeSameSessionAndStopOnRepeatedStall(string presetId, string roleName, bool repeatFailure)
     {
-        ConfigureClientAssignedSettings();
+        ConfigureClientAssignedSettings(presetId);
         _settingsService.Settings.LauncherTimeoutMs = 1800000;
         var clock = new LauncherWatchdogTests.ManualClock();
         Mock<IProcessInstance> first = CreateMockProcess(0, string.Empty, string.Empty);
@@ -997,7 +1026,7 @@ public class ReviewLauncherServiceTests : IDisposable
         LauncherResult result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
         result.Success.Should().Be(!repeatFailure);
         arguments.Should().HaveCount(repeatFailure && roleName == "Reviewed" ? 3 : 2);
-        GetArgumentValue(arguments[0], "--session-id").Should().Be(GetArgumentValue(arguments[1], "--resume"));
+        GetArgumentValue(arguments[0], "--session-id").Should().Be(GetArgumentValue(arguments[1], presetId == "copilot" ? "--session-id" : "--resume"));
         first.Verify(p => p.Kill(true), Times.Once);
         first.Verify(p => p.WaitForExitAsync(CancellationToken.None), Times.Once);
     }
@@ -1066,9 +1095,12 @@ public class ReviewLauncherServiceTests : IDisposable
     [InlineData("claude", "Reviewer", "success")]
     [InlineData("codex", "Reviewer", "success")]
     [InlineData("agy", "Reviewer", "success")]
+    [InlineData("copilot", "Reviewer", "success")]
     [InlineData("claude", "Reviewed", "success")]
     [InlineData("codex", "Reviewed", "success")]
     [InlineData("agy", "Reviewed", "success")]
+    [InlineData("copilot", "Reviewed", "success")]
+    [InlineData("copilot", "Reviewer", "failed")]
     [InlineData("claude", "Reviewer", "failed")]
     [InlineData("claude", "Reviewed", "failed")]
     [InlineData("claude", "Reviewer", "timeout")]

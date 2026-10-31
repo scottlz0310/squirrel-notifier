@@ -45,6 +45,7 @@ public sealed class LauncherSessionResumePolicyTests
 
     [Theory]
     [InlineData("claude", "--custom-prompt", "--resume {sessionId}", true, "claude")]
+    [InlineData("copilot", "-p custom", "-p custom --session-id {sessionId}", true, "copilot")]
     [InlineData("my-agent", "--new {sessionId}", "--continue {sessionId}", true, "custom:MY-AGENT")]
     [InlineData("my-agent", "--new", "--continue {sessionId}", false, null)]
     [InlineData("my-agent", "--new {sessionId}", "--continue", false, null)]
@@ -64,6 +65,7 @@ public sealed class LauncherSessionResumePolicyTests
 
         result.IsSupported.Should().Be(expected);
         result.AgentId.Should().Be(expectedAgentId);
+        result.OutputFormat.Should().Be(LauncherOutputFormat.Text);
     }
 
     [Fact]

@@ -183,13 +183,14 @@ internal static class LauncherAgentCatalog
             "copilot",
             "copilot (GitHub Copilot CLI)",
             "copilot",
-            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\"",
-            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\"",
+            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --output-format json",
+            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --output-format json",
             "--session-id {sessionId}",
-            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --session-id {sessionId}",
-            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --session-id {sessionId}",
+            "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --session-id {sessionId} --output-format json",
+            "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --session-id {sessionId} --output-format json",
             null,
-            SessionIdSupply: SessionIdSupply.ClientAssigned),
+            SessionIdSupply: SessionIdSupply.ClientAssigned,
+            OutputFormat: LauncherOutputFormat.CopilotJson),
     ];
 
     /// <summary>

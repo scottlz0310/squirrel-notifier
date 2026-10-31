@@ -182,7 +182,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             bool monitored = _settingsService.Settings.SessionResumeEnabled
                 && plan.AgentId is not null
                 && initialSlot.PresetId != LauncherAgentCatalog.CustomPresetId
-                && plan.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson;
+                && plan.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson or LauncherOutputFormat.CopilotJson;
             string? head = monitored ? await _headGuard.ReadOpenHeadAsync(reviewEvent, cts.Token).ConfigureAwait(false) : null;
             var recovery = new LauncherRecoveryPolicy();
             while (true)
@@ -258,7 +258,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             bool supported = _settingsService.Settings.SessionResumeEnabled
                 && slot.PresetId != LauncherAgentCatalog.CustomPresetId
                 && notification.IsResume && notification.SessionId is Guid id && id != Guid.Empty
-                && notification.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson;
+                && notification.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson or LauncherOutputFormat.CopilotJson;
             if (supported)
             {
                 await _headGuard.VerifyAsync(reviewEvent, head, cancellationToken).ConfigureAwait(false);
