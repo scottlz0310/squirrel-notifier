@@ -1,7 +1,7 @@
 # リリースの準備と公開
 
-`scottlz0310/release-automate` v3.1.0 の prepare / publish / finalize をすべて
-`fde6d796e366b4a70d73a992a48241c03f49ee68` に固定する。Squirrel Notifier 側は x64 の配布物生成、
+`scottlz0310/release-automate` v3.2.1 の prepare / publish / finalize をすべて
+`3c860f1b178eb5b942d87c800153bc47887a7bfd` に固定する。Squirrel Notifier 側は x64 の配布物生成、
 日本語ノートの合成、CI・ランブック・配布物の検証を担当する。安定版 `X.Y.Z` のみを受け付ける。
 
 ## 準備 PR
