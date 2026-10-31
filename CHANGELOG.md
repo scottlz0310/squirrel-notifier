@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-31
+
 ### Added
 
 - Copilot の標準プリセットを通常起動・同一会話の再開とも JSONL 出力へ移行し、文章表示とツール実行中の無応答監視に対応した。旧標準の通常引数・再開引数が一致する設定だけを一度更新し、カスタム設定は保持する。
@@ -631,7 +633,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.18.0...v0.19.0
