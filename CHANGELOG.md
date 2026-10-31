@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-31
+
 ### Added
 
 - review-status.jsonの起動待ちautoPauseへ、判定対象agent/枠・使用率・閾値・観測時刻・リセット予定を省略可能な項目として公開する。待機理由が同じでも根拠の変化を反映し、別eventや実行中/終了へは流用しない。gateや自動解除/起動の条件は変更しない。
@@ -642,7 +644,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.0...v0.19.1
