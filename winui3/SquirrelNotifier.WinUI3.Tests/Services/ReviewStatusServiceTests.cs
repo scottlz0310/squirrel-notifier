@@ -748,206 +748,6 @@ public sealed class ReviewStatusServiceTests : IDisposable
         await WaitForStatusAsync(node => node["items"]!.AsArray().Count == 0);
     }
 
-    [Fact]
-    public async Task ApplyStateAsync_ShouldCarryTheCycleOfTheEventToWaitingRunningAndFinishedEntries()
-    {
-        ReviewStatusService service = CreateService();
-        ReviewEvent reviewEvent = CreateReviewEvent("event-opened", cycle: Cycle("a"));
-
-        await service.ApplyStateAsync(reviewEvent, CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
-        (await service.GetEntriesAsync()).Single().Cycle.Should().Be(Cycle("a"));
-
-        await service.ApplyStateAsync(
-            reviewEvent,
-            CreateState(status: ReviewCycleStatus.ReviewerRunning, lastEventId: "event-opened", activeEventId: "event-opened"));
-        (await service.GetEntriesAsync()).Single().Cycle.Should().Be(Cycle("a"));
-
-        await service.ApplyStateAsync(
-            reviewEvent,
-            CreateState(status: ReviewCycleStatus.ReviewerCompleted, lastEventId: "event-opened", updatedAt: _initialTime.AddMinutes(1)),
-            exitCode: 0);
-        ReviewStatusEntry finished = (await service.GetEntriesAsync()).Single();
-        finished.State.Should().Be(ReviewStatusState.Finished);
-        finished.Cycle.Should().Be(Cycle("a"));
-    }
-
-    [Fact]
-    public async Task ApplyStateAsync_ShouldPointARunningEntryAtTheCycleOfTheEventThatWasStarted()
-    {
-        ReviewStatusService service = CreateService();
-        ReviewEvent started = CreateReviewEvent("event-started", cycle: Cycle("a"));
-        await service.ApplyStateAsync(
-            started,
-            CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-started"));
-
-        // 起動する前に、同じ PR の次の event が届いている。実行中の状態は、起動した event を指したまま、
-        // 次の event を最新として通知される（通知に添える event は、最新の次の event）
-        ReviewEvent next = CreateReviewEvent("event-next", reason: "synchronized", cycle: Cycle("b"));
-        await service.ApplyStateAsync(
-            next,
-            CreateState(status: ReviewCycleStatus.ReviewerRunning, lastEventId: "event-next", activeEventId: "event-started", updatedAt: _initialTime.AddMinutes(1)));
-
-        ReviewStatusEntry entry = (await service.GetEntriesAsync()).Single();
-        entry.EventId.Should().Be("event-started");
-        entry.Cycle.Should().Be(Cycle("a"));
-    }
-
-    [Fact]
-    public async Task ApplyStateAsync_ShouldLeaveTheCycleEmptyForAnEventFromTheLegacyPath()
-    {
-        ReviewStatusService service = CreateService();
-        ReviewEvent legacy = CreateReviewEvent("event-legacy");
-
-        await service.ApplyStateAsync(legacy, CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-legacy"));
-
-        (await service.GetEntriesAsync()).Single().Cycle.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task ApplyStateAsync_ShouldNotPublishTheCycleInThePublicStatusDocument()
-    {
-        ReviewStatusService service = CreateService();
-        ReviewEvent reviewEvent = CreateReviewEvent("event-opened", cycle: Cycle("a"));
-
-        await service.ApplyStateAsync(reviewEvent, CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
-        await service.ApplyStateAsync(
-            reviewEvent,
-            CreateState(status: ReviewCycleStatus.ReviewerRunning, lastEventId: "event-opened", activeEventId: "event-opened"));
-        await service.ApplyStateAsync(
-            reviewEvent,
-            CreateState(status: ReviewCycleStatus.ReviewerCompleted, lastEventId: "event-opened", updatedAt: _initialTime.AddMinutes(1)),
-            exitCode: 0);
-
-        // 公開契約（schemaVersion 1）の形式は変えない。相関の ID は内部だけに留める
-        string raw = await File.ReadAllTextAsync(StatusPath);
-        raw.Should().NotContain("cycleId").And.NotContain("candidateId").And.NotContain("cyc_").And.NotContain("cand_");
-    }
-
-    [Fact]
-    public async Task RemoveEventsAsync_ShouldDropTheEntryTogetherWithItsCycle()
-    {
-        ReviewStatusService service = CreateService();
-        ReviewEvent reviewEvent = CreateReviewEvent("event-opened", cycle: Cycle("a"));
-        await service.ApplyStateAsync(reviewEvent, CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
-
-        await service.RemoveEventsAsync(["event-opened"]);
-
-        (await service.GetEntriesAsync()).Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task ApplyStateAsync_ShouldRaiseEntriesChanged_ForAStateChange()
-    {
-        ReviewStatusService service = CreateService();
-        List<bool> heartbeats = [];
-        service.EntriesChanged += (_, e) => heartbeats.Add(e.IsHeartbeat);
-
-        await service.ApplyStateAsync(
-            CreateReviewEvent("event-opened"),
-            CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
-
-        heartbeats.Should().Equal(false);
-    }
-
-    [Fact]
-    public async Task RefreshAsync_ShouldRaiseEntriesChangedAsAHeartbeat()
-    {
-        ReviewStatusService service = CreateService();
-        List<bool> heartbeats = [];
-        service.EntriesChanged += (_, e) => heartbeats.Add(e.IsHeartbeat);
-
-        await service.RefreshAsync();
-
-        heartbeats.Should().Equal(true);
-    }
-
-    [Fact]
-    public async Task ApplyStateAsync_ShouldNotRaiseEntriesChanged_WhenNothingChanged()
-    {
-        ReviewStatusService service = CreateService();
-        int raised = 0;
-        service.EntriesChanged += (_, _) => raised++;
-
-        await service.ApplyStateAsync(
-            CreateReviewEvent("event-opened"),
-            CreateState(status: ReviewCycleStatus.Unknown, lastEventId: "event-opened"));
-
-        raised.Should().Be(0);
-    }
-
-    [Fact]
-    public async Task EntriesChanged_ShouldLetTheHandlerReadTheEntriesWithoutWaitingForTheWrite()
-    {
-        ReviewStatusService service = CreateService();
-        Task<IReadOnlyList<ReviewStatusEntry>>? read = null;
-        service.EntriesChanged += (_, _) => read = service.GetEntriesAsync();
-
-        await service.ApplyStateAsync(
-            CreateReviewEvent("event-opened", cycle: Cycle("a")),
-            CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
-
-        read.Should().NotBeNull();
-        (await read!.WaitAsync(TimeSpan.FromSeconds(5))).Single().Cycle.Should().Be(Cycle("a"));
-    }
-
-    [Fact]
-    public async Task ShutdownAsync_ShouldStopRaisingEntriesChanged()
-    {
-        ReviewStatusService service = CreateService();
-        await service.StartAsync();
-        await service.ShutdownAsync();
-        int raised = 0;
-        service.EntriesChanged += (_, _) => raised++;
-
-        await service.RefreshAsync();
-
-        raised.Should().Be(0);
-    }
-
-    [Fact]
-    public async Task Attach_ShouldSendAnObservationWhenAnEntryWithACycleChanges()
-    {
-        SettingsService settings = new(Path.Combine(_testDirectory, "settings"), pnpmBinDir: string.Empty);
-        settings.Settings.ObservationPublishEnabled = true;
-        settings.Settings.ObservationPublishUrl = "https://gateway.example/mcp/review-raven-internal";
-        CapturingSender sender = new();
-        ReviewStatusService service = CreateService();
-        ReviewObservationPublisher publisher = ReviewObservationPublishing.Attach(settings, service, _loggingService, sender);
-
-        await service.ApplyStateAsync(
-            CreateReviewEvent("event-opened", cycle: Cycle("a")),
-            CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
-
-        ReviewObservation observation = await sender.Received.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        observation.Should().Match<ReviewObservation>(static o => o.State == "waiting" && o.ProducerId == "squirrel-notifier" && o.Sequence == 0);
-        observation.CycleId.Should().Be(Cycle("a").CycleId);
-        await publisher.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task Attach_ShouldNotSend_WhenThePublishingIsDisabledByDefault()
-    {
-        SettingsService settings = new(Path.Combine(_testDirectory, "settings"), pnpmBinDir: string.Empty);
-        CapturingSender sender = new();
-        ReviewStatusService service = CreateService();
-        ReviewObservationPublisher publisher = ReviewObservationPublishing.Attach(settings, service, _loggingService, sender);
-
-        await service.ApplyStateAsync(
-            CreateReviewEvent("event-opened", cycle: Cycle("a")),
-            CreateState(status: ReviewCycleStatus.AwaitingReviewer, lastEventId: "event-opened"));
-        await publisher.RunAsync(isHeartbeat: false);
-
-        sender.Received.Task.IsCompleted.Should().BeFalse();
-        await publisher.DisposeAsync();
-    }
-
-    private static ReviewCycleRef Cycle(string name)
-        => new(
-            $"cand_{name}{new string('0', 25)}",
-            $"cyc_{name}{new string('0', 25)}",
-            1,
-            new string(name == "a" ? 'a' : 'b', 40));
-
     private ReviewStatusService CreateService()
         => new(
             _testDirectory,
@@ -1020,11 +820,9 @@ public sealed class ReviewStatusServiceTests : IDisposable
         string eventId,
         int prNumber = 42,
         string reason = "opened",
-        DateTimeOffset? receivedAt = null,
-        ReviewCycleRef? cycle = null)
+        DateTimeOffset? receivedAt = null)
         => new()
         {
-            Cycle = cycle,
             EventId = eventId,
             Repository = "owner/Repo",
             PrNumber = prNumber,
@@ -1033,17 +831,6 @@ public sealed class ReviewStatusServiceTests : IDisposable
             Message = reason,
             ReceivedTime = (receivedAt ?? _initialTime.AddHours(-1)).UtcDateTime,
         };
-
-    private sealed class CapturingSender : IObservationSender
-    {
-        public TaskCompletionSource<ReviewObservation> Received { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public Task<ObservationSendResult> SendAsync(ReviewObservation observation, CancellationToken cancellationToken)
-        {
-            Received.TrySetResult(observation);
-            return Task.FromResult(ObservationSendResult.Accepted);
-        }
-    }
 
     private sealed class StubStatusClient : IPullRequestStatusClient
     {
