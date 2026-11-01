@@ -61,7 +61,6 @@ internal enum ReviewerOutcome
 /// <param name="HoldSince">保留し始めた時刻（UTC）.</param>
 /// <param name="Outcome">プロセスの終了結果.</param>
 /// <param name="ExitCode">プロセスの終了コード.</param>
-/// <param name="Cycle">review-raven の依頼 cycle との対応。review-raven 経由の候補にだけ付き、公開状態には載せない.</param>
 /// <param name="AutoPause">Auto-Pauseを判断した枠の観測値.</param>
 internal sealed record ReviewStatusEntry(
     string Key,
@@ -79,7 +78,6 @@ internal sealed record ReviewStatusEntry(
     DateTimeOffset? HoldSince = null,
     ReviewerOutcome? Outcome = null,
     int? ExitCode = null,
-    ReviewCycleRef? Cycle = null,
     ReviewAutoPauseInfo? AutoPause = null);
 
 /// <summary>Auto-Pauseの判定に使用した枠の観測値。リセット予定は解除の保証ではない.</summary>

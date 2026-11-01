@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- 廃案が決定した認証付き内部連携の観測送信、サービス主体用設定、依頼cycle相関、専用の永続世代カウンターを撤去した。既存のレビュー起動と公開review-status.jsonの契約は維持する。
+
 ## [0.22.0] - 2026-10-31
 
 ### Added
