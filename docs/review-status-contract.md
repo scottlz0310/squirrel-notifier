@@ -143,7 +143,6 @@ Squirrel Notifier は、reviewer の**起動待ち・実行中・終了**の状�
 - 互換性のない変更（フィールドの削除、意味の変更）をするときだけ、`schemaVersion` を上げる。
 - `items[]` と `recent[]` は **N 件**を前提にする。消費者は、実行中の件数が 1 であることを前提にしないこと（将来の並列実行に備える）。
 - `statusline-summary.json` は変えない。
-- **review-raven の依頼 cycle との対応（`cycleId` / `candidateId` / `headSha`）は、このファイルに載せない。** review-raven 経由の queue event にだけ付く相関で、Squirrel Notifier の内部では保持するが、公開状態の形式は変えない。review-raven への観測の送信（review-raven#144 の契約 v1 の `publish_review_observation`）は、この公開契約とは別の契約で、この状態と同じ規則（保留の理由・終了結果）で組み立てる。
 
 ## 書き出しの仕様
 
@@ -170,4 +169,4 @@ schemaVersion 1のまま、waitingかつholdReason=autoPauseのitemsにだけ、
 
 agentIdは判定対象のレートリミットagentで、実行時のプリセットIDを示す既存agentとは区別する。limitIdは枠のID。使用率/閾値はnumber、時刻はUTC。resetAtは取得できないとき省略する。観測値なので現在の残量を保証せず、resetAtも解除時刻の保証ではない。自動解除には、従来どおりfreshなsnapshotで使用率が閾値未満になったことの確認が必要。
 
-根拠が更新された場合は同じevent/holdReasonでも書き直すが、holdSinceと待ち順は保つ。別eventの根拠を引き継がず、busy/manual/ciPending、実行中、終了には詳細を載せない。公開するのは上記の識別子・数値・時刻だけで、元のstatuslineやログ本文は載せない。statusline-summary.jsonと内部の観測配送契約は変更しない。
+根拠が更新された場合は同じevent/holdReasonでも書き直すが、holdSinceと待ち順は保つ。別eventの根拠を引き継がず、busy/manual/ciPending、実行中、終了には詳細を載せない。公開するのは上記の識別子・数値・時刻だけで、元のstatuslineやログ本文は載せない。statusline-summary.jsonの契約は変更しない。
