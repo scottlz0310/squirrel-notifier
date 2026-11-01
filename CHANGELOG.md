@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-11-01
+
 ### Fixed
 
 - MSI の major upgrade で旧 WinUI DLL の FileVersion が高い場合にも、新しい配布物を欠落なく配置する。更新時は既存の自動起動タスクの条件・引数を保持し、高 FileVersion からの更新・通常更新・同版置換・再インストールの全ファイル照合と WinUI 初回起動を隔離 E2E で検証する（#525）。
@@ -654,7 +656,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.1...HEAD
+[0.23.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.20.0...v0.21.0

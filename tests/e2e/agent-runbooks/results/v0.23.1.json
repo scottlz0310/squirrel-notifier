@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "version": "0.23.1",
+  "testedCommit": "b49075d065d62adaee7997367001dd91d0c010b8",
+  "productVersion": "0.23.1+b49075d065d62adaee7997367001dd91d0c010b8",
+  "executedAt": "2026-11-01T13:54:09.3501919+00:00",
+  "executor": {
+    "agent": "codex",
+    "model": "GPT-6",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Pro 10.0.26300",
+    "notes": "利用者が明示委任した、製品実装・準備PR作成を担当していない独立検証セッション。モデル名GPT-6はこのセッションに通知された名称。PowerShell7.6.9/.NET SDK10.0.403の実対話デスクトップ。現行repoのStart/Invoke-RunbookUia/Stopをpwsh -Fileの別プロセスで使用。初回build4プロジェクトの警告0・エラー0、後続は同一ProductVersionを照合しSkipBuild。起動300秒上限、UIAは内側10〜45秒・外側最大60秒、操作前後のPID/Path/Responding検査32件すべてtrue。必須3件すべて初回成功、失敗/再実行/flakyなし。durationSecondsはrun.startedAtからisolation.stoppedAtまでの切上げ（build時間を除く）。全runで隔離・実設定不変・fixture残留0。常駐PID5204/正式0.23.0の設定とプロセスは維持。本番gateway/queue/PR/資格情報への書込みなし。fixtureの呼出だけをloopback fake Gatewayへ送り、認証なしを確認。過去版の結果は流用しない。証跡artifacts/runbook-v0.23.1/final-audit.json。"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 9,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225138-isolated-launch\\evidence\\uia.jsonl",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed.。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225138-isolated-launch\\evidence\\process-files.json",
+          "summary": "fixture PID46712のPathがrun.appPathに一致。常駐PID5204の正式0.23.0は別プロセスで継続しResponding=true。隔離settings.json/logs/winui3.logあり。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225138-isolated-launch\\evidence\\responding.jsonl",
+          "summary": "UIA操作前後のPID/Path/Responding検査4件すべて一致・true。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225138-isolated-launch\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。終了後にfixture app/gateway PIDおよびrunマーカー付きプロセス残留0を別に確認。"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 18,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225149-review-event-flow\\evidence\\uia.jsonl",
+          "summary": "TitleText=synchronized: second-owner/second-repository#308（許可された組に完全一致）。ReviewEventListに#307/#308/#309の3件、#307の実マウスClick後にreviewer 実行完了。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225149-review-event-flow\\evidence\\process-files.json",
+          "summary": "fixture PID10936のPathがrun.appPathに一致。常駐PID5204の正式0.23.0は別プロセスで継続しResponding=true。隔離settings.json/logs/winui3.logあり。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225149-review-event-flow\\evidence\\responding.jsonl",
+          "summary": "UIA操作前後のPID/Path/Responding検査10件すべて一致・true。"
+        },
+        {
+          "kind": "observation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225149-review-event-flow\\observations\\launcher.jsonl",
+          "summary": "arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectoryは隔離data配下launcher-workspace/reviewer/fixture-owner/fixture-repository/307。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225149-review-event-flow\\data\\logs\\winui3.log",
+          "summary": "Review process finished. ExitCode=0 と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました の両行あり。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225149-review-event-flow\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。終了後にfixture app/gateway PIDおよびrunマーカー付きプロセス残留0を別に確認。"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 20,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225207-register-while-stopped\\evidence\\uia.jsonl",
+          "summary": "StopButton実マウスClick後にStartButton有効。PR入力の読戻し一致、EnqueueReviewButtonとPrimaryButtonを実マウスClick後にStopButton有効。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225207-register-while-stopped\\evidence\\process-files.json",
+          "summary": "fixture PID28084のPathがrun.appPathに一致。常駐PID5204の正式0.23.0は別プロセスで継続しResponding=true。隔離settings.json/logs/winui3.logあり。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225207-register-while-stopped\\evidence\\responding.jsonl",
+          "summary": "UIA操作前後のPID/Path/Responding検査18件すべて一致・true。"
+        },
+        {
+          "kind": "observation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225207-register-while-stopped\\observations\\subscriber.jsonl",
+          "summary": "mode=callは1件。tool=enqueue_review、URLは隔離fake Gateway、args=fixture-owner/fixture-repository#320 reason=opened、exitCode=0、hasAuthorization=false。"
+        },
+        {
+          "kind": "log",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225207-register-while-stopped\\data\\logs\\winui3.log",
+          "summary": "State: Stopped→State: Running→Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened)→enqueue_review call finished. ExitCode=0 の順序を確認。"
+        },
+        {
+          "kind": "isolation",
+          "path": "C:\\Users\\dev\\src\\squirrel-notifier\\artifacts\\runbook-v0.23.1\\20261101-225207-register-while-stopped\\evidence\\isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]。終了後にfixture app/gateway PIDおよびrunマーカー付きプロセス残留0を別に確認。"
+        }
+      ],
+      "flaky": []
+    }
+  ]
+}
