@@ -34,7 +34,7 @@ retry なしで実行します。scenario ごとに RUNNER_TEMP 配下の専用 
 | subscriber-gateway-contract | 実 subscriber の引数、success、404、401、500、接続拒否の契約 |
 | gateway-auth-flow | `.cmd` / `.bat` 解決、device flow、token cache 後の再購読 |
 | review-event-flow | 購読開始、`enqueue_review`、InitialText / FinalText の重複排除、通知モデル、dummy launcher |
-| distribution-install | 実 publish payload、MSI、setup ZIP の build、silent install / uninstall、version、cleanup |
+| distribution-install | 実 publish payload、MSI、setup ZIP の build、silent install / uninstall、major upgrade、全 payload の SHA256、WinUI 初回起動、cleanup |
 
 fixture の dummy executable は codex.exe という名前で build されます。ParsedFromOutput
 scenario では一時 PATH から codex として解決し、それ以外では絶対パスで起動します。
@@ -63,6 +63,27 @@ headless 境界は #307、#222、#223 のスコープです。`distribution-inst
 契約に従い、release workflow と同じ publish / WiX 経路で配布物を検証します。
 既存インストール、製品登録、Task Scheduler タスク、実行中プロセスを開始前に検出した
 場合は変更せず失敗します。
+
+### MSI 更新の回帰検証（#525）
+
+`distribution-install` は `Invoke-MsiUpgradeE2E.ps1` で製品名・UpgradeCode・配置先・
+レジストリ・ショートカット・タスク名を一意に変えた MSI を生成します。WiX 定義と
+依存バージョンは本体と共通です。旧製品の2DLLだけを高い FileVersion の fixture にして、
+強制配置を外した対照 MSI で欠落が再現することを確認します。修正版では高 FileVersion・
+通常更新・同版再ビルドの置換・同じ MSI の再実行後に、全 payload の存在と SHA256、
+設定・専用データ・カスタムタスクの保持を照合します。WinUI の実起動後に生成される
+新鮮な `review-status.json` とプロセスの継続を検証し、起動を省略して成功にはしません。
+この確認はリリース時の独立した実デスクトップランブックを置き換えません。
+
+更新部分だけを既存インストールがある開発 PC で実行する場合:
+
+    pwsh -NoProfile -File tests/e2e/scripts/Invoke-MsiUpgradeE2E.ps1 -PublishDirectory <実publish出力> -RunRoot ./artifacts/msi-upgrade -ArtifactsDirectory ./artifacts/msi-upgrade-evidence
+
+実アプリのデータは変更せず、試験用アプリは `SQUIRREL_NOTIFIER_DATA_ROOT` を専用 root に
+指定して起動します。subscriber は存在しない専用パスを指定し、実 gateway・queue・資格情報へ
+接続しません。生成した製品だけをアンインストールし、実設定の hash と隔離製品の残留を
+検査します。試験用 DLL は旧インストール状態の構築にだけ使い、起動するのは実 payload です。
+`msi-upgrade.json` とサニタイズ済み `msi-upgrade.log` は成功時も CI artifact に保存します。
 
 ## 実デスクトップの確認
 

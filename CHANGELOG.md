@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- MSI の major upgrade で旧 WinUI DLL の FileVersion が高い場合にも、新しい配布物を欠落なく配置する。更新時は既存の自動起動タスクの条件・引数を保持し、高 FileVersion からの更新・通常更新・同版置換・再インストールの全ファイル照合と WinUI 初回起動を隔離 E2E で検証する（#525）。
+
 ## [0.23.0] - 2026-11-01
 
 ### Removed

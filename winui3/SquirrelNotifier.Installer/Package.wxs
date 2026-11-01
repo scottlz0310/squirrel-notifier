@@ -21,6 +21,12 @@
     <!-- 同一バージョンの再ビルドでも、旧 ProductCode の製品を置き換える。 -->
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="新しいバージョンの Squirrel Notifier がすでにインストールされています。" />
+    <!-- 旧 DLL が高い FileVersion でも、旧製品削除後に新 payload を欠落させない。 -->
+    <SetProperty Id="REINSTALLMODE"
+                 Value="amus"
+                 Before="CostInitialize"
+                 Sequence="both"
+                 Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- インストール先: %LocalAppData%\Programs\SquirrelNotifier\ -->
@@ -87,7 +93,7 @@
                   Return="ignore" />
 
     <InstallExecuteSequence>
-      <Custom Action="RegisterScheduledTask" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="RegisterScheduledTask" After="InstallFiles" Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
       <Custom Action="UnregisterScheduledTask" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 

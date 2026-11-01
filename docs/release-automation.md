@@ -46,7 +46,7 @@ GitHub 側の設定も維持する。
 4. `extract-release-notes.ps1` が CHANGELOG と RELEASE_TEMPLATE を合成する。
    固定 SHA の draft であることを確認し、配布物と日本語ノートを添付する。
 5. draft から配布物をダウンロードし、ノート一致、ZIP / MSI の SHA256、ZIP の必須ファイル、
-   MSI の ProductVersion と同一版の MajorUpgrade、EXE の `X.Y.Z+<対象 SHA>` を検証する。
+   MSI の ProductVersion と同一版の MajorUpgrade、更新時だけ Costing 前に適用するファイル選択規則とタスク保持条件、EXE の `X.Y.Z+<対象 SHA>` を検証する。
 6. 検証成功を `needs` で受けた reusable finalize だけが公開する。
 
 タグは GITHUB_TOKEN で作成するため、タグ push から別 workflow が起動することに依存しない。

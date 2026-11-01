@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "distribution-install",
   "phase": "headless",
-  "timeoutSeconds": 300,
+  "timeoutSeconds": 900,
   "components": {},
   "fixture": "distribution/publish-msi-setup-zip",
   "expectedOutcome": "BUILD_INSTALL_UNINSTALL_AND_CLEANUP",

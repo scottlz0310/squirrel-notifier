@@ -28,6 +28,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
+. (Join-Path $repoRoot 'scripts\Assert-InstalledPayload.ps1')
 $runRootFullPath = [System.IO.Path]::GetFullPath($RunRoot)
 $artifactsFullPath = [System.IO.Path]::GetFullPath($ArtifactsDirectory)
 $marker = [System.IO.Path]::DirectorySeparatorChar + 'squirrel-notifier-e2e' + [System.IO.Path]::DirectorySeparatorChar
@@ -463,6 +464,8 @@ function Assert-MsiInstalled {
     }
 
     $installedInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $installRoot 'SquirrelNotifier.WinUI3.exe'))
+    $verifiedCount = Assert-InstalledPayload -PayloadDirectory $publishDirectory -InstallDirectory $installRoot
+    $assertions.Add("MSI の全 payload $verifiedCount 件の存在と SHA256 が publish 出力に一致した。")
     $installedVersionPattern = '^' + [regex]::Escape($expectedVersion) + '(\.0)?([+].*)?$'
     if ([string]$installedInfo.FileVersion -notmatch $installedVersionPattern -or [string]$installedInfo.ProductVersion -notmatch $installedVersionPattern) {
         throw [DistributionE2EException]::new(
@@ -734,6 +737,16 @@ try {
     Expand-Archive -LiteralPath $zipPath -DestinationPath $bundleDirectory -Force
     Assert-BundleContents
     Write-Phase 'setup ZIP の内容検証が完了しました。'
+
+    Write-Phase '隔離した MSI major upgrade の検証を開始します。'
+    Invoke-ExternalCommand `
+        -FilePath 'pwsh' `
+        -Arguments @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'Invoke-MsiUpgradeE2E.ps1'),
+            '-PublishDirectory', $publishDirectory, '-RunRoot', $runRootFullPath,
+            '-ArtifactsDirectory', $artifactsFullPath) `
+        -Label 'MSI major upgrade E2E' `
+        -FailureCategory 'PRODUCT_INSTALL_FAILED' | Out-Null
+    $assertions.Add('隔離 MSI で高 FileVersion の欠落再現、更新後の全 payload・WinUI 起動・設定/タスク保持を確認した。')
 
     $msiScenarioStarted = $true
     $msiInstallAttempted = $true
