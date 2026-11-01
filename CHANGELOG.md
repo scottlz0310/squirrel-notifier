@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-01
+
 ### Removed
 
 - 廃案が決定した認証付き内部連携の観測送信、サービス主体用設定、依頼cycle相関、専用の永続世代カウンターを撤去した。既存のレビュー起動と公開review-status.jsonの契約は維持する。
@@ -648,7 +650,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.19.1...v0.20.0
