@@ -15,6 +15,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Assert-MsiMajorUpgrade.ps1')
+. (Join-Path $PSScriptRoot 'Assert-MsiUpgradeFilePolicy.ps1')
 
 function Invoke-ComMethod {
     param(
@@ -98,6 +99,13 @@ try {
 
     $upgradeRows = @(Get-MsiRows -Database $database -Query 'SELECT * FROM `Upgrade`')
     Assert-MsiMajorUpgrade -ProductVersion $properties['ProductVersion'] -UpgradeRows $upgradeRows -MsiPath $resolvedMsiPath -ExpectedVersion $ExpectedVersion
+
+    $actions = @(Get-MsiRows -Database $database -Query 'SELECT * FROM `CustomAction`')
+    $sequences = @{}
+    foreach ($name in @('InstallUISequence', 'InstallExecuteSequence')) {
+        $sequences[$name] = @(Get-MsiRows -Database $database -Query ('SELECT * FROM `' + $name + '`'))
+    }
+    Assert-MsiUpgradeFilePolicy -CustomActions $actions -Sequences $sequences
 }
 finally {
     if ($null -ne $database) {

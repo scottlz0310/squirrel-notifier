@@ -141,7 +141,7 @@ jobs:
   # 既存の headless E2E と並列に実行し、Phase 1 の壁時計を直列化で増加させない。
   distribution-e2e:
     runs-on: windows-2025
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -163,6 +163,17 @@ jobs:
           path: artifacts/e2e-distribution/headless/**/versions.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload MSI upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-msi-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/e2e-distribution/headless/**/msi-upgrade.json
+            artifacts/e2e-distribution/headless/**/msi-upgrade.log
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload failure artifacts
         if: ${{ always() && steps.distribution_e2e.outcome == 'failure' }}
