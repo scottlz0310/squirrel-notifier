@@ -1742,6 +1742,133 @@ public class ReviewLauncherServiceTests : IDisposable
         result.Stdout.Should().Contain(line4);
     }
 
+
+    [Theory]
+    [InlineData("success", true, 2)]
+    [InlineData("retry-failed", false, 2)]
+    [InlineData("retry-conflict", false, 2)]
+    [InlineData("authentication", false, 1)]
+    [InlineData("different-session", false, 1)]
+    [InlineData("stdout-started", false, 1)]
+    [InlineData("fresh-session", false, 1)]
+    [InlineData("reviewed-role", false, 1)]
+    [InlineData("other-agent", false, 1)]
+    public async Task StartSession_ShouldRecoverOnlyCodexReviewerStartupConflict(string scenario, bool success, int starts)
+    {
+        string preset = scenario == "other-agent" ? "agy" : "codex";
+        ConfigureParsedOutputSettings(preset);
+        Guid oldId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        Guid newId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        LauncherRole role = scenario == "reviewed-role" ? LauncherRole.Reviewed : LauncherRole.Reviewer;
+        ReviewEvent reviewEvent = CreateReviewEvent("session-conflict");
+        var resolver = new LauncherWorkingDirectoryResolver(_settingsService);
+        var store = new RecordingSessionResumeStore
+        {
+            Entry = scenario == "fresh-session" ? null : new SessionResumeEntry(oldId, preset, resolver.Resolve(reviewEvent, role), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+        };
+        string conflict = $"failed to initialize thread persistence: thread-store conflict: thread {oldId:D} already has an active writer";
+        string stderr = scenario switch
+        {
+            "authentication" => "authentication failed",
+            "different-session" => conflict.Replace(oldId.ToString("D"), newId.ToString("D"), StringComparison.Ordinal),
+            _ => conflict,
+        };
+        string newOutput = "{\"type\":\"thread.started\",\"thread_id\":\"" + newId.ToString("D") + "\"}\n";
+        var processes = new Queue<IProcessInstance>(new[]
+        {
+            CreateMockProcess(1, scenario == "stdout-started" ? newOutput : string.Empty, stderr).Object,
+            CreateMockProcess(success ? 0 : 1, success ? newOutput : string.Empty, scenario == "retry-conflict" ? conflict : "new process failed").Object,
+        });
+        var launched = new List<ProcessStartInfo>();
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(launched.Add)
+            .Returns(() => processes.Dequeue());
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store);
+        AgentExecutionSession session = service.StartSession(reviewEvent, role, CancellationToken.None);
+        LauncherResult result = await session.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var events = new List<AgentExecutionEvent>();
+        await foreach (AgentExecutionEvent executionEvent in session.ReadEventsAsync())
+        {
+            events.Add(executionEvent);
+        }
+
+        result.Success.Should().Be(success);
+        launched.Should().HaveCount(starts);
+        store.RemoveCalls.Should().Be(scenario == "fresh-session" ? 0 : 1);
+        if (starts == 2)
+        {
+            GetLauncherArguments(launched[0]).Should().ContainInOrder("resume", oldId.ToString("D"));
+            GetLauncherArguments(launched[1]).Should().NotContain("resume").And.NotContain(oldId.ToString("D"));
+            launched[1].WorkingDirectory.Should().Be(launched[0].WorkingDirectory);
+            events.Should().Contain(e => e.Kind == AgentExecutionEventKind.Stdout && e.Text != null && e.Text.Contains("新規セッションで一度だけ", StringComparison.Ordinal));
+            string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+            log.Should().Contain("セッションの起動競合を検出しました");
+            events.FindAll(e => e.Kind == AgentExecutionEventKind.Completed).Should().HaveCount(1);
+        }
+
+        if (success)
+        {
+            store.SavedSessionIds.Should().Equal(newId);
+            result.Stdout.Should().Be(newOutput.TrimEnd('\n'));
+        }
+        else
+        {
+            store.SavedSessionIds.Should().BeEmpty();
+        }
+    }
+
+    [Theory]
+    [InlineData("head-moved")]
+    [InlineData("settings-changed")]
+    [InlineData("cancelled")]
+    [InlineData("store-failed")]
+    public async Task LaunchAsync_ShouldNotRecoverConflictWhenRunCannotContinue(string reason)
+    {
+        ConfigureParsedOutputSettings("codex");
+        Guid sessionId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        ReviewEvent reviewEvent = CreateReviewEvent("conflict-guard");
+        var store = new RecordingSessionResumeStore
+        {
+            Entry = new SessionResumeEntry(sessionId, "codex", new LauncherWorkingDirectoryResolver(_settingsService).Resolve(reviewEvent, LauncherRole.Reviewer), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            FailRemove = reason == "store-failed",
+        };
+        var client = new Mock<IGhApiClient>();
+        string head = "0123456789abcdef0123456789abcdef01234567";
+        client.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<string>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => GhApiResult.Success("{\"state\":\"open\",\"headSha\":\"" + head + "\",\"baseRef\":\"main\"}"));
+        using var cancellation = new CancellationTokenSource();
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback(() =>
+            {
+                if (reason == "head-moved")
+                {
+                    head = new string('a', 40);
+                }
+                else if (reason == "settings-changed")
+                {
+                    _settingsService.Settings.SessionResumeEnabled = false;
+                }
+                else if (reason == "cancelled")
+                {
+                    cancellation.Cancel();
+                }
+            })
+            .Returns(CreateMockProcess(1, string.Empty, $"failed to initialize thread persistence: thread-store conflict: thread {sessionId:D} already has an active writer").Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object, sessionResumeStore: store, ghApiClient: client.Object);
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, cancellation.Token).WaitAsync(TimeSpan.FromSeconds(10));
+        result.Success.Should().BeFalse();
+        runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once());
+        result.ErrorMessage.Should().Contain(reason switch
+        {
+            "head-moved" => "HEADが変わりました",
+            "settings-changed" => "設定が変わった",
+            "store-failed" => "保存または破棄に失敗",
+            _ => "cancelled",
+        });
+    }
+
     private sealed class RecordingSessionResumeStore : ISessionResumeStore
     {
         public SessionResumeEntry? Entry { get; set; }
@@ -1751,6 +1878,8 @@ public class ReviewLauncherServiceTests : IDisposable
         public int TryGetCalls { get; private set; }
 
         public int RemoveCalls { get; private set; }
+
+        public bool FailRemove { get; set; }
 
         public List<Guid> SavedSessionIds { get; } = [];
 
@@ -1795,6 +1924,11 @@ public class ReviewLauncherServiceTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             RemoveCalls++;
+            if (FailRemove)
+            {
+                throw new IOException("store remove failed");
+            }
+
             Entry = null;
             return Task.CompletedTask;
         }
