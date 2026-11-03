@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.2] - 2026-11-03
+
 ### Fixed
 
 - 標準Codex reviewerのセッション再開が対象IDの起動競合で失敗した場合、保存情報を破棄し、HEADと設定を確認して同じcycle・roundのまま新規セッションで1回だけ起動し直す。出力開始後・競合以外の失敗は再試行せず、競合の理由と復旧操作をログ・実行画面へ表示する（#502）。
@@ -660,7 +662,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.1...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.2...HEAD
+[0.23.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.21.0...v0.22.0
