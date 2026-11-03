@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 標準Codex reviewerのセッション再開が対象IDの起動競合で失敗した場合、保存情報を破棄し、HEADと設定を確認して同じcycle・roundのまま新規セッションで1回だけ起動し直す。出力開始後・競合以外の失敗は再試行せず、競合の理由と復旧操作をログ・実行画面へ表示する（#502）。
+
 ## [0.23.1] - 2026-11-01
 
 ### Fixed

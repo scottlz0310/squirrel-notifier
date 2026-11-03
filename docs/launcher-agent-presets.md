@@ -98,3 +98,9 @@ CLI は安全な `.cmd` / `.bat` factory で起動し、`call --args-stdin --jso
 ## codex exec のハング対策
 
 codex 等の非対話 print / exec モードは、プロンプトを引数で受け取っても標準入力の EOF を待って停止することがある（[openai/codex#20919](https://github.com/openai/codex/issues/20919)）。`ReviewLauncherService` は起動直後に標準入力を即座に閉じ、EOF を通知することでこれを回避している。
+
+## Codex reviewerのセッション起動競合
+
+標準Codexプリセットのreviewerがresume対象IDの`thread-store conflict`（`already has an active writer`）で永続化初期化に失敗し、stdoutがまだ空の場合は、保存済みIDの破棄成功後にHEADとlauncher設定を確認し、同じcycle・roundで新規セッションを1回だけ起動する。ログと実行画面には競合と復旧操作を表示する。別プロセスが開いている既存セッション自体は終了しない。
+
+新規起動も失敗した場合、認証エラー等の別原因、出力開始後、他CLIやカスタムプリセット、reviewed側では自動的に新規起動しない。ユーザーのキャンセル、HEAD/設定変更、保存情報の破棄失敗も復旧を止める。公開JSONのschemaは変更しない。

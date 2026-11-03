@@ -185,10 +185,37 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 && plan.OutputFormat is LauncherOutputFormat.CodexJson or LauncherOutputFormat.ClaudeStreamJson or LauncherOutputFormat.AgyStreamJson or LauncherOutputFormat.CopilotJson;
             string? head = monitored ? await _headGuard.ReadOpenHeadAsync(reviewEvent, cts.Token).ConfigureAwait(false) : null;
             var recovery = new LauncherRecoveryPolicy();
+            bool conflictRecoveryAttempted = false;
             while (true)
             {
                 cts.Token.ThrowIfCancellationRequested();
                 LauncherAttemptResult attempt = await RunAttemptAsync(session, reviewEvent, role, plan, monitored, cts.Token).ConfigureAwait(false);
+                if (!conflictRecoveryAttempted
+                    && monitored
+                    && role == LauncherRole.Reviewer
+                    && plan.IsResume
+                    && plan.AgentId == "codex"
+                    && plan.SessionId is Guid conflictedSessionId
+                    && attempt.Outcome == AgentExecutionOutcome.Failed
+                    && attempt.Timeout == LauncherWatchdogTimeout.None
+                    && attempt.Result.ExitCode is not null and not 0
+                    && attempt.ResumeEntryRemoved
+                    && LauncherSessionConflictPolicy.IsStartupConflict(attempt.Result.Stdout, attempt.Result.Stderr, conflictedSessionId))
+                {
+                    await _headGuard.VerifyAsync(reviewEvent, head!, cts.Token).ConfigureAwait(false);
+                    if (!_settingsService.Settings.SessionResumeEnabled || initialSlot != ResolveLauncherSlot(_settingsService.Settings, role))
+                    {
+                        throw new InvalidOperationException("実行中に launcher 設定が変わったため、競合後の新規起動を停止しました。");
+                    }
+
+                    conflictRecoveryAttempted = true;
+                    plan = plan with { ArgumentsTemplate = initialSlot.ArgumentsTemplate, SessionId = null, IsResume = false, ResumeUnavailableReason = null };
+                    const string message = "セッションの起動競合を検出しました。別のプロセスが開いている可能性があるため、同じレビューを新規セッションで一度だけ起動し直します。";
+                    await LogAsync(message).ConfigureAwait(false);
+                    session.PublishStdout(message);
+                    continue;
+                }
+
                 if (attempt.Timeout is not (LauncherWatchdogTimeout.NoProgress or LauncherWatchdogTimeout.Tool)
                     || attempt.Outcome != AgentExecutionOutcome.TimedOut
                     || attempt.SessionId is not Guid sessionId
@@ -438,7 +465,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
             string errorMessage = exitCode == 0
                 ? string.Empty
-                : BuildProcessFailureMessage(plan, exitCode, stderr);
+                : BuildProcessFailureMessage(plan, exitCode, stdout, stderr);
             if (!string.IsNullOrWhiteSpace(errorMessage))
             {
                 await LogAsync($"Review process failure: {errorMessage}").ConfigureAwait(false);
@@ -548,10 +575,11 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         bool processStarted,
         LauncherWatchdogTimeout timeout)
     {
+        bool resumeEntryRemoved = false;
         try
         {
             await LogParsedSessionIdFailureAsync(plan, parsedSessionId, processStarted).ConfigureAwait(false);
-            bool resumeEntryRemoved = await PersistSessionStateAsync(
+            resumeEntryRemoved = await PersistSessionStateAsync(
                 reviewEvent,
                 role,
                 plan,
@@ -567,6 +595,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
         catch (Exception ex)
         {
+            resumeEntryRemoved = false;
             string message = $"セッション resume 情報の保存または破棄に失敗しました: {ex.Message}";
             await LogAsync(message).ConfigureAwait(false);
             outcome = AgentExecutionOutcome.Failed;
@@ -574,10 +603,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             result.ErrorMessage = message;
         }
 
-        return new LauncherAttemptResult(outcome, result, plan?.SessionId ?? parsedSessionId.SessionId, timeout);
+        return new LauncherAttemptResult(outcome, result, plan?.SessionId ?? parsedSessionId.SessionId, timeout, resumeEntryRemoved);
     }
 
-    private sealed record LauncherAttemptResult(AgentExecutionOutcome Outcome, LauncherResult Result, Guid? SessionId, LauncherWatchdogTimeout Timeout);
+    private sealed record LauncherAttemptResult(AgentExecutionOutcome Outcome, LauncherResult Result, Guid? SessionId, LauncherWatchdogTimeout Timeout, bool ResumeEntryRemoved);
 
     private async Task<LauncherLaunchPlan> CreateLaunchPlanAsync(
         ReviewEvent reviewEvent,
@@ -972,8 +1001,14 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         await _loggingService.WriteAsync(message).ConfigureAwait(false);
     }
 
-    private string BuildProcessFailureMessage(LauncherLaunchPlan plan, int exitCode, string stderr)
+    private string BuildProcessFailureMessage(LauncherLaunchPlan plan, int exitCode, string stdout, string stderr)
     {
+        if (plan.IsResume && plan.AgentId == "codex" && plan.SessionId is Guid sessionId
+            && LauncherSessionConflictPolicy.IsStartupConflict(stdout, stderr, sessionId))
+        {
+            return "セッションの起動競合で再開できませんでした。別のプロセスがこのセッションを開いたままの可能性があります。";
+        }
+
         string detail = ProcessOutputSummarizer.Summarize(stderr, _secretMasker);
 
         // skill 呼び出しのプレフィックスは CLI ごとに異なる（codex は $、他は /。#395）ため、skill 名だけで判定する
