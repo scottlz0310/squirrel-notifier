@@ -4,16 +4,20 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace SquirrelNotifier.WinUI3.Helpers;
 
 /// <summary>
 /// Antigravity CLI の <c>--output-format stream-json</c> が stdout へ出力するイベントから、
-/// conversation ID と agent response のテキストを抽出する（#306）.
+/// conversation ID、agent response のテキスト、tool step の進捗を抽出する（#306）.
 /// </summary>
-internal static class AgyStreamJsonEventExtractor
+internal static partial class AgyStreamJsonEventExtractor
 {
+    private const int _toolSummaryMaxLength = 160;
+
     /// <summary>
     /// 1 行を agy stream-json event として解釈する.
     /// </summary>
@@ -84,9 +88,69 @@ internal static class AgyStreamJsonEventExtractor
         {
             logLines.AddRange(SplitNonEmptyLines(textDelta!));
         }
+        else if (stepType == "tool" && FormatToolProgress(stepUpdate) is string toolLine)
+        {
+            logLines.Add(toolLine);
+        }
 
         return new AgyStreamJsonExtraction(logLines, sessionId, failureReason);
     }
+
+    /// <summary>
+    /// tool step の開始・完了を 1 行にする。agy は本文を持たない turn（tool 呼び出しだけの応答）の間、
+    /// 実行ウィンドウに何も出せなくなるため、tool 名と run_command のコマンド行だけを示す.
+    /// 出力本文や run_command 以外の引数は、量と機微な内容を避けるため表示しない.
+    /// </summary>
+    private static string? FormatToolProgress(JsonElement stepUpdate)
+    {
+        if (!TryGetString(stepUpdate, "tool_name", out string? toolName)
+            || !TryGetString(stepUpdate, "state", out string? state))
+        {
+            return null;
+        }
+
+        stepUpdate.TryGetProperty("tool_info", out JsonElement toolInfo);
+        if (state == "ACTIVE")
+        {
+            string? commandLine = toolInfo.ValueKind == JsonValueKind.Object
+                && toolInfo.TryGetProperty("parameters", out JsonElement parameters)
+                && parameters.ValueKind == JsonValueKind.Object
+                && TryGetString(parameters, "CommandLine", out string? command)
+                    ? SummarizeForOneLine(command!)
+                    : null;
+            return string.IsNullOrEmpty(commandLine) ? $"[tool] {toolName}" : $"[tool] {toolName}: {commandLine}";
+        }
+
+        if (state != "DONE")
+        {
+            return null;
+        }
+
+        string duration = stepUpdate.TryGetProperty("duration_seconds", out JsonElement seconds)
+            && seconds.ValueKind == JsonValueKind.Number
+            && seconds.TryGetDouble(out double value)
+                ? $" {value.ToString("0.0", CultureInfo.InvariantCulture)}秒"
+                : string.Empty;
+        string exit = toolInfo.ValueKind == JsonValueKind.Object
+            && TryGetString(toolInfo, "output", out string? output)
+            && ExitCodePattern().Match(output!) is { Success: true } match
+            && match.Groups[1].Value != "0"
+                ? $" 終了コード {match.Groups[1].Value}"
+                : string.Empty;
+        return $"[tool] {toolName} 完了{duration}{exit}";
+    }
+
+    private static string SummarizeForOneLine(string text)
+    {
+        string singleLine = WhitespacePattern().Replace(text, " ").Trim();
+        return singleLine.Length <= _toolSummaryMaxLength ? singleLine : singleLine[.._toolSummaryMaxLength] + "…";
+    }
+
+    [GeneratedRegex(@"^Command exited with code (-?\d+)")]
+    private static partial Regex ExitCodePattern();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespacePattern();
 
     private static AgyStreamJsonExtraction ExtractSessionIdFromRoot(JsonElement root)
     {
