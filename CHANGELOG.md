@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.24.0] - 2026-11-05
+## [0.25.0] - 2026-11-05
 
 ### Added
 
 - Copilot の premium requests（月間）の使用率をレートリミットゲージに表示し、Auto-Pause の対象にする。取得元は `gh api copilot_internal/user` で、GitHub が公開していない内部 API のため、仕様変更で取得できなくなる可能性がある（その場合はゲージの取得失敗として通知する）。無制限プランは使用率 0% として扱う（有限枠で停止した後に無制限へ変わった場合も解除できる）。`gh` のログインが必要。
+
+## [0.24.0] - 2026-11-05
 
 ### Added
 
@@ -677,7 +679,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.2...v0.24.0
 [0.23.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.0...v0.23.1
