@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-05
+
 ## [0.24.0] - 2026-11-05
 
 ### Added
@@ -677,7 +679,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.2...v0.24.0
 [0.23.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.0...v0.23.1
