@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 実行ウィンドウに、agy の tool 呼び出しの進捗（`[tool] run_command: <コマンド行>` と、完了時の所要時間・非 0 の終了コード）を逐次表示する。agy は tool 呼び出しだけの応答の間、本文を出さないため、これまでは最終回答までウィンドウに何も出なかった。tool の出力本文と、`run_command` 以外の引数は表示しない。
+
 ### Changed
 
 - `renovate.json` の `extends` から、中央プリセットで解除済みの非推奨プリセット（`options/automerge`・`options/schedule`・`options/security`・`options/monorepo`）への参照を削除した。スケジュール・待機期間・自動マージ等は中央側で既に解除されているため更新の挙動は変わらず、Dependency Dashboard の警告表示が消える。
