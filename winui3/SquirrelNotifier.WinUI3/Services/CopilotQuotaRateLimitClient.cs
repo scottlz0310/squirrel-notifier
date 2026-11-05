@@ -80,22 +80,27 @@ internal sealed class CopilotQuotaRateLimitClient
             return (null, "応答を解釈できませんでした。");
         }
 
-        if (payload.Unlimited == true)
+        if (!DateTimeOffset.TryParse(payload.Reset, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset resetAt))
         {
-            return (null, "premium request 枠が無制限のプランです。");
+            return (null, "応答にリセット日がありません。");
         }
 
-        if (payload.PercentRemaining is not double percentRemaining
-            || !DateTimeOffset.TryParse(payload.Reset, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset resetAt))
+        // 無制限は「取得失敗」ではなく使用率 0% の正常な状態として返し、プラン変更前の Auto-Pause を解除できるようにする
+        double usedPercentage = payload.Unlimited == true
+            ? 0
+            : payload.PercentRemaining is double percentRemaining
+                ? Math.Clamp(100 - percentRemaining, 0, 100)
+                : double.NaN;
+        if (double.IsNaN(usedPercentage))
         {
-            return (null, "応答に premium request 枠の使用率またはリセット日がありません。");
+            return (null, "応答に premium request 枠の使用率がありません。");
         }
 
         RateLimitInfo info = new()
         {
             Id = PremiumLimitId,
             Label = "Premium requests（月間）",
-            UsedPercentage = Math.Clamp(100 - percentRemaining, 0, 100),
+            UsedPercentage = usedPercentage,
             ResetAt = resetAt,
         };
         return (new RateLimitSnapshot(agentId, observedAt, [info]), null);

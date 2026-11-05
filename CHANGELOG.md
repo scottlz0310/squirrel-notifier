@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Copilot の premium requests（月間）の使用率をレートリミットゲージに表示し、Auto-Pause の対象にする。取得元は `gh api copilot_internal/user` で、GitHub が公開していない内部 API のため、仕様変更で取得できなくなる可能性がある（その場合はゲージの取得失敗として通知する）。無制限プランは監視対象外。`gh` のログインが必要。
+- Copilot の premium requests（月間）の使用率をレートリミットゲージに表示し、Auto-Pause の対象にする。取得元は `gh api copilot_internal/user` で、GitHub が公開していない内部 API のため、仕様変更で取得できなくなる可能性がある（その場合はゲージの取得失敗として通知する）。無制限プランは使用率 0% として扱う（有限枠で停止した後に無制限へ変わった場合も解除できる）。`gh` のログインが必要。
 
 ### Added
 

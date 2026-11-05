@@ -37,8 +37,19 @@ public class CopilotQuotaRateLimitClientTests
         limit.IsAutoPauseEligible.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task CaptureAsync_ShouldReturnZeroUsage_WhenPlanIsUnlimited()
+    {
+        CopilotQuotaRateLimitClient client = CreateClient(GhApiResult.Success("{\"reset\":\"2026-12-01T00:00:00Z\",\"unlimited\":true,\"percentRemaining\":3}"));
+
+        RateLimitSnapshot? snapshot = await client.CaptureAsync("copilot", CancellationToken.None);
+
+        RateLimitInfo limit = snapshot!.Limits.Should().ContainSingle().Subject;
+        limit.UsedPercentage.Should().Be(0);
+        limit.ResetAt.Should().Be(new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero));
+    }
+
     [Theory]
-    [InlineData("{\"reset\":\"2026-12-01T00:00:00Z\",\"unlimited\":true,\"percentRemaining\":100}", "無制限")]
     [InlineData("{\"reset\":\"2026-12-01T00:00:00Z\",\"unlimited\":false,\"percentRemaining\":null}", "使用率")]
     [InlineData("{\"reset\":null,\"unlimited\":false,\"percentRemaining\":50}", "リセット日")]
     [InlineData("{\"reset\":\"not-a-date\",\"unlimited\":false,\"percentRemaining\":50}", "リセット日")]

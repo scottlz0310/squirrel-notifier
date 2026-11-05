@@ -373,6 +373,25 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshAsync_ShouldReleaseGate_WhenCopilotPlanBecomesUnlimitedAfterPause()
+    {
+        Mock<IGhApiClient> api = new();
+        api.SetupSequence(a => a.GetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GhApiResult.Success("{\"reset\":\"2026-12-01T00:00:00.000Z\",\"unlimited\":false,\"percentRemaining\":3}"))
+            .ReturnsAsync(GhApiResult.Success("{\"reset\":\"2026-12-01T00:00:00.000Z\",\"unlimited\":true,\"percentRemaining\":100}"));
+        SettingsService settingsService = CreateSettingsService();
+        settingsService.Settings.ReviewerLauncherPresetId = "copilot";
+        RateLimitRefreshCoordinator coordinator = CreateCoordinator(settingsService: settingsService, ghApiClient: api.Object);
+        RateLimitRefreshRequest request = CreateRequest(CreateAgent(RateLimitSnapshotService.CopilotAgentId));
+
+        await coordinator.RefreshAsync(request);
+        _autoPauseGate.PausedLimits.Should().ContainSingle();
+        await coordinator.RefreshAsync(request);
+
+        _autoPauseGate.PausedLimits.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task RefreshAsync_ShouldPauseGate_WhenFreshSnapshotIsAtRisk()
     {
         // 「更新」でも gate を再評価する（#167。以前は起動試行時にしか評価されなかった）
