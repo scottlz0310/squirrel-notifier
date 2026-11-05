@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-05
+
 ### Added
 
 - 実行ウィンドウに、agy の tool 呼び出しの進捗（`[tool] run_command: <コマンド行>` と、完了時の所要時間・非 0 の終了コード）を逐次表示する。agy は tool 呼び出しだけの応答の間、本文を出さないため、これまでは最終回答までウィンドウに何も出なかった。tool の出力本文と、`run_command` 以外の引数は表示しない。
@@ -671,7 +673,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.2...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.2...v0.24.0
 [0.23.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.22.0...v0.23.0
