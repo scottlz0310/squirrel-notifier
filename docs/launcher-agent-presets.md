@@ -15,7 +15,7 @@ squirrel-notifier の launcher スロット（reviewer / reviewed）が扱うの
 | `claude` | `claude` | `-p "/thread-owl-pr-reviewer ..." --verbose --output-format stream-json` のようなスキル呼び出し。stream-json は progress event の逐次取得用で、`-p` との併用時は CLI 仕様で `--verbose` が必須（[docs/progress-event-contract.md](progress-event-contract.md) 参照） | `claude-code` |
 | `codex` | `codex` | reviewer は `exec --skip-git-repo-check --json "$thread-owl-pr-reviewer ..."`、reviewed は `exec --json "$review-raven-thread-owl-cycle ..."`。codex の skill 呼び出し構文は `$` で始まる | `codex`（レートリミット取得は対応待ち。[docs/statusline-integration.md](statusline-integration.md) 参照） |
 | `agy` | `agy` | `--print-timeout 30m --output-format stream-json -p "/thread-owl-pr-reviewer ..."` または `"/review-raven-thread-owl-cycle ..."` | `agy` |
-| `copilot` | `copilot` | `-p "/thread-owl-pr-reviewer ..." --output-format json` または `-p "/review-raven-thread-owl-cycle ..." --output-format json` | `null`（レートリミット取得手段が無い） |
+| `copilot` | `copilot` | `-p "/thread-owl-pr-reviewer ..." --output-format json` または `-p "/review-raven-thread-owl-cycle ..." --output-format json` | `copilot`（`gh api copilot_internal/user` の premium requests 月間枠） |
 
 全プリセットが正式 skill 名をプロンプトの先頭で呼び出す（codex は `$`、他は `/` プレフィックス）。skill 本体の配布・更新と MCP 接続設定は Mcp-Docker の責務であり、squirrel-notifier は起動テンプレートだけを管理する。skill が未配布、または CLI が skill 呼び出しに未対応の場合は、起動プロセスの stderr と失敗メッセージに原因を残す。
 
@@ -68,7 +68,7 @@ session 情報は `%LOCALAPPDATA%\SquirrelNotifier\sessions.json` に保存す�
 
 ## rateLimitAgentId の解決
 
-`SettingsService.ResolveLauncherRateLimitAgentId(LauncherRole)` が、指定したスロットに選択されているプリセットの `rateLimitAgentId` を返す。「カスタム」設定、および取得手段が無いプリセット（copilot）では `null` を返し、Auto-Pause（#147）はこれを gate 対象外として扱う。
+`SettingsService.ResolveLauncherRateLimitAgentId(LauncherRole)` が、指定したスロットに選択されているプリセットの `rateLimitAgentId` を返す。「カスタム」設定、および取得手段が無いプリセットでは `null` を返し、Auto-Pause（#147）はこれを gate 対象外として扱う。
 
 ## コマンド解決と Windows shim の起動規約
 

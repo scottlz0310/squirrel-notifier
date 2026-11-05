@@ -6,7 +6,8 @@ namespace SquirrelNotifier.WinUI3.Models;
 
 /// <summary>
 /// レートリミット状態を取得できる CLI エージェントの定義。取得経路はエージェントにより異なる
-/// （claude-code / agy は statusline フック由来のローカルファイル、codex は App Server 直読み #163）.
+/// （claude-code / agy は statusline フック由来のローカルファイル、codex は App Server 直読み #163、
+/// copilot は GitHub の quota API 直読み）.
 /// </summary>
 internal sealed record RateLimitAgentDefinition(string Id, string DisplayName, bool IsAvailable);
 
@@ -26,5 +27,8 @@ internal static class RateLimitAgentCatalog
         // codex は statusline フックが外部コマンドに JSON を渡さないためローカルファイル経由は
         // 不可能だが、App Server（account/rateLimits/read）経由で取得できる（spike #157 / #163）.
         new RateLimitAgentDefinition("codex", "Codex", IsAvailable: true),
+
+        // copilot も statusline を持たないため、GitHub の quota（gh api copilot_internal/user、非公開 API）から取得する.
+        new RateLimitAgentDefinition("copilot", "GitHub Copilot", IsAvailable: true),
     ];
 }

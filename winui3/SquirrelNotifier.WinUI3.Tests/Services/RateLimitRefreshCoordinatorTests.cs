@@ -324,6 +324,55 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshAsync_ShouldReturnCopilotLimits_WhenQuotaApiResponds()
+    {
+        Mock<IGhApiClient> api = new();
+        api.Setup(a => a.GetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GhApiResult.Success("{\"reset\":\"2026-12-01T00:00:00.000Z\",\"unlimited\":false,\"percentRemaining\":40}"));
+        RateLimitRefreshCoordinator coordinator = CreateCoordinator(ghApiClient: api.Object);
+
+        RateLimitRefreshResult result = await coordinator.RefreshAsync(
+            CreateRequest(CreateAgent(RateLimitSnapshotService.CopilotAgentId)));
+
+        result.Alerts.Should().BeEmpty();
+        RateLimitInfo limit = result.Limits.Should().ContainSingle().Subject;
+        limit.UsedPercentage.Should().BeApproximately(60, 0.001);
+        limit.SourceUri.Should().Be("agent://copilot");
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ShouldAlertCopilotFailure_WhenQuotaApiFails()
+    {
+        Mock<IGhApiClient> api = new();
+        api.Setup(a => a.GetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GhApiResult.Failure(401, "認証が必要です"));
+        RateLimitRefreshCoordinator coordinator = CreateCoordinator(ghApiClient: api.Object);
+
+        RateLimitRefreshResult result = await coordinator.RefreshAsync(
+            CreateRequest(CreateAgent(RateLimitSnapshotService.CopilotAgentId)));
+
+        result.Limits.Should().BeEmpty();
+        RateLimitRefreshAlert alert = result.Alerts.Should().ContainSingle().Subject;
+        alert.Title.Should().Be("レートリミット情報を取得できません");
+        alert.Message.Should().Contain("copilot_internal/user").And.Contain("認証が必要です");
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ShouldPauseGate_WhenCopilotQuotaIsAtRisk()
+    {
+        Mock<IGhApiClient> api = new();
+        api.Setup(a => a.GetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GhApiResult.Success("{\"reset\":\"2026-12-01T00:00:00.000Z\",\"unlimited\":false,\"percentRemaining\":3}"));
+        SettingsService settingsService = CreateSettingsService();
+        settingsService.Settings.ReviewerLauncherPresetId = "copilot";
+        RateLimitRefreshCoordinator coordinator = CreateCoordinator(settingsService: settingsService, ghApiClient: api.Object);
+
+        await coordinator.RefreshAsync(CreateRequest(CreateAgent(RateLimitSnapshotService.CopilotAgentId)));
+
+        _autoPauseGate.PausedLimits.Should().ContainSingle().Which.AgentId.Should().Be("copilot");
+    }
+
+    [Fact]
     public async Task RefreshAsync_ShouldPauseGate_WhenFreshSnapshotIsAtRisk()
     {
         // 「更新」でも gate を再評価する（#167。以前は起動試行時にしか評価されなかった）
@@ -382,9 +431,11 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
         await WriteSnapshotAsync(_claudeCode, usedPercentage: 96);
         SettingsService settingsService = CreateSettingsService();
 
-        // copilot はレートリミットを取得できないため gate 対象外になる
-        settingsService.Settings.ReviewerLauncherPresetId = "copilot";
-        settingsService.Settings.ReviewedLauncherPresetId = "copilot";
+        // 既存プリセットとコマンドを共有しない独自設定のスロットはレートリミットを取得できないため gate 対象外になる
+        settingsService.Settings.ReviewerLauncherPresetId = "custom";
+        settingsService.Settings.ReviewedLauncherPresetId = "custom";
+        settingsService.Settings.ReviewerLauncherCommandPath = "my-own-agent";
+        settingsService.Settings.ReviewedLauncherCommandPath = "my-own-agent";
         RateLimitRefreshCoordinator coordinator = CreateCoordinator(settingsService: settingsService);
 
         RateLimitRefreshResult result = await coordinator.RefreshAsync(CreateRequest(CreateAgent(_claudeCode)));
@@ -473,14 +524,16 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
         McpResourceTextReader? mcpResourceReader = null,
         IProcessRunner? processRunner = null,
         Func<string, string?>? commandResolver = null,
-        AgyModelSelectionService? agyModelSelectionService = null)
+        AgyModelSelectionService? agyModelSelectionService = null,
+        IGhApiClient? ghApiClient = null)
     {
         RateLimitFileService fileService = new(_settingsDirectory);
         RateLimitSnapshotService snapshotService = new(
             fileService,
             new CodexAppServerRateLimitClient(
                 processRunner ?? new Mock<IProcessRunner>().Object,
-                commandResolver: commandResolver));
+                commandResolver: commandResolver),
+            new CopilotQuotaRateLimitClient(ghApiClient ?? new Mock<IGhApiClient>().Object));
         return new RateLimitRefreshCoordinator(
             fileService,
             snapshotService,

@@ -19,14 +19,22 @@ internal sealed class RateLimitSnapshotService
     /// <summary>App Server 経由で取得するエージェント ID（<see cref="RateLimitAgentCatalog"/> の codex）.</summary>
     public const string CodexAgentId = "codex";
 
+    /// <summary>GitHub の quota API 経由で取得するエージェント ID（<see cref="RateLimitAgentCatalog"/> の copilot）.</summary>
+    public const string CopilotAgentId = "copilot";
+
     private readonly RateLimitFileService _fileService;
     private readonly CodexAppServerRateLimitClient _codexClient;
+    private readonly CopilotQuotaRateLimitClient _copilotClient;
 
-    public RateLimitSnapshotService(RateLimitFileService fileService, CodexAppServerRateLimitClient? codexClient = null)
+    public RateLimitSnapshotService(
+        RateLimitFileService fileService,
+        CodexAppServerRateLimitClient? codexClient = null,
+        CopilotQuotaRateLimitClient? copilotClient = null)
     {
         ArgumentNullException.ThrowIfNull(fileService);
         _fileService = fileService;
         _codexClient = codexClient ?? new CodexAppServerRateLimitClient(new ProcessRunner());
+        _copilotClient = copilotClient ?? new CopilotQuotaRateLimitClient();
     }
 
     /// <summary>
@@ -42,6 +50,11 @@ internal sealed class RateLimitSnapshotService
         if (agentId == CodexAgentId)
         {
             return await _codexClient.CaptureAsync(agentId, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (agentId == CopilotAgentId)
+        {
+            return await _copilotClient.CaptureAsync(agentId, cancellationToken).ConfigureAwait(false);
         }
 
         string? json = await _fileService.ReadAgentStatusAsync(agentId, cancellationToken).ConfigureAwait(false);
@@ -63,5 +76,21 @@ internal sealed class RateLimitSnapshotService
         }
 
         return _codexClient.CaptureWithFailureReasonAsync(agentId, cancellationToken);
+    }
+
+    /// <summary>
+    /// copilot エージェント向け。<see cref="CaptureAsync"/> と同じ取得処理を行うが、取得不可時の原因も返す.
+    /// </summary>
+    /// <param name="agentId"><see cref="CopilotAgentId"/> であること.</param>
+    /// <param name="cancellationToken">キャンセル用トークン.</param>
+    /// <returns>取得できた場合は snapshot と <see langword="null"/>。取得不可の場合は <see langword="null"/> snapshot と原因.</returns>
+    public Task<(RateLimitSnapshot? Snapshot, string? FailureDetail)> CaptureCopilotWithFailureDetailAsync(string agentId, CancellationToken cancellationToken)
+    {
+        if (agentId != CopilotAgentId)
+        {
+            throw new ArgumentException($"'{agentId}' は copilot エージェントではありません。", nameof(agentId));
+        }
+
+        return _copilotClient.CaptureWithFailureDetailAsync(agentId, cancellationToken);
     }
 }

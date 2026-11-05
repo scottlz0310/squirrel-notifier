@@ -21,7 +21,7 @@ public class LauncherAgentCatalogTests
     [InlineData("claude", "claude-code")]
     [InlineData("codex", "codex")]
     [InlineData("agy", "agy")]
-    [InlineData("copilot", null)]
+    [InlineData("copilot", "copilot")]
     public void All_ShouldMapExpectedRateLimitAgentId(string presetId, string? expectedRateLimitAgentId)
     {
         LauncherAgentDefinition? definition = LauncherAgentCatalog.Find(presetId);

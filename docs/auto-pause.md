@@ -13,7 +13,7 @@ Issue #147 で導入された、レートリミット危険水域での新規 la
 
 ## gate の対象外（常に起動を許可）
 
-- rateLimitAgentId を持たないプリセット（copilot など取得手段が無いエージェント）
+- rateLimitAgentId を持たないプリセット（取得手段が無い独自エージェント）
 - 「カスタム」設定のスロット
 - Paused でない agent の snapshot が stale / missing の場合（推測制御をしない）
 - 自律実行に使われない予約枠（下記「判定対象の枠」、#335）

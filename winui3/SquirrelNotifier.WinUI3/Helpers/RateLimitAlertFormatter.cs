@@ -34,6 +34,16 @@ internal static class RateLimitAlertFormatter
         };
     }
 
+    /// <summary>
+    /// copilot の取得不可の原因を案内に組み立てる。原因は <c>gh</c> のマスク・要約済みの出力で、
+    /// 未ログイン・非公開 API の仕様変更・Copilot 未契約などを含みうるため断定しない.
+    /// </summary>
+    /// <param name="agentDisplayName">エージェントの表示名.</param>
+    /// <param name="failureDetail">取得不可の原因.</param>
+    /// <returns>ダイアログに出す本文.</returns>
+    public static string BuildCopilotFailureMessage(string agentDisplayName, string? failureDetail)
+        => $"{agentDisplayName} のレートリミット情報を GitHub（gh api copilot_internal/user）から取得できませんでした。gh にログイン済みか確認してください。{(string.IsNullOrWhiteSpace(failureDetail) ? string.Empty : $" 詳細: {failureDetail}")}";
+
     /// <summary>statusline フックがまだ snapshot を書き出していないエージェント向けの案内（#139）.</summary>
     /// <param name="agentDisplayName">エージェントの表示名.</param>
     /// <returns>ダイアログに出す本文.</returns>
