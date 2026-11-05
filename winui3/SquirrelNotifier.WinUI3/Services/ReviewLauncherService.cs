@@ -331,6 +331,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         LauncherWatchdogTimeout timeout = LauncherWatchdogTimeout.None;
         Task<string>? stdoutTask = null;
         Task<string>? stderrTask = null;
+        ReviewerOutputRecorder? recorder = null;
         var parsedSessionId = new ParsedSessionIdCapture();
         bool processStarted = false;
         AgentExecutionOutcome outcome;
@@ -441,14 +442,23 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             // 実行中の逐次配信（#143）: 終了後一括の ReadToEndAsync ではなく行単位で読み取り、
             // stdout / stderr の各ストリーム内の順序を維持したままセッションへ流す。
             // WaitForExitAsync と並行して読み進めることでパイプ詰まりによる deadlock も回避する.
+            if (role == LauncherRole.Reviewer)
+            {
+                recorder = await TryOpenOutputRecorderAsync(reviewEvent, plan).ConfigureAwait(false);
+            }
+
+            // recorder は、下記の pump を finally で完了まで待ってから破棄する（CA2025 の指摘する破棄前の完了は保証済み）。
+#pragma warning disable CA2025
             stdoutTask = PumpStdoutAsync(
                 _activeProcess.StandardOutput,
                 session,
                 plan.OutputFormat,
                 parsedSessionId,
                 watchdog is null ? null : line => watchdog.Observe(line, plan.OutputFormat),
+                recorder,
                 combinedToken);
-            stderrTask = PumpStderrAsync(_activeProcess.StandardError, session, combinedToken);
+            stderrTask = PumpStderrAsync(_activeProcess.StandardError, session, recorder, combinedToken);
+#pragma warning restore CA2025
 
             await _activeProcess.WaitForExitAsync(combinedToken).ConfigureAwait(false);
 
@@ -456,6 +466,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             string stderr = await stderrTask.ConfigureAwait(false);
 
             int exitCode = _activeProcess.ExitCode;
+            recorder?.WriteNote($"プロセスが終了しました。ExitCode={exitCode}");
 
             await LogAsync($"Review process finished. ExitCode={exitCode}; WorkingDirectory={workingDirectory}").ConfigureAwait(false);
             if (exitCode != 0 && !string.IsNullOrWhiteSpace(stderr))
@@ -502,6 +513,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
             string reason = cancelledByUser ? "cancelled by user" : "timed out";
             await LogAsync($"Review process was {reason}.").ConfigureAwait(false);
+            recorder?.WriteNote($"Review process was {reason}. Watchdog={timeout}");
 
             KillActiveProcess();
             if (timeout is LauncherWatchdogTimeout.NoProgress or LauncherWatchdogTimeout.Tool && _activeProcess is not null)
@@ -530,6 +542,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         catch (Exception ex)
         {
             await LogAsync($"Failed to run review process: {ex.Message}").ConfigureAwait(false);
+            recorder?.WriteNote($"Failed to run review process: {ex.Message}");
 
             KillActiveProcess();
 
@@ -555,6 +568,12 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         {
             cts.Cancel();
             await WaitForPumpsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+            if (recorder?.FailureMessage is string recordFailure)
+            {
+                await LogAsync($"Reviewer output recording stopped: {_secretMasker.Mask(recordFailure)}").ConfigureAwait(false);
+            }
+
+            recorder?.Dispose();
             watchdog?.Dispose();
             cts.Dispose();
             lock (_lock)
@@ -811,6 +830,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         LauncherOutputFormat outputFormat,
         ParsedSessionIdCapture parsedSessionId,
         Action<string>? observeOutput,
+        ReviewerOutputRecorder? recorder,
         CancellationToken cancellationToken)
     {
         var lines = new List<string>();
@@ -821,6 +841,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             // ただし先頭の UTF-8 BOM により StreamReader が UTF-8 へ切り替わった場合は既にデコード済み（#252）
             bool isLatin1 = reader.CurrentEncoding.CodePage == Encoding.Latin1.CodePage;
             string line = isLatin1 ? ProcessOutputDecoder.Decode(rawLine) : rawLine;
+            recorder?.WriteStdout(line);
             observeOutput?.Invoke(line);
             if (outputFormat == LauncherOutputFormat.CopilotJson)
             {
@@ -888,7 +909,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
     }
 
-    private static async Task<string> PumpStderrAsync(StreamReader reader, AgentExecutionSession session, CancellationToken cancellationToken)
+    private static async Task<string> PumpStderrAsync(StreamReader reader, AgentExecutionSession session, ReviewerOutputRecorder? recorder, CancellationToken cancellationToken)
     {
         var lines = new List<string>();
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
@@ -898,10 +919,43 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             bool isLatin1 = reader.CurrentEncoding.CodePage == Encoding.Latin1.CodePage;
             string line = isLatin1 ? ProcessOutputDecoder.Decode(rawLine) : rawLine;
             lines.Add(line);
+            recorder?.WriteStderr(line);
             session.PublishStderr(line);
         }
 
         return string.Join('\n', lines);
+    }
+
+    // reviewer の生の出力を記録するファイルを開く。記録は調査用の副経路なので、保存先の整理や
+    // ファイルの作成に失敗してもレビューは止めず、失敗を winui3.log に残して記録なしで続行する.
+    private async Task<ReviewerOutputRecorder?> TryOpenOutputRecorderAsync(ReviewEvent reviewEvent, LauncherLaunchPlan plan)
+    {
+        if (!_settingsService.Settings.ReviewerOutputCaptureEnabled)
+        {
+            return null;
+        }
+
+        try
+        {
+            string root = ReviewerOutputLayout.GetRoot(_settingsService.SettingsDirectory);
+            DateTimeOffset now = _timeProvider.GetUtcNow();
+            (int deleted, int failed) = ReviewerOutputRecorder.Prune(root, now);
+            if (deleted > 0 || failed > 0)
+            {
+                await LogAsync($"Pruned reviewer output files. Deleted={deleted}; Failed={failed}; Root={root}").ConfigureAwait(false);
+            }
+
+            string path = ReviewerOutputLayout.GetFilePath(root, reviewEvent.Repository, reviewEvent.PrNumber, now);
+            string header = $"Squirrel reviewer output. Repository={reviewEvent.Repository}; Pr={reviewEvent.PrNumber}; Agent={plan.AgentId ?? "(custom)"}; Resume={plan.IsResume}; SessionId={plan.SessionId?.ToString("D") ?? "(none)"}";
+            ReviewerOutputRecorder recorder = ReviewerOutputRecorder.Open(path, header, _secretMasker, _timeProvider);
+            await LogAsync($"Recording reviewer output to: {path}").ConfigureAwait(false);
+            return recorder;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            await LogAsync($"Reviewer output recording is disabled for this run: {_secretMasker.Mask(ex.Message)}").ConfigureAwait(false);
+            return null;
+        }
     }
 
     // キャンセル・タイムアウト・例外時に reader task を残存させないための後始末。

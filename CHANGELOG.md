@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - 実行ウィンドウに、agy の tool 呼び出しの進捗（`[tool] run_command: <コマンド行>` と、完了時の所要時間・非 0 の終了コード）を逐次表示する。agy は tool 呼び出しだけの応答の間、本文を出さないため、これまでは最終回答までウィンドウに何も出なかった。tool の出力本文と、`run_command` 以外の引数は表示しない。
+- reviewer の生の標準出力・標準エラーを、起動ごとに `%LocalAppData%/SquirrelNotifier/reviewer-output/<owner>/<repo>/<PR番号>/<開始時刻>.log` へ受信時刻つきで記録する。実行ウィンドウが閉じた後や、レビューが停止・異常終了したときに、agy・codex などの出力から原因を追えるようにする（2026-11-05 の mcp-gateway #251 で、停止の原因を追う手段がなかった）。記録は `SecretMasker` を通し、1 ファイル 32 MB・合計 256 MB・14 日で古いものから削除する。記録に失敗してもレビューは止めず、理由を `winui3.log` に残す。`settings.json` の `ReviewerOutputCaptureEnabled`（既定 true）で無効にできる。
 
 ### Changed
 
