@@ -423,6 +423,88 @@ public class ReviewLauncherServiceTests : IDisposable
         log.Should().NotContain(secret);
     }
 
+    [Fact]
+    public async Task LaunchAsync_ShouldRecordMaskedReviewerOutputWithExitCode()
+    {
+        const string secret = "recorded-secret-value";
+        ReviewEvent reviewEvent = CreateReviewEvent("record-output");
+        ConfigureSettings();
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(3, $"stdout line {secret}", "stderr line");
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object, secretMasker: new SecretMasker([secret]));
+
+        await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        string outputRoot = ReviewerOutputLayout.GetRoot(_tempDir);
+        string file = Directory.GetFiles(outputRoot, "*.log", SearchOption.AllDirectories).Should().ContainSingle().Subject;
+        string text = await File.ReadAllTextAsync(file);
+        string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+        Path.GetDirectoryName(file).Should().Be(Path.Combine(outputRoot, "scottlz0310", "squirrel-notifier", "52"));
+        text.Should().Contain("[note] Squirrel reviewer output. Repository=scottlz0310/squirrel-notifier; Pr=52; Agent=(custom); Resume=False; SessionId=(none)");
+        text.Should().Contain("[stdout] stdout line ***");
+        text.Should().Contain("[stderr] stderr line");
+        text.Should().Contain("[note] プロセスが終了しました。ExitCode=3");
+        text.Should().NotContain(secret);
+        log.Should().Contain($"Recording reviewer output to: {file}");
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldRecordTimeoutNote()
+    {
+        ReviewEvent reviewEvent = CreateReviewEvent("record-timeout");
+        ConfigureSettings(timeoutMs: 200);
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "Slow...", string.Empty, delayMs: 5000);
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
+
+        await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        string file = Directory.GetFiles(ReviewerOutputLayout.GetRoot(_tempDir), "*.log", SearchOption.AllDirectories).Should().ContainSingle().Subject;
+        string text = await File.ReadAllTextAsync(file);
+        text.Should().Contain("[stdout] Slow...");
+        text.Should().Contain("[note] Review process was timed out. Watchdog=None");
+    }
+
+    [Theory]
+    [InlineData("Reviewed", true)]
+    [InlineData("Reviewer", false)]
+    public async Task LaunchAsync_ShouldNotRecordOutput_WhenRoleIsReviewedOrCaptureIsDisabled(string roleName, bool captureEnabled)
+    {
+        ReviewEvent reviewEvent = CreateReviewEvent("no-record");
+        ConfigureSettings();
+        _settingsService.Settings.ReviewerOutputCaptureEnabled = captureEnabled;
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "out", "err");
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
+
+        LauncherResult result = await service.LaunchAsync(reviewEvent, Enum.Parse<LauncherRole>(roleName), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        Directory.Exists(ReviewerOutputLayout.GetRoot(_tempDir)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldContinueWithoutRecording_WhenOutputFileCannotBeCreated()
+    {
+        ReviewEvent reviewEvent = CreateReviewEvent("record-fails");
+        ConfigureSettings();
+        await File.WriteAllTextAsync(ReviewerOutputLayout.GetRoot(_tempDir), "not a directory");
+        Mock<IProcessInstance> mockProcess = CreateMockProcess(0, "out", "err");
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(mockProcess.Object);
+        ReviewLauncherService service = CreateLauncher(mockRunner.Object);
+
+        LauncherResult result = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+        string log = await File.ReadAllTextAsync(Path.Combine(_tempDir, "winui3.log"));
+
+        result.Success.Should().BeTrue();
+        result.Stdout.Should().Be("out");
+        log.Should().Contain("Reviewer output recording is disabled for this run:");
+    }
+
     [Theory]
     [InlineData("codex")]
     [InlineData("claude")]

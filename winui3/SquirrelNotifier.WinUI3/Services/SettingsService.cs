@@ -718,6 +718,10 @@ internal sealed class AppSettings
 
     public string LastSkippedVersion { get; set; } = string.Empty;
 
+    // reviewer の生の標準出力・標準エラーを、PR・試行ごとにファイルへ記録するか。
+    // 停止・異常終了の原因調査用で、保存先・保持期間・サイズ上限は ReviewerOutputRecorder が定める.
+    public bool ReviewerOutputCaptureEnabled { get; set; } = true;
+
     // ライブログウィンドウ（#144）: 成功終了時に短い猶予の後で自動クローズするか。
     // 失敗・キャンセル・タイムアウト時は設定に関わらず診断のため保持する
     public bool LiveLogAutoCloseEnabled { get; set; } = true;
