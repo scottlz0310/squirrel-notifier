@@ -214,16 +214,27 @@ internal sealed class RateLimitRefreshCoordinator
     {
         try
         {
-            if (agent.Id == RateLimitSnapshotService.CodexAgentId)
+            if (agent.Id is RateLimitSnapshotService.CodexAgentId or RateLimitSnapshotService.CopilotAgentId)
             {
-                // codex は statusline を持たないため App Server（account/rateLimits/read）から取得する
-                (RateLimitSnapshot? snapshot, CodexRateLimitFailureReason? failureReason) =
-                    await _snapshotService.CaptureCodexWithFailureReasonAsync(agent.Id, cancellationToken);
+                // codex は App Server、copilot は GitHub の quota API から取得する（statusline を持たないため）
+                RateLimitSnapshot? snapshot;
+                string failureMessage;
+                if (agent.Id == RateLimitSnapshotService.CodexAgentId)
+                {
+                    (snapshot, CodexRateLimitFailureReason? failureReason) =
+                        await _snapshotService.CaptureCodexWithFailureReasonAsync(agent.Id, cancellationToken);
+                    failureMessage = RateLimitAlertFormatter.BuildCodexFailureMessage(agent.DisplayName, failureReason);
+                }
+                else
+                {
+                    (snapshot, string? failureDetail) =
+                        await _snapshotService.CaptureCopilotWithFailureDetailAsync(agent.Id, cancellationToken);
+                    failureMessage = RateLimitAlertFormatter.BuildCopilotFailureMessage(agent.DisplayName, failureDetail);
+                }
+
                 if (snapshot == null)
                 {
-                    alerts.Add(new RateLimitRefreshAlert(
-                        "レートリミット情報を取得できません",
-                        RateLimitAlertFormatter.BuildCodexFailureMessage(agent.DisplayName, failureReason)));
+                    alerts.Add(new RateLimitRefreshAlert("レートリミット情報を取得できません", failureMessage));
                     return;
                 }
 

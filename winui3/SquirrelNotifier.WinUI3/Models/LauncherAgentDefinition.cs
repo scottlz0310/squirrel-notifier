@@ -188,7 +188,7 @@ internal static class LauncherAgentCatalog
             "--session-id {sessionId}",
             "-p \"/thread-owl-pr-reviewer {owner}/{repo}#{prNumber} を {reason} モードでレビューしてください\" --session-id {sessionId} --output-format json",
             "-p \"/review-raven-thread-owl-cycle {owner}/{repo}#{prNumber} のレビュー指摘に対応してください\" --session-id {sessionId} --output-format json",
-            null,
+            "copilot",
             SessionIdSupply: SessionIdSupply.ClientAssigned,
             OutputFormat: LauncherOutputFormat.CopilotJson),
     ];

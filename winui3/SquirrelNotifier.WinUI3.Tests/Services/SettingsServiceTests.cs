@@ -175,12 +175,12 @@ public class SettingsServiceTests : IDisposable
     [InlineData("claude", "claude", "claude-code")]
     [InlineData("codex", "codex", "codex")]
     [InlineData("agy", "agy", "agy")]
-    // レートリミット取得手段の無いプリセットは対象外のまま
-    [InlineData("copilot", "copilot", null)]
+    // コマンドを共有しない独自設定は対象外のまま
+    [InlineData("copilot", "copilot", "copilot")]
     // arguments 編集で custom になっても command が一致すれば引き継ぐ（#233）
     [InlineData("custom", "claude", "claude-code")]
     [InlineData("custom", "agy", "agy")]
-    [InlineData("custom", "copilot", null)]
+    [InlineData("custom", "copilot", "copilot")]
     // command 自体がプリセットと異なる場合は対象外
     [InlineData("custom", @"C:\tools\claude.cmd", null)]
     [InlineData("custom", "my-own-agent", null)]
@@ -1565,7 +1565,7 @@ public class SettingsServiceTests : IDisposable
     [InlineData("claude", "claude-code")]
     [InlineData("codex", "codex")]
     [InlineData("agy", "agy")]
-    [InlineData("copilot", null)]
+    [InlineData("copilot", "copilot")]
     public void ResolveLauncherRateLimitAgentId_ShouldReturnMappedId_ForKnownPresets(string presetId, string? expectedRateLimitAgentId)
     {
         LauncherAgentDefinition definition = LauncherAgentCatalog.Find(presetId)!;
