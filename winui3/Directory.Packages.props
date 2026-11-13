@@ -16,7 +16,7 @@
     <PackageVersion Include="H.NotifyIcon.WinUI" Version="2.5.0-dev.2" />
     <PackageVersion Include="CommunityToolkit.WinUI.Controls.Sizers" Version="8.2.251219" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.4.0" />
-    <PackageVersion Include="System.Drawing.Common" Version="10.0.14" />
+    <PackageVersion Include="System.Drawing.Common" Version="10.0.15" />
     <PackageVersion Include="Tomlyn" Version="2.11.1" />
 
     <!-- Code Analysis -->
