@@ -218,10 +218,13 @@ internal static class ClaudeStreamJsonEventExtractor
 
     private static string? GetStringProperty(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out JsonElement value)
-            && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
+        if (element.TryGetProperty(propertyName, out JsonElement value)
+            && value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString();
+        }
+
+        return null;
     }
 }
 

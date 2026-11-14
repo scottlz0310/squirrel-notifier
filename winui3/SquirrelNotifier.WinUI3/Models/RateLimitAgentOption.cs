@@ -9,6 +9,9 @@ namespace SquirrelNotifier.WinUI3.Models;
 /// <summary>
 /// Settings の「レートリミット監視対象」チェックボックス一覧の表示用アイテム.
 /// </summary>
+/// <param name="id">エージェント ID.</param>
+/// <param name="displayName">表示名.</param>
+/// <param name="isAvailable">環境で利用可能かどうか.</param>
 internal sealed class RateLimitAgentOption(string id, string displayName, bool isAvailable) : INotifyPropertyChanged
 {
     private bool _isMonitored;
@@ -21,7 +24,11 @@ internal sealed class RateLimitAgentOption(string id, string displayName, bool i
 
     public bool IsMonitored
     {
-        get => _isMonitored;
+        get
+        {
+            return _isMonitored;
+        }
+
         set
         {
             if (_isMonitored != value)

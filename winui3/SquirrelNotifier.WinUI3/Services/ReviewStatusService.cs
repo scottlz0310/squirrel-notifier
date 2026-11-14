@@ -191,10 +191,13 @@ internal sealed class ReviewStatusService
                 _holds.Remove(eventId);
             }
 
-            string[] keysToRemove = [.. _current
-                .Where(pair => eventIds.Contains(pair.Value.EventId)
-                    || (_relatedEventIds.TryGetValue(pair.Key, out HashSet<string>? related) && related.Overlaps(eventIds)))
-                .Select(static pair => pair.Key)];
+            string[] keysToRemove =
+            [
+                .. _current
+                    .Where(pair => eventIds.Contains(pair.Value.EventId)
+                        || (_relatedEventIds.TryGetValue(pair.Key, out HashSet<string>? related) && related.Overlaps(eventIds)))
+                    .Select(static pair => pair.Key),
+            ];
             foreach (string key in keysToRemove)
             {
                 _current.Remove(key);
@@ -461,9 +464,12 @@ internal sealed class ReviewStatusService
         _finished.RemoveAll(entry => entry.FinishedAt < cutoff);
         if (_finished.Count > ReviewStatusDocumentBuilder.RecentLimit)
         {
-            ReviewStatusEntry[] keep = [.. _finished
-                .OrderByDescending(static entry => entry.FinishedAt)
-                .Take(ReviewStatusDocumentBuilder.RecentLimit)];
+            ReviewStatusEntry[] keep =
+            [
+                .. _finished
+                    .OrderByDescending(static entry => entry.FinishedAt)
+                    .Take(ReviewStatusDocumentBuilder.RecentLimit),
+            ];
             _finished.Clear();
             _finished.AddRange(keep);
         }

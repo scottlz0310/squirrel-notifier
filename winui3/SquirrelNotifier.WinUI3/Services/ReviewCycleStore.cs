@@ -60,10 +60,12 @@ internal sealed class ReviewCycleStore : IReviewCycleStore
             ReviewCycleDocument document = await LoadAsync(cancellationToken).ConfigureAwait(false);
             DateTimeOffset now = _timeProvider.GetUtcNow();
             bool changed = Cleanup(document, now);
-            ReviewCycleState? state = document.Cycles.TryGetValue(key, out PersistedReviewCycleState? persisted)
-                && persisted is not null
-                ? ToState(persisted)
-                : null;
+            ReviewCycleState? state = null;
+            if (document.Cycles.TryGetValue(key, out PersistedReviewCycleState? persisted)
+                && persisted is not null)
+            {
+                state = ToState(persisted);
+            }
 
             if (changed)
             {

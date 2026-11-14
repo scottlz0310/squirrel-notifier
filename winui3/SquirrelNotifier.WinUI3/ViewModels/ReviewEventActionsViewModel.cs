@@ -29,7 +29,10 @@ public sealed class ReviewEventActionsViewModel : INotifyPropertyChanged
     /// </summary>
     public bool IsReviewedActionVisible
     {
-        get => _isReviewedActionVisible;
+        get
+        {
+            return _isReviewedActionVisible;
+        }
 
         set
         {
