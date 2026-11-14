@@ -42,7 +42,7 @@ internal sealed record LauncherSelectionArguments(string? Model, string? Effort,
                 break;
             }
 
-            if (!argument.StartsWith('-'))
+            if (!argument.StartsWith('-', StringComparison.Ordinal))
             {
                 if (agentId == "codex" && argument is "exec" or "review")
                 {
@@ -51,7 +51,7 @@ internal sealed record LauncherSelectionArguments(string? Model, string? Effort,
 
                 if (argument == "resume")
                 {
-                    if (index + 1 < arguments.Count && !arguments[index + 1].StartsWith('-'))
+                    if (index + 1 < arguments.Count && !arguments[index + 1].StartsWith('-', StringComparison.Ordinal))
                     {
                         index++;
                     }
@@ -135,7 +135,7 @@ internal sealed record LauncherSelectionArguments(string? Model, string? Effort,
             }
             else if (separator < 0 && _valueOptions.Contains(option))
             {
-                if (!(agentId == "claude" && option is "--resume" or "-r" && index + 1 < arguments.Count && arguments[index + 1].StartsWith('-')))
+                if (!(agentId == "claude" && option is "--resume" or "-r" && index + 1 < arguments.Count && arguments[index + 1].StartsWith('-', StringComparison.Ordinal)))
                 {
                     index++;
                 }

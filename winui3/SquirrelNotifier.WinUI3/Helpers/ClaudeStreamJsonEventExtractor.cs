@@ -31,7 +31,7 @@ internal static class ClaudeStreamJsonEventExtractor
     {
         extraction = null;
 
-        if (line == null || !line.StartsWith('{'))
+        if (line == null || !line.StartsWith('{', StringComparison.Ordinal))
         {
             return false;
         }

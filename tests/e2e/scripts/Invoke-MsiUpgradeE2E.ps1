@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     製品識別子を隔離した実 MSI で、高 FileVersion からの更新と初回 WinUI 起動を検証します。
 #>
@@ -175,7 +175,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $run 'installer'), (Join-Path $run 'fixture'), $dataRoot, $ArtifactsDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot 'winui3\SquirrelNotifier.Installer\SquirrelNotifier.Installer.wixproj') -Destination $project
     Copy-Item -LiteralPath (Join-Path $repoRoot 'winui3\Directory.Packages.props') -Destination (Join-Path $run 'Directory.Packages.props')
-    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>' |
+    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework></PropertyGroup></Project>' |
         Set-Content -LiteralPath $fixtureProject -Encoding utf8NoBOM
     $definition = [IO.File]::ReadAllText((Join-Path $repoRoot 'winui3\SquirrelNotifier.Installer\Package.wxs'))
     $definition = $definition.Replace('F7E8D9C0-B1A2-4C3D-8E5F-9A7B6C4D3E2F', [guid]::NewGuid().ToString())
