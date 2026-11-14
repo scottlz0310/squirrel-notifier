@@ -25,7 +25,7 @@ internal static class CodexJsonEventExtractor
     {
         extraction = null;
 
-        if (line == null || !line.TrimStart().StartsWith('{'))
+        if (line == null || !line.TrimStart().StartsWith('{', StringComparison.Ordinal))
         {
             return false;
         }

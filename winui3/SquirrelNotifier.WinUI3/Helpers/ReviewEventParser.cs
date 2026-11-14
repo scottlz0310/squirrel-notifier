@@ -36,7 +36,7 @@ internal static class ReviewEventParser
                 PropertyNameCaseInsensitive = true,
             };
 
-            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            if (trimmed.StartsWith('[', StringComparison.Ordinal) && trimmed.EndsWith(']', StringComparison.Ordinal))
             {
                 List<ReviewCandidate>? candidates = JsonSerializer.Deserialize<List<ReviewCandidate>>(trimmed, options);
                 if (candidates == null)
@@ -62,7 +62,7 @@ internal static class ReviewEventParser
                     }
                 }
             }
-            else if (trimmed.StartsWith('{') && trimmed.EndsWith('}'))
+            else if (trimmed.StartsWith('{', StringComparison.Ordinal) && trimmed.EndsWith('}', StringComparison.Ordinal))
             {
                 // Try parsing as ReviewEvent first to check if it's already a fully built ReviewEvent
                 ReviewEvent? reviewEvent = JsonSerializer.Deserialize<ReviewEvent>(trimmed, options);

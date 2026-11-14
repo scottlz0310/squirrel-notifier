@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   ランブックの 1 シナリオ分の隔離環境を用意し、対象ビルドの Squirrel Notifier を起動する（#433）。
 .DESCRIPTION
@@ -61,10 +61,10 @@ if (-not $SkipBuild) {
     Invoke-Checked 'fake Gateway（headless runner）の build' { dotnet build $runnerProject -c Release -p:Platform=x64 -p:IncludeWindowsSdkBuildTools=false -v q -nologo }
 }
 
-$appPath = Resolve-BuildOutput $appProject 'SquirrelNotifier.WinUI3.exe' '*\bin\x64\Release\net10.0-windows*\SquirrelNotifier.WinUI3.exe'
-$launcherPath = Resolve-BuildOutput $launcherProject 'codex.exe' '*\x64\Release\net10.0\win-x64\codex.exe'
-$subscriberPath = Resolve-BuildOutput $subscriberProject 'resource-bridge-cli.exe' '*\x64\Release\net10.0\win-x64\resource-bridge-cli.exe'
-$gatewayHostPath = Resolve-BuildOutput $runnerProject 'SquirrelNotifier.HeadlessE2E.exe' '*\x64\Release\net10.0-windows*\win-x64\SquirrelNotifier.HeadlessE2E.exe'
+$appPath = Resolve-BuildOutput $appProject 'SquirrelNotifier.WinUI3.exe' '*\bin\x64\Release\net11.0-windows*\SquirrelNotifier.WinUI3.exe'
+$launcherPath = Resolve-BuildOutput $launcherProject 'codex.exe' '*\x64\Release\net11.0\win-x64\codex.exe'
+$subscriberPath = Resolve-BuildOutput $subscriberProject 'resource-bridge-cli.exe' '*\x64\Release\net11.0\win-x64\resource-bridge-cli.exe'
+$gatewayHostPath = Resolve-BuildOutput $runnerProject 'SquirrelNotifier.HeadlessE2E.exe' '*\x64\Release\net11.0-windows*\win-x64\SquirrelNotifier.HeadlessE2E.exe'
 
 # 古いビルドを起動すると、データディレクトリの切り替えが効かず実データへ書き込みうるため、起動前に止める
 $productVersion = (Get-Item -LiteralPath $appPath).VersionInfo.ProductVersion

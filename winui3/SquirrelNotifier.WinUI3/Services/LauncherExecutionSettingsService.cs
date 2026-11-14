@@ -97,7 +97,7 @@ internal sealed class LauncherExecutionSettingsService
             {
                 foreach (string settingsOverride in selection.SettingsOverrides)
                 {
-                    if (settingsOverride.StartsWith('{'))
+                    if (settingsOverride.StartsWith('{', StringComparison.Ordinal))
                     {
                         try
                         {

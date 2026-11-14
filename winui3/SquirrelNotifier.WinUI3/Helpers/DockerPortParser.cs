@@ -41,7 +41,7 @@ internal static class DockerPortParser
             return trimmedBase;
         }
 
-        if (!trimmedRoute.StartsWith('/'))
+        if (!trimmedRoute.StartsWith('/', StringComparison.Ordinal))
         {
             trimmedRoute = "/" + trimmedRoute;
         }

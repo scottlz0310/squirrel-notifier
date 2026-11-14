@@ -126,10 +126,10 @@ uninstall.cmd -KeepSettings
 
 ```powershell
 # ビルド後の実行ファイルを起動
-.\winui3\SquirrelNotifier.WinUI3\bin\x64\Release\net10.0-windows10.0.26100.0\SquirrelNotifier.WinUI3.exe
+.\winui3\SquirrelNotifier.WinUI3\bin\x64\Release\net11.0-windows10.0.26100.0\SquirrelNotifier.WinUI3.exe
 
 # トレイに最小化して起動
-.\winui3\SquirrelNotifier.WinUI3\bin\x64\Release\net10.0-windows10.0.26100.0\SquirrelNotifier.WinUI3.exe --tray
+.\winui3\SquirrelNotifier.WinUI3\bin\x64\Release\net11.0-windows10.0.26100.0\SquirrelNotifier.WinUI3.exe --tray
 ```
 
 または、Visual Studioから `F5` でデバッグ実行できます。

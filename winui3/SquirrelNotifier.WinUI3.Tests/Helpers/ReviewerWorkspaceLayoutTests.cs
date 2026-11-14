@@ -100,7 +100,7 @@ public class ReviewerWorkspaceLayoutTests
             ReviewerWorkspaceLayout.GetScratchRoot(settings), repository, prNumber);
         string clone = Path.Combine(scratch, "c-a8948205e564");
         string generated = Path.Combine(clone, "winui3", "SquirrelNotifier.WinUI3", "obj", "x64", "Release",
-            "net10.0-windows10.0.26100.0", "win-x64", "ReviewNotificationPopup.g.cs");
+            "net11.0-windows10.0.26100.0", "win-x64", "ReviewNotificationPopup.g.cs");
 
         generated.Length.Should().BeLessThan(260);
         clone.Length.Should().BeLessThan(110);

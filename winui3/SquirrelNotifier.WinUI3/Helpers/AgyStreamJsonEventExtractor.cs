@@ -28,7 +28,7 @@ internal static partial class AgyStreamJsonEventExtractor
     {
         extraction = null;
 
-        if (line == null || !line.TrimStart().StartsWith('{'))
+        if (line == null || !line.TrimStart().StartsWith('{', StringComparison.Ordinal))
         {
             return false;
         }

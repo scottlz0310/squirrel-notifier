@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- ターゲットフレームワークおよび .NET SDK を .NET 11（`net11.0` / `net11.0-windows10.0.26100.0`、SDK `11.0.100`）へ移行し、CI・リリースワークフローの SDK 指定を `global.json` 参照へ統一（`#546` / `#550` の前提対応）。
+
 ## [0.25.0] - 2026-11-05
 
 ### Added

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Phase 1 headless E2E を build、実行、cleanup、artifact 検査まで一貫して行います。
 #>
@@ -161,13 +161,13 @@ try {
         }
 
         $dummyLauncher = Get-ChildItem -LiteralPath (Join-Path (Split-Path $dummyProject) 'bin') -Recurse -Filter 'codex.exe' -File |
-            Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\codex.exe' } |
+            Where-Object { $_.FullName -like '*\x64\Release\net11.0\win-x64\codex.exe' } |
             Select-Object -First 1
         $subscriberFixture = Get-ChildItem -LiteralPath (Join-Path (Split-Path $subscriberProject) 'bin') -Recurse -Filter 'resource-bridge-cli.exe' -File |
-            Where-Object { $_.FullName -like '*\x64\Release\net10.0\win-x64\resource-bridge-cli.exe' } |
+            Where-Object { $_.FullName -like '*\x64\Release\net11.0\win-x64\resource-bridge-cli.exe' } |
             Select-Object -First 1
         $runner = Get-ChildItem -LiteralPath (Join-Path (Split-Path $runnerProject) 'bin') -Recurse -Filter 'SquirrelNotifier.HeadlessE2E.exe' -File |
-            Where-Object { $_.FullName -like '*\x64\Release\net10.0-windows10.0.26100.0\win-x64\SquirrelNotifier.HeadlessE2E.exe' } |
+            Where-Object { $_.FullName -like '*\x64\Release\net11.0-windows10.0.26100.0\win-x64\SquirrelNotifier.HeadlessE2E.exe' } |
             Select-Object -First 1
         if ($null -eq $dummyLauncher -or $null -eq $subscriberFixture -or $null -eq $runner) {
             throw 'build output から E2E runner、dummy launcher、または dummy subscriber を解決できません。'
