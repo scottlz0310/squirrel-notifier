@@ -28,6 +28,11 @@ internal sealed record UpdateDialogPresentation(
 
 /// <summary>更新チェックの結果解釈、スキップ設定、ダイアログ表示中を含む再入抑止を担当する.</summary>
 /// <remarks>UI スレッドから呼び出す。表示のため await 後も呼び出し元のコンテキストを維持する.</remarks>
+/// <param name="checkAsync">更新確認を実行する非同期デリゲート.</param>
+/// <param name="settingsService">スキップ設定等を保持する設定サービス.</param>
+/// <param name="loggingService">診断ログ出力サービス.</param>
+/// <param name="urlOpener">リリースページを開く URL オープナー.</param>
+/// <param name="timeout">更新確認のタイムアウト時間（省略時は既定値）.</param>
 internal sealed class UpdateCheckCoordinator(
     Func<CancellationToken, Task<AutoUpdateResult>> checkAsync,
     SettingsService settingsService,

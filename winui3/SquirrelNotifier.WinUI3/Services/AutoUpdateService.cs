@@ -74,10 +74,12 @@ internal sealed class AutoUpdateService : IDisposable
                     return await FailAsync("リリース情報のバージョンタグを解析できません。").ConfigureAwait(false);
                 }
 
-                string releaseUrl = doc.RootElement.TryGetProperty("html_url", out JsonElement htmlUrl)
-                    && htmlUrl.ValueKind == JsonValueKind.String
-                    ? htmlUrl.GetString() ?? string.Empty
-                    : string.Empty;
+                string releaseUrl = string.Empty;
+                if (doc.RootElement.TryGetProperty("html_url", out JsonElement htmlUrl)
+                    && htmlUrl.ValueKind == JsonValueKind.String)
+                {
+                    releaseUrl = htmlUrl.GetString() ?? string.Empty;
+                }
 
                 bool hasUpdate = latestVersion > _currentVersion;
                 if (hasUpdate && !Helpers.UrlValidator.IsHttpOrHttpsAbsoluteUrl(releaseUrl))

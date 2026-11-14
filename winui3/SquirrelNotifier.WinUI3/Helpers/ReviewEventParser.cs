@@ -127,8 +127,20 @@ internal static class ReviewEventParser
 
         string eventId = $"evt_{safeOwner}_{safeRepo}_{candidate.PrNumber}_{safeReason}_{safeQueuedAt}";
 
-        string source = !string.IsNullOrEmpty(sourceUri) ? sourceUri
-            : !string.IsNullOrEmpty(candidate.RequestedBy) ? candidate.RequestedBy : "thread-owl";
+        string source;
+        if (!string.IsNullOrEmpty(sourceUri))
+        {
+            source = sourceUri;
+        }
+        else if (!string.IsNullOrEmpty(candidate.RequestedBy))
+        {
+            source = candidate.RequestedBy;
+        }
+        else
+        {
+            source = "thread-owl";
+        }
+
         string message = !string.IsNullOrEmpty(candidate.RequestedBy)
             ? $"{candidate.Reason} by {candidate.RequestedBy}"
             : candidate.Reason;

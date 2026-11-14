@@ -93,7 +93,11 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
 
     public SubscriptionState State
     {
-        get => _state;
+        get
+        {
+            return _state;
+        }
+
         private set
         {
             if (_state != value)

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `StyleCop.Analyzers` 1.3.180 の厳格化された解析ルール（`SA1143`, `SA1413`, `SA1500`, `SA1504`, `SA1611`）に対応した（[#552](https://github.com/scottlz0310/squirrel-notifier/pull/552) 対応）。
+
 ## [0.25.0] - 2026-11-05
 
 ### Added

@@ -43,7 +43,11 @@ internal sealed class RateLimitInfo : INotifyPropertyChanged
     [JsonIgnore]
     public bool IsReminderScheduled
     {
-        get => _isReminderScheduled;
+        get
+        {
+            return _isReminderScheduled;
+        }
+
         set
         {
             if (_isReminderScheduled != value)

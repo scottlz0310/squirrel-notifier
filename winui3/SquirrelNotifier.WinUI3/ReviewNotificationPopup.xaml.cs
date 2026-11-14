@@ -44,12 +44,11 @@ public sealed partial class ReviewNotificationPopup : UserControl
         _reviewEvent = reviewEvent;
         TitleText.Text = ReviewNotificationFormatter.BuildSummary(reviewEvent, isAutoStarted, statusNote);
         MessageText.Text = reviewEvent.Message;
-        OpenPrButton.Visibility = UrlValidator.IsSafeGitHubUrl(
+        bool isSafeUrl = UrlValidator.IsSafeGitHubUrl(
             reviewEvent.PrUrl,
             reviewEvent.Repository,
-            reviewEvent.PrNumber)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+            reviewEvent.PrNumber);
+        OpenPrButton.Visibility = isSafeUrl ? Visibility.Visible : Visibility.Collapsed;
         LaunchReviewButton.Visibility = !isAutoStarted && ReviewNotificationPolicy.ShouldOfferReviewerAction(reviewEvent.Reason)
             ? Visibility.Visible
             : Visibility.Collapsed;
