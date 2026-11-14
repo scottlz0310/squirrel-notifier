@@ -42,17 +42,23 @@ internal static class ReviewStatusDocumentBuilder
 
         ReviewStatusEntry[] all = [.. entries];
 
-        ReviewStatusEntry[] running = [.. all
-            .Where(static entry => entry.State == ReviewStatusState.Running)
-            .OrderBy(static entry => entry.StartedAt ?? entry.ReceivedAt)
-            .ThenBy(static entry => entry.Key, StringComparer.Ordinal)];
+        ReviewStatusEntry[] running =
+        [
+            .. all
+                .Where(static entry => entry.State == ReviewStatusState.Running)
+                .OrderBy(static entry => entry.StartedAt ?? entry.ReceivedAt)
+                .ThenBy(static entry => entry.Key, StringComparer.Ordinal),
+        ];
 
         // 保留を観測した順に待ち順を付ける。保留を観測していない起動待ち（手動運用、または評価の途中）は、待ち順を持たない
-        ReviewStatusEntry[] waiting = [.. all
-            .Where(static entry => entry.State == ReviewStatusState.Waiting)
-            .OrderBy(static entry => entry.HoldSince ?? entry.ReceivedAt)
-            .ThenBy(static entry => entry.ReceivedAt)
-            .ThenBy(static entry => entry.Key, StringComparer.Ordinal)];
+        ReviewStatusEntry[] waiting =
+        [
+            .. all
+                .Where(static entry => entry.State == ReviewStatusState.Waiting)
+                .OrderBy(static entry => entry.HoldSince ?? entry.ReceivedAt)
+                .ThenBy(static entry => entry.ReceivedAt)
+                .ThenBy(static entry => entry.Key, StringComparer.Ordinal),
+        ];
 
         List<ReviewStatusItem> items = [];
         items.AddRange(running.Select(entry => ToItem(entry, environment, queuePosition: null)));
@@ -65,12 +71,15 @@ internal static class ReviewStatusDocumentBuilder
         }
 
         DateTimeOffset cutoff = now - RecentRetention;
-        ReviewStatusItem[] recent = [.. all
-            .Where(entry => entry.State == ReviewStatusState.Finished && entry.FinishedAt >= cutoff)
-            .OrderByDescending(static entry => entry.FinishedAt)
-            .ThenBy(static entry => entry.Key, StringComparer.Ordinal)
-            .Take(RecentLimit)
-            .Select(entry => ToItem(entry, environment, queuePosition: null))];
+        ReviewStatusItem[] recent =
+        [
+            .. all
+                .Where(entry => entry.State == ReviewStatusState.Finished && entry.FinishedAt >= cutoff)
+                .OrderByDescending(static entry => entry.FinishedAt)
+                .ThenBy(static entry => entry.Key, StringComparer.Ordinal)
+                .Take(RecentLimit)
+                .Select(entry => ToItem(entry, environment, queuePosition: null)),
+        ];
 
         return new ReviewStatusDocument(
             SchemaVersion,

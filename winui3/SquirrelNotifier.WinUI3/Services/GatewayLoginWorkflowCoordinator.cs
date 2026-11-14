@@ -56,6 +56,9 @@ internal delegate GatewayLoginDialogPort GatewayLoginDialogFactory(GatewayLoginD
 /// <c>ContentDialog</c> と UI スレッドへの配送は <see cref="GatewayLoginDialogPort"/> として受け取り、
 /// 認証 I/O は <see cref="IGatewayLoginService"/> に委譲する.
 /// </summary>
+/// <param name="gatewayLoginCoordinator">ログイン開始・完了の排他制御と結果文面生成を担うコーディネータ.</param>
+/// <param name="loginServiceFactory">認証セッションごとの <see cref="IGatewayLoginService"/> を生成するファクトリ.</param>
+/// <param name="loggingService">診断ログ出力サービス.</param>
 internal sealed class GatewayLoginWorkflowCoordinator(
     GatewayLoginCoordinator gatewayLoginCoordinator,
     Func<IGatewayLoginService> loginServiceFactory,
@@ -125,6 +128,8 @@ internal sealed class GatewayLoginWorkflowCoordinator(
 /// 1 回のログイン進行ダイアログの状態を保持する。イベント購読、キャンセル、Opened 前のクローズ保留、
 /// コピー用の承認情報を所有し、UI の具体的な要素には依存しない.
 /// </summary>
+/// <param name="loginService">Device flow 認証を実行するサービス.</param>
+/// <param name="loggingService">診断ログ出力サービス.</param>
 internal sealed class GatewayLoginDialogSession(IGatewayLoginService loginService, LoggingService loggingService)
 {
     private readonly DeferredDialogCloseGate _closeGate = new();

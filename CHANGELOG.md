@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ターゲットフレームワークおよび .NET SDK を .NET 11（`net11.0` / `net11.0-windows10.0.26100.0`、SDK `11.0.100`）へ移行し、CI・リリースワークフローの SDK 指定を `global.json` 参照へ統一（`#546` / `#550` の前提対応）。
 
+### Fixed
+
+- `StyleCop.Analyzers` 1.3.180 の厳格化された解析ルール（`SA1143`, `SA1413`, `SA1500`, `SA1504`, `SA1611`）に対応した（[#552](https://github.com/scottlz0310/squirrel-notifier/pull/552) 対応）。
+
 ## [0.25.0] - 2026-11-05
 
 ### Added

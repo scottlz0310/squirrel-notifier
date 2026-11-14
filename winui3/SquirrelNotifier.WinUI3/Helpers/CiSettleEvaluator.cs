@@ -47,13 +47,19 @@ internal static class CiSettleEvaluator
             .GroupBy(status => status.Context, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
 
-        List<(string Name, CheckOutcome Outcome)> entries = requiredChecks.Count > 0
-            ? [.. requiredChecks.Select(required => (required.Context, EvaluateRequired(required, latestRuns, latestStatuses)))]
-            :
+        List<(string Name, CheckOutcome Outcome)> entries;
+        if (requiredChecks.Count > 0)
+        {
+            entries = [.. requiredChecks.Select(required => (required.Context, EvaluateRequired(required, latestRuns, latestStatuses)))];
+        }
+        else
+        {
+            entries =
             [
                 .. latestRuns.Select(run => (run.Name, FromRun(run))),
                 .. latestStatuses.Values.Select(status => (status.Context, FromStatus(status))),
             ];
+        }
 
         string[] failed = DistinctNames(entries, CheckOutcome.Failed);
         if (failed.Length > 0)
