@@ -285,7 +285,7 @@ public sealed class RateLimitRefreshCoordinatorTests : IDisposable
     [Fact]
     public async Task RefreshAsync_ShouldAlertCodexFailure_WhenCommandIsNotFound()
     {
-        // codex は statusline を持たないため、ローカルファイルではなく App Server 経路の失敗を伝える（#163/#174）
+        // codex はローカル statusline ファイルではなく App Server 直読み経路を使うため、その失敗を伝える（#163/#174）
         RateLimitRefreshCoordinator coordinator = CreateCoordinator(commandResolver: _ => null);
 
         RateLimitRefreshResult result = await coordinator.RefreshAsync(

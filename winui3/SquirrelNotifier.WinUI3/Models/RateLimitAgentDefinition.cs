@@ -24,11 +24,12 @@ internal static class RateLimitAgentCatalog
         new RateLimitAgentDefinition("claude-code", "Claude Code", IsAvailable: true),
         new RateLimitAgentDefinition("agy", "Antigravity (agy)", IsAvailable: true),
 
-        // codex は statusline フックが外部コマンドに JSON を渡さないためローカルファイル経由は
-        // 不可能だが、App Server（account/rateLimits/read）経由で取得できる（spike #157 / #163）.
+        // codex は 0.171.0+ で TUI 向け外部 statusline（実験機能・stdio MCP provider）に対応したが、
+        // 非対話 exec 実行時の鮮度・Delta・Auto-Pause 自動解除および実験機能非依存のため、
+        // 引き続き App Server（account/rateLimits/read）直読みを正本とする（spike #157 / #163）.
         new RateLimitAgentDefinition("codex", "Codex", IsAvailable: true),
 
-        // copilot も statusline を持たないため、GitHub の quota（gh api copilot_internal/user、非公開 API）から取得する.
+        // copilot は statusline を持たないため、GitHub の quota（gh api copilot_internal/user、非公開 API）から取得する.
         new RateLimitAgentDefinition("copilot", "GitHub Copilot", IsAvailable: true),
     ];
 }

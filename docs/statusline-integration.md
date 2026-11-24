@@ -18,7 +18,7 @@ squirrel-notifier リポジトリ側は「ローカルファイルを読み取�
 |---|---|
 | `claude-code` | 対応可能（statusline フックあり） |
 | `agy`（Antigravity CLI） | 対応可能（statusline フックあり） |
-| `codex` | **statusline 連携は不要**（このページの手順の対象外）。Codex CLI の `tui.status_line` は外部コマンドに JSON を渡す仕組みがない（[openai/codex#16037](https://github.com/openai/codex/issues/16037)、[#20310](https://github.com/openai/codex/issues/20310)）が、squirrel-notifier が Codex App Server（`codex app-server` の `account/rateLimits/read`）から直接取得する（spike #157 / #163）。`codex` にログイン済みであれば追加設定なしで動作する。App Server 経由の snapshot は取得時刻が観測時刻になるため常に fresh であり、ヘッドレス実行でも Delta・Auto-Pause の解除判定が機能する |
+| `codex` | **statusline 連携は不要**（このページの手順の対象外）。Codex CLI `0.171.0` 以降では実験機能 Custom status line（`[features] tui_extensions_statusline = true`、stdio MCP provider + 構造化 `UiTree` JSON、[openai/codex#17827](https://github.com/openai/codex/issues/17827)）が提供されたが、レートリミット監視は引き続き **Codex App Server（`codex app-server` の `account/rateLimits/read`）直読みを正本**とする（spike #157 / #163）。外部ステータスラインは対話 TUI 専用かつ実験機能であるため、非対話 `codex exec` でも常に fresh で Delta・Auto-Pause 自動解除が機能する App Server 経路を維持し、二重管理を避ける。`codex` にログイン済みであれば追加設定なしで動作する |
 
 ## 書き出し先パス
 
@@ -124,7 +124,7 @@ Claude Code の `Stop` / `SessionEnd` hook は、ヘッドレス実行後の sna
 
 > 時刻・保留の理由・終了コード・鮮度（heartbeat）を含む詳細な公開状態は、別のファイル `review-status.json` にある（reviewed 側の待機などが読む。[docs/review-status-contract.md](review-status-contract.md)）。このサマリは、statusline が頻繁に読むため、小さく安定したまま保つ。
 
-squirrel-notifier は、reviewer 起動待ちの PR と実行中のレビューを statusline 側（agent-statusline 等）が読むためのサマリを書き出す。内部ストアの `review-cycles.json` は公開契約ではないため、statusline 側はこのサマリだけを読む。
+squirrel-notifier は、reviewer 起動待ちの PR と実行中のレビューを statusline 側（agent-statusline 等。Codex CLI `0.171.0+` の Custom status line を含む全対応クライアントで利用可能）が読むためのサマリを書き出す。内部ストアの `review-cycles.json` は公開契約ではないため、statusline 側はこのサマリまたは詳細な公開契約 `review-status.json`（[docs/review-status-contract.md](review-status-contract.md)）を読む。
 
 ```
 %LOCALAPPDATA%\SquirrelNotifier\statusline-summary.json
