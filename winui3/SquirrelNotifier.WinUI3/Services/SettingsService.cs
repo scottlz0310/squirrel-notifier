@@ -487,7 +487,7 @@ internal sealed class SettingsService
 
     /// <summary>
     /// 指定した launcher スロットの rateLimitAgentId を解決する（#149）。
-    /// レートリミット取得手段が無いプリセット（copilot 等）、および command がどのプリセットとも
+    /// rateLimitAgentId を持たないプリセット、および command がどのプリセットとも
     /// 一致しない場合は <see langword="null"/> を返す（Auto-Pause の gate 対象外として扱う #147）.
     /// </summary>
     /// <remarks>
