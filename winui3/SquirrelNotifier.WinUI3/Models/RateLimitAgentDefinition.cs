@@ -29,7 +29,7 @@ internal static class RateLimitAgentCatalog
         // 引き続き App Server（account/rateLimits/read）直読みを正本とする（spike #157 / #163）.
         new RateLimitAgentDefinition("codex", "Codex", IsAvailable: true),
 
-        // copilot も statusline を持たないため、GitHub の quota（gh api copilot_internal/user、非公開 API）から取得する.
+        // copilot は statusline を持たないため、GitHub の quota（gh api copilot_internal/user、非公開 API）から取得する.
         new RateLimitAgentDefinition("copilot", "GitHub Copilot", IsAvailable: true),
     ];
 }
