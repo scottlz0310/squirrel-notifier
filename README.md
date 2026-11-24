@@ -49,9 +49,9 @@ MCP リソースイベントを配信するゲートウェイサーバーです�
 ### 必要環境
 
 - Windows 11 24H2 (10.0.26100) 以降を推奨
-- .NET 10 SDK
+- .NET 11 SDK
 - Visual Studio 2026 (WinUI3ワークロード含む)
-- Windows App SDK 1.8
+- Windows App SDK 2.7
 
 ### ビルド方法
 
@@ -66,7 +66,7 @@ MCP リソースイベントを配信するゲートウェイサーバーです�
 dotnet build winui3\SquirrelNotifier.WinUI3.sln -c Release -p:Platform=x64
 ```
 
-> **注意:** .NET SDK 10.0.102（global.jsonで指定）が必要です。
+> **注意:** .NET SDK 11.0.100（global.jsonで指定）が必要です。
 
 ### インストール（自動起動設定）
 

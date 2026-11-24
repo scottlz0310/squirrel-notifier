@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Codex CLI `0.171.0+` の外部ステータスライン（実験機能・stdio MCP provider）対応に伴い、`docs/statusline-integration.md`・`docs/launcher-agent-presets.md` およびコードコメントの前提を同期し、レートリミット監視は引き続き `codex app-server` 直読みを正本とする設計根拠を明記した（#559）。
 - ターゲットフレームワークおよび .NET SDK を .NET 11（`net11.0` / `net11.0-windows10.0.26100.0`、SDK `11.0.100`）へ移行し、CI・リリースワークフローの SDK 指定を `global.json` 参照へ統一（`#546` / `#550` の前提対応）。
+- `README.md` および `.github/RELEASE_TEMPLATE.md` の前提条件（ランタイム・SDK・Windows App SDK）を `.NET 11` / `11.0.100` / `Windows App SDK 2.7` へ同期した。
 
 ### Fixed
 
