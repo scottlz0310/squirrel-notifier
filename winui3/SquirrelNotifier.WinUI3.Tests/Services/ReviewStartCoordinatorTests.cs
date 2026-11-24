@@ -4,6 +4,7 @@
 
 using System.Globalization;
 using FluentAssertions;
+using Moq;
 using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Models;
 using SquirrelNotifier.WinUI3.Services;
@@ -195,8 +196,9 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         FakeLauncherService launcher = new();
         SettingsService settingsService = CreateSettingsService();
 
-        // copilot はレートリミットを取得できないため gate 対象外（NotApplicable）になる
-        settingsService.Settings.ReviewerLauncherPresetId = "copilot";
+        // どのプリセットにも一致しないカスタム command は rateLimitAgentId を解決できず、gate 対象外（NotApplicable）になる
+        settingsService.Settings.ReviewerLauncherPresetId = "custom";
+        settingsService.Settings.ReviewerLauncherCommandPath = "unregistered-reviewer-cli";
         ReviewStartCoordinator coordinator = CreateCoordinator(launcher, settingsService);
 
         ReviewStartResult result = await coordinator.StartAsync(
@@ -1089,10 +1091,20 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             _logLines.Add(line);
             onLogAppended?.Invoke(line);
         };
+        // codex（App Server）と copilot（gh api）は外部プロセスへ到達するため、実環境の認証状態や
+        // 残量でテストの合否が変わらないよう、常に取得失敗を返す fake へ差し替える
+        Mock<IGhApiClient> ghApiClient = new();
+        ghApiClient
+            .Setup(a => a.GetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GhApiResult.Failure(null, "テスト用に gh を無効化しています"));
+        RateLimitSnapshotService rateLimitSnapshotService = new(
+            new RateLimitFileService(_workingDirectory),
+            new CodexAppServerRateLimitClient(new Mock<IProcessRunner>().Object),
+            new CopilotQuotaRateLimitClient(ghApiClient.Object));
         return new ReviewStartCoordinator(
             launcherService,
             settingsService ?? CreateSettingsService(),
-            new RateLimitSnapshotService(new RateLimitFileService(_workingDirectory)),
+            rateLimitSnapshotService,
             new AutoPauseGate(),
             _pendingQueue,
             _autoPauseResumeScheduler,
