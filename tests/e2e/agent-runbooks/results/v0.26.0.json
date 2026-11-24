@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "version": "0.26.0",
+  "testedCommit": "8afcbec41d6e357238a5ce0e79983d2f6f3cf241",
+  "productVersion": "0.26.0+8afcbec41d6e357238a5ce0e79983d2f6f3cf241",
+  "executedAt": "2026-11-24T23:54:00Z",
+  "executor": {
+    "agent": "claude-code",
+    "model": "claude-sonnet-5-5",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Home 10.0.26300",
+    "notes": "リリース準備 PR #563 のブランチ release/v0.26.0（HEAD 8afcbec）を checkout し、作業ツリーがクリーンな状態で実行。対象リリースの実装・PR 作成をしていない別セッション。ツールはすべて pwsh -File の別プロセスで実行し、ボタンは実マウス Click で押した。UIA 操作ごとに対象 PID の Responding=True を確認。全 run で isolated=true・realSettingsUnchanged=true・findings=[]。常駐中の既定インスタンス（PID 37820）は停止・変更せず稼働を継続。証跡の path は各 run ディレクトリ（%TEMP%\\squirrel-notifier-runbook\\20261125-0850xx-<scenario> など）からの相対パス。"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 90,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed.（run 20261125-085059-isolated-launch）"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "テスト用 PID 13264 の Path が run.appPath（bin\\x64\\Release 配下）に一致し、常駐 PID 37820（%LOCALAPPDATA%\\Programs\\SquirrelNotifier）は別プロセスで継続。隔離 data に settings.json（2083B）と logs/winui3.log（1454B）がある"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 65,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "TitleText=opened: fixture-owner/fixture-repository#307（許可された組に完全一致）。ReviewEventList に #307 / #308 / #309 の 3 件。#307 の実マウス Click 後に「reviewer 実行完了（結果未確認）」へ更新（run 20261125-085155-review-event-flow）"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/launcher.jsonl",
+          "summary": "arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectory=data\\launcher-workspace\\reviewer\\fixture-owner\\fixture-repository\\307"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "Review process finished. ExitCode=0 と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました（結果未確認）。の両行あり"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 66,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "StopButton の実マウス Click 後に StartButton が有効。PrReferenceBox へ fixture-owner/fixture-repository#320 を入力し、EnqueueReviewButton と PrimaryButton（購読を開始して登録）を Click 後に StopButton が有効（run 20261125-085311-register-while-stopped）"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/subscriber.jsonl",
+          "summary": "mode=call は 1 行。--tool enqueue_review、--url は fake Gateway（http://127.0.0.1:54542/）、--args={owner:fixture-owner,repo:fixture-repository,prNumber:320,reason:opened}、exitCode=0、hasAuthorization=false"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "State: Running（08:53:34）→ Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened) → enqueue_review call finished. ExitCode=0 の順"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    }
+  ]
+}
