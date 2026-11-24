@@ -26,6 +26,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
     private readonly INotificationService _notificationService;
     private readonly LauncherWorkingDirectoryResolver _workingDirectoryResolver;
     private readonly SecretMasker _secretMasker;
+    private readonly Func<string?> _codexStatuslineServerResolver;
     private readonly object _lock = new();
 
     private bool _isRunning;
@@ -68,7 +69,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         ISessionResumeStore? sessionResumeStore = null,
         IGhApiClient? ghApiClient = null,
         IRunnerEscalationReporter? escalationReporter = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        Func<string?>? codexStatuslineServerResolver = null)
     {
         _settingsService = settingsService;
         _loggingService = loggingService;
@@ -80,6 +82,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         _workingDirectoryResolver = workingDirectoryResolver ?? new LauncherWorkingDirectoryResolver(settingsService);
         _secretMasker = secretMasker ?? SecretMasker.CreateDefault();
         _sessionResumeStore = sessionResumeStore ?? new SessionResumeStore(settingsService.SettingsDirectory, _timeProvider);
+        _codexStatuslineServerResolver = codexStatuslineServerResolver ?? CodexStatuslineProviderReader.ReadConfiguredServer;
     }
 
     public async Task<LauncherResult> LaunchAsync(ReviewEvent reviewEvent, LauncherRole role, CancellationToken cancellationToken)
@@ -148,7 +151,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         ArgumentNullException.ThrowIfNull(reviewEvent);
         LauncherLaunchPlan plan = await CreateLaunchPlanAsync(reviewEvent, role, cancellationToken).ConfigureAwait(false);
         return new LauncherLaunchInfo(
-            LauncherArgumentBuilder.BuildArguments(plan.ArgumentsTemplate, reviewEvent, plan.SessionId?.ToString("D")),
+            BuildEffectiveArguments(plan, reviewEvent),
             _workingDirectoryResolver.Resolve(reviewEvent, role));
     }
 
@@ -164,12 +167,32 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         ArgumentNullException.ThrowIfNull(reviewEvent);
 
         LauncherLaunchPlan plan = await CreateLaunchPlanAsync(reviewEvent, role, cancellationToken).ConfigureAwait(false);
+        List<string> args = BuildEffectiveArguments(plan, reviewEvent);
+
+        return CommandLineFormatter.Format(plan.CommandPath, args);
+    }
+
+    // 起動・診断・コマンドコピーの引数組み立てを一箇所に集約する。
+    // Codex CLI 実行時は、TUI 専用 status_line_provider として登録された MCP サーバーが
+    // 非対話 exec でも起動して LLM へ不要なツールを露出するのを防ぐ（#560）.
+    private List<string> BuildEffectiveArguments(LauncherLaunchPlan plan, ReviewEvent reviewEvent)
+    {
         List<string> args = LauncherArgumentBuilder.BuildArguments(
             plan.ArgumentsTemplate,
             reviewEvent,
             plan.SessionId?.ToString("D"));
+        if (plan.NotificationPrompt is string notificationPrompt)
+        {
+            int promptIndex = plan.OutputFormat == LauncherOutputFormat.CodexJson ? args.Count - 1 : args.IndexOf("-p") + 1;
+            args[promptIndex] = notificationPrompt;
+        }
 
-        return CommandLineFormatter.Format(plan.CommandPath, args);
+        if (CodexStatuslineProviderReader.IsCodexCommand(plan.CommandPath))
+        {
+            args = CodexStatuslineProviderReader.PrependDisableConfigArgs(args, _codexStatuslineServerResolver());
+        }
+
+        return args;
     }
 
     private async Task RunSessionAsync(AgentExecutionSession session, ReviewEvent reviewEvent, LauncherRole role, CancellationTokenSource cts, CancellationToken cancellationToken)
@@ -376,15 +399,7 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             string workingDirectory = plan.WorkingDirectory ?? _workingDirectoryResolver.Resolve(reviewEvent, role);
 
             // .cmd / .bat シムの cmd.exe ラップと引数の安全な受け渡しは共通 factory に委ねる（#186）
-            List<string> args = LauncherArgumentBuilder.BuildArguments(
-                plan.ArgumentsTemplate,
-                reviewEvent,
-                plan.SessionId?.ToString("D"));
-            if (plan.NotificationPrompt is string notificationPrompt)
-            {
-                int promptIndex = plan.OutputFormat == LauncherOutputFormat.CodexJson ? args.Count - 1 : args.IndexOf("-p") + 1;
-                args[promptIndex] = notificationPrompt;
-            }
+            List<string> args = BuildEffectiveArguments(plan, reviewEvent);
 
             ProcessStartInfo psi = AgentProcessStartInfoFactory.Create(resolvedPath, args);
             psi.WorkingDirectory = workingDirectory;

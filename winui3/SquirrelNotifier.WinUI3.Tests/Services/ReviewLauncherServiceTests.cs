@@ -50,12 +50,24 @@ public class ReviewLauncherServiceTests : IDisposable
         ISessionResumeStore? sessionResumeStore = null,
         IGhApiClient? ghApiClient = null,
         IRunnerEscalationReporter? escalationReporter = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        Func<string?>? codexStatuslineServerResolver = null)
     {
         var client = new Mock<IGhApiClient>();
         client.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<string>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(GhApiResult.Success("""{"state":"open","headSha":"0123456789abcdef0123456789abcdef01234567","baseRef":"main"}"""));
-        return new ReviewLauncherService(_settingsService, _loggingService, processRunner, timeProvider, workingDirectoryResolver, secretMasker, sessionResumeStore, ghApiClient ?? client.Object, escalationReporter ?? Mock.Of<IRunnerEscalationReporter>(), notificationService);
+        return new ReviewLauncherService(
+            _settingsService,
+            _loggingService,
+            processRunner,
+            timeProvider,
+            workingDirectoryResolver,
+            secretMasker,
+            sessionResumeStore,
+            ghApiClient ?? client.Object,
+            escalationReporter ?? Mock.Of<IRunnerEscalationReporter>(),
+            notificationService,
+            codexStatuslineServerResolver ?? (static () => null));
     }
 
     private Mock<IProcessInstance> CreateMockProcess(int exitCode, string stdout, string stderr, int delayMs = 0)
@@ -620,6 +632,64 @@ public class ReviewLauncherServiceTests : IDisposable
         string commandLine = await service.BuildCommandLineAsync(reviewEvent, role);
 
         commandLine.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task CodexLaunch_ShouldPrependDisableConfigForConfiguredStatuslineProvider()
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find("codex")!;
+        ConfigureSettings(
+            reviewerCmd: definition.Command,
+            reviewerArgs: definition.ReviewerArgumentsTemplate,
+            reviewerPresetId: "codex");
+        ReviewEvent reviewEvent = CreateReviewEvent("codex-statusline-suppress");
+        reviewEvent.Reason = "opened";
+        reviewEvent.PrNumber = 123;
+        reviewEvent.PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/123";
+
+        ProcessStartInfo? capturedStartInfo = null;
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner
+            .Setup(r => r.Start(It.IsAny<ProcessStartInfo>()))
+            .Callback<ProcessStartInfo>(psi => capturedStartInfo = psi)
+            .Returns(CreateMockProcess(0, string.Empty, string.Empty).Object);
+
+        ReviewLauncherService service = CreateLauncher(
+            mockRunner.Object,
+            codexStatuslineServerResolver: static () => "agent-statusline");
+
+        LauncherLaunchInfo info = await service.GetLaunchInfoAsync(reviewEvent, LauncherRole.Reviewer);
+        string commandLine = await service.BuildCommandLineAsync(reviewEvent, LauncherRole.Reviewer);
+        LauncherResult launchResult = await service.LaunchAsync(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+
+        launchResult.Success.Should().BeTrue();
+        info.Arguments.Take(3).Should().Equal("-c", "mcp_servers.agent-statusline.enabled=false", "exec");
+        commandLine.Should().StartWith("codex -c mcp_servers.agent-statusline.enabled=false exec ");
+        capturedStartInfo.Should().NotBeNull();
+        GetLauncherArguments(capturedStartInfo!).Take(3).Should().Equal("-c", "mcp_servers.agent-statusline.enabled=false", "exec");
+    }
+
+    [Fact]
+    public async Task NonCodexLaunch_ShouldNotPrependCodexStatuslineDisableConfig()
+    {
+        LauncherAgentDefinition definition = LauncherAgentCatalog.Find("claude")!;
+        ConfigureSettings(
+            reviewerCmd: definition.Command,
+            reviewerArgs: definition.ReviewerArgumentsTemplate,
+            reviewerPresetId: "claude");
+        ReviewEvent reviewEvent = CreateReviewEvent("claude-no-codex-override");
+        reviewEvent.Reason = "opened";
+        reviewEvent.PrNumber = 123;
+        reviewEvent.PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/123";
+
+        ReviewLauncherService service = CreateLauncher(
+            new Mock<IProcessRunner>().Object,
+            codexStatuslineServerResolver: static () => "agent-statusline");
+
+        LauncherLaunchInfo info = await service.GetLaunchInfoAsync(reviewEvent, LauncherRole.Reviewer);
+
+        info.Arguments.Should().NotContain("-c");
+        info.Arguments.Should().NotContain("mcp_servers.agent-statusline.enabled=false");
     }
 
     [Theory]
