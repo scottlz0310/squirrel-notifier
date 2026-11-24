@@ -38,6 +38,7 @@ Claude Code 以外のエージェント（Codex / Antigravity など）も、こ
 - 購読先: fake Gateway（loopback）
 - subscriber: dummy。PR #307〜#309 の固定イベントを約 5 秒ごとに返す
 - reviewer / reviewed: dummy launcher（`codex.exe` という名前の fixture）。起動の記録を `observations/launcher.jsonl` に残す
+- Codex の設定: `CODEX_HOME` を run ディレクトリ内の空ディレクトリへ差し替える。アプリは `codex.exe` を Codex CLI と見なし、`$CODEX_HOME/config.toml` の内容で起動引数を変えるため（#560）、実行マシンの `~/.codex/config.toml` が合否に影響しないようにする
 
 ツールは必ず `pwsh -File` で別プロセスとして実行してください。環境変数を呼び出し元のシェルへ残さないためです。
 

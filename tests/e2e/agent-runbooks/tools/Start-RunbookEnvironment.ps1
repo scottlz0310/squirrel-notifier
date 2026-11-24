@@ -131,6 +131,12 @@ $env:SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_TOKEN_CACHE_PATH = Join-Path $runDirectory
 $env:SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_FLOW = 'review-event-flow'
 $env:SQUIRREL_NOTIFIER_E2E_SUBSCRIBER_DELAY_MS = [string]$SubscriberDelayMs
 $env:SQUIRREL_NOTIFIER_E2E_DUMMY_OBSERVATION_PATH = Join-Path $observationDirectory 'launcher.jsonl'
+# dummy launcher は codex.exe という名前のため、アプリは Codex CLI として扱い、実行マシンの
+# $CODEX_HOME/config.toml（既定 ~/.codex/config.toml）を読んで起動引数を変える（#560）。
+# 実機の設定で合否が変わらないよう、空の CODEX_HOME を run ディレクトリに用意して差し替える
+$codexHome = Join-Path $runDirectory 'codex-home'
+New-Item -ItemType Directory -Path $codexHome -Force | Out-Null
+$env:CODEX_HOME = $codexHome
 # 利用者のシェルに gateway の token があっても、テスト用インスタンスへ渡さない
 Remove-Item Env:\MCP_PROBE_AUTH_TOKEN -ErrorAction SilentlyContinue
 $app = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -PassThru
