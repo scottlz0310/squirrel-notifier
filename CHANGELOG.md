@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 非対話 `codex exec` / `codex exec resume` 起動時に、`$CODEX_HOME/config.toml`（既定 `~/.codex/config.toml`）の `[tui] status_line_provider` に登録された TUI 専用 MCP サーバーを `-c mcp_servers.<name>.enabled=false` で実行時抑止し、不要な子プロセス起動と reviewer LLM へのツール露出を防ぐようにした（#560）。
 - `StyleCop.Analyzers` 1.3.180 の厳格化された解析ルール（`SA1143`, `SA1413`, `SA1500`, `SA1504`, `SA1611`）に対応した（[#552](https://github.com/scottlz0310/squirrel-notifier/pull/552) 対応）。
 
 ## [0.25.0] - 2026-11-05

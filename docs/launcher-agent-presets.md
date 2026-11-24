@@ -99,6 +99,14 @@ CLI は安全な `.cmd` / `.bat` factory で起動し、`call --args-stdin --jso
 
 codex 等の非対話 print / exec モードは、プロンプトを引数で受け取っても標準入力の EOF を待って停止することがある（[openai/codex#20919](https://github.com/openai/codex/issues/20919)）。`ReviewLauncherService` は起動直後に標準入力を即座に閉じ、EOF を通知することでこれを回避している。
 
+## Codex の TUI 専用 `status_line_provider` MCP サーバー抑止（#560）
+
+Codex CLI `0.171.0+` の Custom status line（実験機能 `tui_extensions_statusline`）は、ユーザー設定（`$CODEX_HOME/config.toml`、既定 `~/.codex/config.toml`）に `[mcp_servers.<name>]` と `[tui] status_line_provider = { server = "<name>", tool = "..." }` として登録される。非対話の `codex exec` でもこの MCP サーバーが自動起動して LLM へ不要なツール定義が露出するため、`ReviewLauncherService` は Codex 起動時に `$CODEX_HOME/config.toml` を読み取り専用で参照し、登録されたプロバイダーサーバー名（特定ツール名をハードコードしない）に対して実行時オーバーライド `-c mcp_servers.<name>.enabled=false` を先頭付与する。
+
+- `~/.codex/config.toml` は書き換えず、既存プリセット一致判定やカスタム設定も変更しない
+- 既に引数へ同一サーバーの `mcp_servers.<name>.enabled=` が指定されている場合は上書きしない
+- 設定ファイル不在・`"default"` 指定・不正なサーバー名の場合は何も付与しない
+
 ## Codex reviewerのセッション起動競合
 
 標準Codexプリセットのreviewerがresume対象IDの`thread-store conflict`（`already has an active writer`）で永続化初期化に失敗し、stdoutがまだ空の場合は、保存済みIDの破棄成功後にHEADとlauncher設定を確認し、同じcycle・roundで新規セッションを1回だけ起動する。ログと実行画面には競合と復旧操作を表示する。別プロセスが開いている既存セッション自体は終了しない。
