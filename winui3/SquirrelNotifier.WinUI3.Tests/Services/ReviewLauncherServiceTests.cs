@@ -666,10 +666,7 @@ public class ReviewLauncherServiceTests : IDisposable
         info.Arguments.Take(3).Should().Equal("-c", "mcp_servers.agent-statusline.enabled=false", "exec");
         commandLine.Should().StartWith("codex -c mcp_servers.agent-statusline.enabled=false exec ");
         capturedStartInfo.Should().NotBeNull();
-        if (capturedStartInfo!.ArgumentList.Count > 0 && capturedStartInfo.ArgumentList[0] == "-c")
-        {
-            capturedStartInfo.ArgumentList.Take(3).Should().Equal("-c", "mcp_servers.agent-statusline.enabled=false", "exec");
-        }
+        GetLauncherArguments(capturedStartInfo!).Take(3).Should().Equal("-c", "mcp_servers.agent-statusline.enabled=false", "exec");
     }
 
     [Fact]

@@ -6,6 +6,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace SquirrelNotifier.WinUI3.Helpers;
 
@@ -24,9 +26,6 @@ namespace SquirrelNotifier.WinUI3.Helpers;
 internal static class CodexStatuslineProviderReader
 {
     private static readonly Regex _safeServerNameRegex = new(@"^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
-    private static readonly Regex _inlineServerRegex = new(
-        @"(?:^|[,\{\s])server\s*=\s*(?:""([^""\r\n]+)""|'([^'\r\n]+)')",
-        RegexOptions.Compiled);
 
     /// <summary>
     /// 指定コマンドが Codex CLI（<c>codex</c> / <c>codex.exe</c> / <c>codex.cmd</c> / <c>codex.bat</c> 等）かを判定する.
@@ -48,7 +47,8 @@ internal static class CodexStatuslineProviderReader
     /// <summary>
     /// 現在の環境の <c>$CODEX_HOME/config.toml</c>（未設定時は <c>~/.codex/config.toml</c>）から
     /// <c>[tui] status_line_provider</c> の MCP サーバー名を読み取る。
-    /// ファイル不在・読み取りエラー・未設定・<c>"default"</c>・不正形式の場合は <see langword="null"/> を返す.
+    /// ファイル不在・読み取りエラー・未設定・<c>"default"</c>・対応する <c>[mcp_servers.&lt;name&gt;]</c> 不在・
+    /// 不正形式の場合は <see langword="null"/> を返す.
     /// </summary>
     /// <returns>安全な MCP サーバー名。該当なしの場合は <see langword="null"/>.</returns>
     public static string? ReadConfiguredServer()
@@ -105,8 +105,10 @@ internal static class CodexStatuslineProviderReader
     }
 
     /// <summary>
-    /// TOML テキストから <c>[tui] status_line_provider</c>（インラインテーブル形式および
-    /// <c>[tui.status_line_provider]</c> サブテーブル形式の両方）の <c>server</c> 値を抽出する.
+    /// TOML テキストを <see cref="TomlSerializer"/> で解析し、<c>[tui] status_line_provider</c> の <c>server</c> 値を抽出する。
+    /// 孤立設定に対して <c>-c mcp_servers.&lt;name&gt;.enabled=false</c> を渡すと Codex CLI が
+    /// <c>invalid transport</c> で起動エラーとなるため、同一設定内に <c>[mcp_servers.&lt;name&gt;]</c> が
+    /// 定義されている場合のみ対象とする.
     /// </summary>
     /// <param name="tomlContent"><c>config.toml</c> の内容.</param>
     /// <param name="serverName">抽出できた安全なサーバー名.</param>
@@ -119,45 +121,32 @@ internal static class CodexStatuslineProviderReader
             return false;
         }
 
-        string currentSection = string.Empty;
-        string? extracted = null;
-
-        using var reader = new StringReader(tomlContent);
-        while (reader.ReadLine() is string rawLine)
+        TomlTable? root;
+        try
         {
-            string line = StripTomlComment(rawLine).Trim();
-            if (line.Length == 0)
-            {
-                continue;
-            }
-
-            if (line.StartsWith('[', StringComparison.Ordinal)
-                && line.EndsWith(']', StringComparison.Ordinal)
-                && !line.StartsWith("[[", StringComparison.Ordinal))
-            {
-                currentSection = line[1..^1].Trim();
-                continue;
-            }
-
-            if (string.Equals(currentSection, "tui", StringComparison.Ordinal))
-            {
-                if (TrySplitKeyValue(line, out string key, out string value)
-                    && string.Equals(key, "status_line_provider", StringComparison.Ordinal))
-                {
-                    extracted = TryExtractInlineTableServer(value);
-                }
-            }
-            else if (string.Equals(currentSection, "tui.status_line_provider", StringComparison.Ordinal))
-            {
-                if (TrySplitKeyValue(line, out string key, out string value)
-                    && string.Equals(key, "server", StringComparison.Ordinal))
-                {
-                    extracted = TryUnquoteTomlString(value);
-                }
-            }
+            root = TomlSerializer.Deserialize<TomlTable>(tomlContent);
+        }
+        catch (TomlException)
+        {
+            return false;
         }
 
-        if (extracted is null || !_safeServerNameRegex.IsMatch(extracted))
+        if (root is null
+            || !root.TryGetValue("tui", out object? tuiObj)
+            || tuiObj is not TomlTable tuiTable
+            || !tuiTable.TryGetValue("status_line_provider", out object? providerObj)
+            || providerObj is not TomlTable providerTable
+            || !providerTable.TryGetValue("server", out object? serverObj)
+            || serverObj is not string extracted
+            || !_safeServerNameRegex.IsMatch(extracted))
+        {
+            return false;
+        }
+
+        if (!root.TryGetValue("mcp_servers", out object? serversObj)
+            || serversObj is not TomlTable serversTable
+            || !serversTable.TryGetValue(extracted, out object? serverConfigObj)
+            || serverConfigObj is not TomlTable)
         {
             return false;
         }
@@ -168,8 +157,8 @@ internal static class CodexStatuslineProviderReader
 
     /// <summary>
     /// 既存の起動引数へ、対象 statusline MCP サーバーを無効化するトップレベル <c>-c</c> 引数を先頭付与する。
-    /// サーバー名が未設定・不正、または既存引数に同一サーバーの <c>mcp_servers.&lt;name&gt;.enabled=</c> が
-    /// 既に含まれる場合は変更せず元の引数を返す.
+    /// サーバー名が未設定・不正、または既存引数に同一サーバーの <c>mcp_servers.&lt;name&gt;.enabled</c> が
+    /// <c>-c</c> / <c>--config</c> で既に指定されている場合は変更せず元の引数を返す.
     /// </summary>
     /// <param name="existingArgs">既存の引数リスト.</param>
     /// <param name="serverName">抑止対象の MCP サーバー名.</param>
@@ -179,22 +168,12 @@ internal static class CodexStatuslineProviderReader
         ArgumentNullException.ThrowIfNull(existingArgs);
 
         var result = new List<string>(existingArgs.Count + 2);
-        if (string.IsNullOrWhiteSpace(serverName) || !_safeServerNameRegex.IsMatch(serverName))
+        if (string.IsNullOrWhiteSpace(serverName)
+            || !_safeServerNameRegex.IsMatch(serverName)
+            || HasServerEnabledOverride(existingArgs, serverName))
         {
             result.AddRange(existingArgs);
             return result;
-        }
-
-        string keyPrefix = $"mcp_servers.{serverName}.enabled=";
-        string quotedKeyPrefix = $"mcp_servers.\"{serverName}\".enabled=";
-        foreach (string arg in existingArgs)
-        {
-            if (arg.StartsWith(keyPrefix, StringComparison.Ordinal)
-                || arg.StartsWith(quotedKeyPrefix, StringComparison.Ordinal))
-            {
-                result.AddRange(existingArgs);
-                return result;
-            }
         }
 
         result.Add("-c");
@@ -203,84 +182,57 @@ internal static class CodexStatuslineProviderReader
         return result;
     }
 
-    private static string? TryExtractInlineTableServer(string value)
+    private static bool HasServerEnabledOverride(IReadOnlyList<string> arguments, string serverName)
     {
-        string trimmed = value.Trim();
-        if (!trimmed.StartsWith('{', StringComparison.Ordinal) || !trimmed.EndsWith('}', StringComparison.Ordinal))
+        string bareKey = $"mcp_servers.{serverName}.enabled";
+        string doubleQuotedKey = $"mcp_servers.\"{serverName}\".enabled";
+        string singleQuotedKey = $"mcp_servers.'{serverName}'.enabled";
+
+        for (int i = 0; i < arguments.Count; i++)
         {
-            // "default" や不正形式は抑止対象なしとして扱う
-            return null;
-        }
-
-        Match match = _inlineServerRegex.Match(trimmed);
-        if (!match.Success)
-        {
-            return null;
-        }
-
-        return match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
-    }
-
-    private static string? TryUnquoteTomlString(string value)
-    {
-        string trimmed = value.Trim();
-        if (trimmed.Length < 2)
-        {
-            return null;
-        }
-
-        char quote = trimmed[0];
-        if ((quote == '"' || quote == '\'') && trimmed[^1] == quote)
-        {
-            return trimmed[1..^1];
-        }
-
-        return null;
-    }
-
-    private static bool TrySplitKeyValue(string line, out string key, out string value)
-    {
-        int eqIndex = line.IndexOf('=', StringComparison.Ordinal);
-        if (eqIndex <= 0)
-        {
-            key = string.Empty;
-            value = string.Empty;
-            return false;
-        }
-
-        key = line[..eqIndex].Trim();
-        value = line[(eqIndex + 1)..].Trim();
-        return key.Length > 0 && value.Length > 0;
-    }
-
-    // 引用符の外側の '#' 以降をコメントとして取り除く
-    private static string StripTomlComment(string line)
-    {
-        bool inDouble = false;
-        bool inSingle = false;
-        for (int i = 0; i < line.Length; i++)
-        {
-            char c = line[i];
-            if (c == '\\' && inDouble && i + 1 < line.Length)
+            string arg = arguments[i];
+            if (arg == "--")
             {
-                i++;
+                break;
+            }
+
+            string? configValue = null;
+            if (arg is "-c" or "--config")
+            {
+                if (i + 1 < arguments.Count)
+                {
+                    configValue = arguments[++i];
+                }
+            }
+            else if (arg.StartsWith("-c=", StringComparison.Ordinal))
+            {
+                configValue = arg[3..];
+            }
+            else if (arg.StartsWith("--config=", StringComparison.Ordinal))
+            {
+                configValue = arg[9..];
+            }
+
+            if (configValue is null)
+            {
                 continue;
             }
 
-            if (c == '"' && !inSingle)
+            int equalsIndex = configValue.IndexOf('=', StringComparison.Ordinal);
+            if (equalsIndex <= 0)
             {
-                inDouble = !inDouble;
+                continue;
             }
-            else if (c == '\'' && !inDouble)
+
+            string key = configValue[..equalsIndex].Trim();
+            if (string.Equals(key, bareKey, StringComparison.Ordinal)
+                || string.Equals(key, doubleQuotedKey, StringComparison.Ordinal)
+                || string.Equals(key, singleQuotedKey, StringComparison.Ordinal))
             {
-                inSingle = !inSingle;
-            }
-            else if (c == '#' && !inDouble && !inSingle)
-            {
-                return line[..i];
+                return true;
             }
         }
 
-        return line;
+        return false;
     }
 }
