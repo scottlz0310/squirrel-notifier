@@ -216,7 +216,7 @@ internal sealed class RateLimitRefreshCoordinator
         {
             if (agent.Id is RateLimitSnapshotService.CodexAgentId or RateLimitSnapshotService.CopilotAgentId)
             {
-                // codex は App Server、copilot は GitHub の quota API から取得する（statusline を持たないため）
+                // codex は App Server、copilot は GitHub の quota API から取得する（ローカル statusline ファイルではなく直接取得経路を使うため）
                 RateLimitSnapshot? snapshot;
                 string failureMessage;
                 if (agent.Id == RateLimitSnapshotService.CodexAgentId)
