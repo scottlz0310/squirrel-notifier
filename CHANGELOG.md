@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-24
+
 ### Changed
 
 - Codex CLI `0.171.0+` の外部ステータスライン（実験機能・stdio MCP provider）対応に伴い、`docs/statusline-integration.md`・`docs/launcher-agent-presets.md` およびコードコメントの前提を同期し、レートリミット監視は引き続き `codex app-server` 直読みを正本とする設計根拠を明記した（#559）。
 - ターゲットフレームワークおよび .NET SDK を .NET 11（`net11.0` / `net11.0-windows10.0.26100.0`、SDK `11.0.100`）へ移行し、CI・リリースワークフローの SDK 指定を `global.json` 参照へ統一（`#546` / `#550` の前提対応）。
+- `README.md` および `.github/RELEASE_TEMPLATE.md` の前提条件（ランタイム・SDK・Windows App SDK）を `.NET 11` / `11.0.100` / `Windows App SDK 2.7` へ同期した。
 
 ### Fixed
 
@@ -689,7 +692,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.2...v0.24.0
 [0.23.2]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.1...v0.23.2

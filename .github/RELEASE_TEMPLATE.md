@@ -27,7 +27,7 @@ install.cmd -StartMinimized
 | 項目 | 内容 |
 |------|------|
 | OS | Windows 11 24H2 (10.0.26100) 以降 |
-| ランタイム | .NET 10（self-contained のためインストール不要） |
+| ランタイム | .NET 11（self-contained のためインストール不要） |
 | 外部ツール | `resource-bridge-cli` v0.7.0以降、Node >=26.10.0（MCP 購読機能を使用する場合） |
 
 > **注意:** `resource-bridge-cli` は本アプリには同梱されていません。
