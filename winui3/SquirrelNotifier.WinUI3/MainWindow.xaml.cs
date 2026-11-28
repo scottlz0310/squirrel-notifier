@@ -38,7 +38,7 @@ internal sealed partial class MainWindow : Window
     private readonly IClipboardService _clipboardService;
     private readonly CopyFeedbackCoordinator _copyFeedbackCoordinator;
     private readonly IWindowIconService _windowIconService;
-    private readonly ITaskSchedulerService _taskSchedulerService;
+    private readonly IAutoStartService _autoStartService;
     private readonly ReviewRegistrationCoordinator _reviewRegistrationCoordinator;
     private readonly ReviewEventCleanupCoordinator _reviewEventCleanupCoordinator;
     private readonly ReviewCycleCoordinator _reviewCycleCoordinator;
@@ -92,7 +92,7 @@ internal sealed partial class MainWindow : Window
         IFileOpener fileOpener,
         IClipboardService clipboardService,
         IWindowIconService windowIconService,
-        ITaskSchedulerService taskSchedulerService,
+        IAutoStartService autoStartService,
         ReviewRegistrationService reviewRegistrationService,
         IRateLimitReminderService rateLimitReminderService,
         RateLimitFileService rateLimitFileService,
@@ -132,7 +132,7 @@ internal sealed partial class MainWindow : Window
             autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, _urlOpener);
         _notificationService = notificationService;
         _launcherService = launcherService;
-        _taskSchedulerService = taskSchedulerService;
+        _autoStartService = autoStartService;
         _reviewRegistrationCoordinator = new(reviewRegistrationService);
         _reviewEventCleanupCoordinator = reviewEventCleanupCoordinator;
         _reviewCycleCoordinator = reviewCycleCoordinator;
@@ -150,7 +150,7 @@ internal sealed partial class MainWindow : Window
         _settingsCoordinator = new SettingsCoordinator(_settingsService);
         _settingsInputCoordinator = new SettingsInputCoordinator(_settingsService, _settingsCoordinator);
         _launcherPresetCoordinator = new LauncherPresetCoordinator();
-        _autoStartCoordinator = new AutoStartCoordinator(_taskSchedulerService);
+        _autoStartCoordinator = new AutoStartCoordinator(_autoStartService);
         _gatewayLoginWorkflowCoordinator = new GatewayLoginWorkflowCoordinator(
             _gatewayLoginCoordinator,
             () => new McpLoginService(_settingsService, _loggingService),

@@ -58,7 +58,12 @@ internal static class Program
         AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
-        if (DecideRedirection())
+        // パッケージ版の起動引数は、プロセスの最初の呼び出しでだけ取得できる。2 回目以降は起動種別が
+        // Launch になりうるため、ここで 1 回だけ取得して引き継ぐ（#569）。
+        AppActivationArguments activationArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
+        ExtendedActivationKind activationKind = activationArgs.Kind;
+
+        if (DecideRedirection(activationArgs))
         {
             return;
         }
@@ -67,13 +72,12 @@ internal static class Program
         {
             var context = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
             SynchronizationContext.SetSynchronizationContext(context);
-            _ = new App();
+            _ = new App(activationKind);
         });
     }
 
-    private static bool DecideRedirection()
+    private static bool DecideRedirection(AppActivationArguments activationArgs)
     {
-        AppActivationArguments activationArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
         AppInstance mainInstance = AppInstance.FindOrRegisterForKey(AppDataPaths.SingleInstanceKey(_singleInstanceKey));
 
         if (mainInstance.IsCurrent)
