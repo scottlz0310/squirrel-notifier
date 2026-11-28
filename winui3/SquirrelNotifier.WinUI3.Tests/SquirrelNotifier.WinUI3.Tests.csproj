@@ -57,6 +57,11 @@
     <None Include="TestData\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- MSIX マニフェストとアプリのコードの整合をテストが検証する -->
+  <ItemGroup>
+    <None Include="..\SquirrelNotifier.Msix\AppxManifest.xml" Link="Packaging\AppxManifest.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\SquirrelNotifier.WinUI3\SquirrelNotifier.WinUI3.csproj" />
   </ItemGroup>

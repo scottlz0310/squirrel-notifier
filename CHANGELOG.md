@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MSIX パッケージを生成する `scripts/Build-MsixPackage.ps1` とマニフェストを追加した。`%LocalAppData%\SquirrelNotifier` は仮想化から除外し、公開契約のファイルをパッケージ外から読めるようにする。配布物は引き続き MSI で、MSIX はリリースに含まれない（[#569](https://github.com/scottlz0310/squirrel-notifier/issues/569)）。
+
 ## [0.26.1] - 2026-11-28
 
 ### Fixed

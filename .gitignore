@@ -218,6 +218,7 @@ obj/
 *.user
 *.userosscache
 AppPackages/
+msix-output/
 BundleArtifacts/
 [Bb]in/
 [Ll]og/

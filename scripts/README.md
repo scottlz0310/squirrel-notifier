@@ -5,6 +5,10 @@
 - `uninstall.ps1`: タスクスケジューラ登録を解除します。`-KeepSettings` または `-NonInteractive` を付けると設定ファイルを残します。`-NonInteractive` は実行中のアプリを停止せず失敗します。
 - `create-shortcuts.ps1`: スタートメニュー/デスクトップにショートカットを作成します（`-Tray` でトレイ起動用、`-Desktop` でデスクトップにも配置）。
 
+## MSIX（移行中、#569）
+- `Build-MsixPackage.ps1`: アプリのビルド出力から MSIX を生成します。手順は [MSIX パッケージ](../docs/msix.md) を参照してください。
+- `Get-ProjectVersion.ps1`: csproj の `<Version>` を取得します。MSI と MSIX の生成で共有します。
+
 ## 開発用フック
 - `scripts/hooks/pre-commit-format.ps1`: コミット前フォーマットチェック。
 - `scripts/hooks/pre-commit-build.ps1`: コミット前ビルドチェック。

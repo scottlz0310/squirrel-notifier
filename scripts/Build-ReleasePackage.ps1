@@ -24,18 +24,8 @@ $publishDirectory = Join-Path $outputRoot "publish\$Platform"
 $msiDirectory = Join-Path $outputRoot "msi\$Platform"
 $bundleDirectory = Join-Path $outputRoot "installer\$Platform"
 
-function Get-ProjectVersion {
-    [xml]$project = Get-Content -LiteralPath $projectPath -Raw -Encoding utf8
-    $versions = @($project.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-    if ($versions.Count -ne 1) {
-        throw 'csproj から release version を一意に取得できません。'
-    }
-
-    return [string]$versions[0]
-}
-
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Get-ProjectVersion
+    $Version = & (Join-Path $PSScriptRoot 'Get-ProjectVersion.ps1') -ProjectPath $projectPath
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "release version が SemVer の 3 要素形式ではありません: $Version"

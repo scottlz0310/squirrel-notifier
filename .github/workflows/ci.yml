@@ -59,6 +59,14 @@ jobs:
           /p:TreatWarningsAsErrors=true
           /p:RunCodeAnalysis=true
 
+      # MSIX マニフェストを実際の makeappx に通す（#569）。署名と配布はしない。
+      - name: Verify MSIX packaging
+        shell: pwsh
+        run: |
+          $exe = @(Get-ChildItem -Path winui3/SquirrelNotifier.WinUI3/bin/x64/Release -Filter SquirrelNotifier.WinUI3.exe -Recurse)
+          if ($exe.Count -ne 1) { throw "ビルド出力の実行ファイルを一意に特定できません: $($exe.Count) 件" }
+          ./scripts/Build-MsixPackage.ps1 -PayloadDirectory $exe[0].DirectoryName -OutputDirectory ./msix-output
+
       - name: Verify MSI MajorUpgrade
         shell: pwsh
         run: |
