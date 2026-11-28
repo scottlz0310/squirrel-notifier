@@ -127,7 +127,7 @@ public sealed class UpdateCheckCoordinatorTests : IDisposable
         await coordinator.CheckAsync(true, dialog =>
         {
             _dialogs.Add(dialog);
-            return Task.FromResult(dialog.IsUpdateAvailable ? UpdateDialogAction.Download : UpdateDialogAction.Close);
+            return Task.FromResult(dialog.IsUpdateAvailable ? UpdateDialogAction.Accept : UpdateDialogAction.Close);
         });
 
         _urlOpener.Verify(opener => opener.TryOpen("https://example.com/releases/v2.0.0"), Times.Once);
@@ -169,6 +169,66 @@ public sealed class UpdateCheckCoordinatorTests : IDisposable
         await coordinator.CheckAsync(true, ShowDialogAsync);
         calls.Should().Be(2);
         _dialogs.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CheckAsync_ShouldRequestApplyAndOfferCancelWhileWaiting(bool staysWaiting, bool cancels)
+    {
+        var applier = new Mock<IUpdateApplier>();
+        applier.Setup(a => a.RequestAsync()).Callback(() =>
+        {
+            applier.SetupGet(a => a.IsWaiting).Returns(staysWaiting);
+        }).Returns(Task.CompletedTask);
+        UpdateCheckCoordinator coordinator = Create(_ => Task.FromResult(Result(true)), applier.Object);
+
+        await coordinator.CheckAsync(true, dialog =>
+        {
+            _dialogs.Add(dialog);
+            bool accepts = dialog.IsUpdateAvailable || cancels;
+            return Task.FromResult(accepts ? UpdateDialogAction.Accept : UpdateDialogAction.Close);
+        });
+
+        _dialogs.First().PrimaryButtonText.Should().Be("更新して再起動");
+        _dialogs.First().Message.Should().Contain("終了を待って適用します");
+        _dialogs.Should().HaveCount(staysWaiting ? 2 : 1);
+        if (staysWaiting)
+        {
+            _dialogs.Last().Title.Should().Be("更新の適用を待っています");
+            _dialogs.Last().IsUpdateAvailable.Should().BeFalse("取りやめを既定のボタンにしない");
+        }
+
+        applier.Verify(a => a.RequestAsync(), Times.Once);
+        applier.Verify(a => a.Cancel(), cancels ? Times.Once() : Times.Never());
+        _urlOpener.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(true, true, 1)]
+    [InlineData(false, true, 0)]
+    [InlineData(true, false, 1)]
+    [InlineData(false, false, 0)]
+    public async Task CheckAsync_ShouldNotCheckAgainWhileApplyIsPending(bool isManual, bool isWaiting, int dialogCount)
+    {
+        var applier = new Mock<IUpdateApplier>();
+        applier.SetupGet(a => a.IsPending).Returns(true);
+        applier.SetupGet(a => a.IsWaiting).Returns(isWaiting);
+        int calls = 0;
+        UpdateCheckCoordinator coordinator = Create(
+            _ =>
+            {
+                calls++;
+                return Task.FromResult(Result(true));
+            },
+            applier.Object);
+
+        await coordinator.CheckAsync(isManual, ShowDialogAsync);
+
+        calls.Should().Be(0);
+        _dialogs.Should().HaveCount(dialogCount);
+        applier.Verify(a => a.Cancel(), Times.Never);
     }
 
     [Fact]
@@ -225,6 +285,9 @@ public sealed class UpdateCheckCoordinatorTests : IDisposable
 
     private UpdateCheckCoordinator Create(Func<CancellationToken, Task<AutoUpdateResult>> check, TimeSpan? timeout = null)
         => new(check, _settings, _logging, _urlOpener.Object, timeout);
+
+    private UpdateCheckCoordinator Create(Func<CancellationToken, Task<AutoUpdateResult>> check, IUpdateApplier applier)
+        => new(check, _settings, _logging, _urlOpener.Object, applier: applier);
 
     private Task<UpdateDialogAction> ShowDialogAsync(UpdateDialogPresentation dialog)
     {

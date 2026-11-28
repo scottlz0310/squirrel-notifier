@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MSIX パッケージを生成する `scripts/Build-MsixPackage.ps1` とマニフェストを追加した。`%LocalAppData%\SquirrelNotifier` は仮想化から除外し、公開契約のファイルをパッケージ外から読めるようにする。配布物は引き続き MSI で、MSIX はリリースに含まれない（[#569](https://github.com/scottlz0310/squirrel-notifier/issues/569)）。
 - MSIX パッケージ版の自動起動を、スタートアップタスクで切り替えられるようにした。有効にすると、ログオン時にトレイへ常駐する（[#569](https://github.com/scottlz0310/squirrel-notifier/issues/569)）。
+- `.appinstaller` から導入した MSIX パッケージ版で、更新をアプリ内で適用して再起動できるようにした。実行中のレビューがある場合は終了を待ち、保留中のレビューは再起動後に引き継ぐ（[#569](https://github.com/scottlz0310/squirrel-notifier/issues/569)）。
 
 ### Changed
 

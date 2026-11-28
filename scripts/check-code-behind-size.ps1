@@ -35,7 +35,7 @@ $limits = [ordered]@{
     # #456 の CI 確定待ちのゲートの生成・再評価の契機の購読と破棄・通知への注記の受け渡しを反映。判断は Helpers / Services 側に配置している。
     # #452 のログ入力・レイアウト通知・末尾移動の UI 配線を反映。追従判断と件数は LogTailViewModel へ配置。
     # #476 のライブログ最前面設定の読み込みとトグルイベントの配線を反映。
-    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1506
+    "winui3/SquirrelNotifier.WinUI3/MainWindow.xaml.cs"              = 1528
     # #305 の resume 失敗メッセージを既存 InfoBar に表示する配線を反映。
     # #476・#477 の UI 配線と #478 の起動設定テキスト・tooltipの4行の配線を反映。
     "winui3/SquirrelNotifier.WinUI3/AgentExecutionWindow.xaml.cs"    = 330

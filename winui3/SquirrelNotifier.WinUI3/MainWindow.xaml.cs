@@ -26,7 +26,7 @@ internal sealed partial class MainWindow : Window
     private readonly McpSubscriptionService _service;
     private readonly LoggingService _loggingService;
     private readonly SettingsService _settingsService;
-    private readonly UpdateCheckCoordinator _updateCheckCoordinator;
+    private readonly AppUpdate _appUpdate;
     private readonly LogEntryCollectionCoordinator _logEntryCoordinator = new();
     private readonly ReviewEventCollectionCoordinator _reviewEventCollectionCoordinator = new();
     private readonly TrayIconService _trayIconService;
@@ -128,8 +128,6 @@ internal sealed partial class MainWindow : Window
         _copyFeedbackCoordinator = new CopyFeedbackCoordinator();
         _copyFeedbackCoordinator.Expired += OnCopyFeedbackExpired;
         _copyFeedbackCoordinator.ExpirationFailed += OnCopyFeedbackExpirationFailed;
-        _updateCheckCoordinator = new UpdateCheckCoordinator(
-            autoUpdateService.CheckForUpdatesAsync, settingsService, loggingService, _urlOpener);
         _notificationService = notificationService;
         _launcherService = launcherService;
         _autoStartService = autoStartService;
@@ -164,7 +162,18 @@ internal sealed partial class MainWindow : Window
             _autoPauseResumeScheduler,
             _loggingService,
             _reviewCycleCoordinator,
-            _ciSettleGate);
+            _ciSettleGate,
+            isUpdatePending: () => _appUpdate!.IsApplyPending);
+        _appUpdate = new AppUpdate(AppUpdate.CreateAccessor(), autoUpdateService, settingsService, loggingService, _urlOpener, new AppUpdateHost(
+            () => _reviewStartCoordinator.IsReviewActive,
+            _pendingReviewStartQueue,
+            new UpdateCarryOverStore(settingsService.SettingsDirectory),
+            () => _service.State,
+            _service.StopAsync,
+            _service.Start,
+            () => appWindow.IsVisible,
+            message => _trayIconService!.ShowNotification("更新を適用できませんでした", message),
+            () => OnPendingReviewReevaluationRequested(this, EventArgs.Empty)));
         _agentExecutionWindowCoordinator = new AgentExecutionWindowCoordinator(
             launch => new AgentExecutionWindowAdapter(
                 new AgentExecutionWindow(
@@ -353,6 +362,12 @@ internal sealed partial class MainWindow : Window
         TrayIcon.Loaded -= OnTrayIconLoaded;
         AttachTrayPopup();
         _trayIconService.MarkReady();
+
+        // 更新の再起動の前に保留していたレビューは受信し直されないため、通知を出せる状態になってから処理する（#569）
+        foreach (Models.ReviewEvent carried in _appUpdate.TakeCarriedReviews())
+        {
+            HandleReviewEvent(carried);
+        }
     }
 
     /// <summary>
@@ -417,6 +432,7 @@ internal sealed partial class MainWindow : Window
         _copyFeedbackCoordinator.Dispose();
         _autoPauseResumeScheduler.Dispose();
         _ciSettleGate.Dispose();
+        _appUpdate.Dispose();
         _trayIconService.Dispose();
     }
 
@@ -886,7 +902,7 @@ internal sealed partial class MainWindow : Window
     }
 
     private Task CheckForUpdatesAsync(bool showNoUpdateDialog)
-        => _updateCheckCoordinator.CheckAsync(showNoUpdateDialog, ShowUpdateDialogAsync);
+        => _appUpdate.Check.CheckAsync(showNoUpdateDialog, ShowUpdateDialogAsync);
 
     private async Task<UpdateDialogAction> ShowUpdateDialogAsync(UpdateDialogPresentation presentation)
     {
@@ -902,7 +918,7 @@ internal sealed partial class MainWindow : Window
         };
         return await dialog.ShowAsync(ContentDialogPlacement.Popup) switch
         {
-            ContentDialogResult.Primary => UpdateDialogAction.Download,
+            ContentDialogResult.Primary => UpdateDialogAction.Accept,
             ContentDialogResult.Secondary => UpdateDialogAction.Skip,
             _ => UpdateDialogAction.Close,
         };
@@ -964,6 +980,7 @@ internal sealed partial class MainWindow : Window
     {
         try
         {
+            await _appUpdate.TryApplyAsync();
             PendingReviewStartResult? pending = await _reviewEventProcessingCoordinator.ProcessPendingAsync();
             if (pending is not null)
             {
@@ -1173,6 +1190,11 @@ internal sealed partial class MainWindow : Window
                 await ShowReviewStartErrorDialogAsync(
                     "レビュー実行エラー",
                     "別のレビューアクションが既に実行中です。");
+                return false;
+            case ReviewStartStatus.SkippedUpdatePending:
+                await ShowReviewStartErrorDialogAsync(
+                    "更新の適用待ち",
+                    "更新して再起動するまで、レビューを開始できません。取りやめる場合は、トレイメニューの「アプリの更新を確認」から操作してください。");
                 return false;
             case ReviewStartStatus.Failed:
                 await ShowReviewStartErrorDialogAsync(

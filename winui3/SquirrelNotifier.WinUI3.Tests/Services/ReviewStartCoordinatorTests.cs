@@ -46,6 +46,47 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         launcher.StartSessionCalls.Should().ContainSingle().Which.Should().Be(launcherRole);
     }
 
+    // 更新の適用を待つ間は開始せず、自動起動は再起動をまたいで引き継げるよう保留する（#569）
+    [Theory]
+    [InlineData("Manual", "Reviewer", "SkippedUpdatePending", false)]
+    [InlineData("Manual", "Reviewed", "SkippedUpdatePending", false)]
+    [InlineData("Automatic", "Reviewer", "SkippedBusy", true)]
+    public async Task StartAsync_ShouldNotStartWhileUpdateIsPending(string trigger, string role, string expected, bool expectsHeld)
+    {
+        FakeLauncherService launcher = new();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, isUpdatePending: () => true);
+
+        ReviewStartResult result = await coordinator.StartAsync(
+            CreateReviewEvent(),
+            Enum.Parse<LauncherRole>(role),
+            Enum.Parse<ReviewStartTrigger>(trigger),
+            _ => Task.FromResult(true));
+
+        result.Status.Should().Be(Enum.Parse<ReviewStartStatus>(expected));
+        result.HoldReason.Should().Be(expectsHeld ? "更新の適用待ち" : null);
+        _pendingQueue.Count.Should().Be(expectsHeld ? 1 : 0);
+        launcher.StartSessionCalls.Should().BeEmpty();
+        coordinator.IsBusy.Should().BeTrue();
+        coordinator.IsReviewActive.Should().BeFalse("適用の条件には、適用待ち自体を含めない");
+    }
+
+    [Fact]
+    public async Task TryStartAutomaticallyAsync_ShouldHoldWhileUpdateIsPending()
+    {
+        SettingsService settingsService = CreateSettingsService();
+        settingsService.UpdateAutoReviewStartEnabled(true);
+        FakeLauncherService launcher = new();
+        ReviewStartCoordinator coordinator = CreateCoordinator(launcher, settingsService, isUpdatePending: () => true);
+
+        ReviewStartResult result = await coordinator.TryStartAutomaticallyAsync(CreateReviewEvent());
+
+        result.Status.Should().Be(ReviewStartStatus.SkippedBusy);
+        result.HoldReason.Should().Be("更新の適用待ち");
+        _pendingQueue.Count.Should().Be(1);
+        _logLines.Should().Contain(line => line.Contains("更新の適用待ちのため。再起動の後に自動起動します", StringComparison.Ordinal));
+        launcher.StartSessionCalls.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("Reviewer", "レビューする")]
     [InlineData("Reviewed", "レビューに対応")]
@@ -1083,7 +1124,8 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
         Action<string>? onLogAppended = null,
         ReviewCiSettleGate? ciSettleGate = null,
         ReviewCycleCoordinator? reviewCycleCoordinator = null,
-        AgyModelSelectionService? agyModelSelectionService = null)
+        AgyModelSelectionService? agyModelSelectionService = null,
+        Func<bool>? isUpdatePending = null)
     {
         LoggingService loggingService = new(_workingDirectory);
         loggingService.LogAppended += (_, line) =>
@@ -1112,7 +1154,8 @@ public sealed class ReviewStartCoordinatorTests : IDisposable
             reviewCycleCoordinator,
             ciSettleGate,
             agyModelSelectionService ?? new AgyModelSelectionService(readSettings: (_, _) => Task.FromResult("{\"model\":\"fixture-model\"}")),
-            new LauncherExecutionSettingsService(getEnvironment: _ => null, readFile: (_, _) => Task.FromResult<string?>(null)));
+            new LauncherExecutionSettingsService(getEnvironment: _ => null, readFile: (_, _) => Task.FromResult<string?>(null)),
+            isUpdatePending);
     }
 
     private ReviewCycleCoordinator CreateCycleCoordinator()

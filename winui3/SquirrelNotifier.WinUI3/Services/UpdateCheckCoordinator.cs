@@ -9,8 +9,8 @@ internal enum UpdateDialogAction
     /// <summary>ダイアログを閉じる.</summary>
     Close,
 
-    /// <summary>ダウンロードページを開く.</summary>
-    Download,
+    /// <summary>主ボタンの操作を実行する（ダウンロードページを開く、更新して再起動する、適用を取りやめる）.</summary>
+    Accept,
 
     /// <summary>起動時の通知からこのバージョンを除外する.</summary>
     Skip,
@@ -21,9 +21,10 @@ internal sealed record UpdateDialogPresentation(
     string Message,
     string PrimaryButtonText = "",
     string SecondaryButtonText = "",
-    string CloseButtonText = "閉じる")
+    string CloseButtonText = "閉じる",
+    bool IsWaitingNotice = false)
 {
-    public bool IsUpdateAvailable => PrimaryButtonText.Length > 0;
+    public bool IsUpdateAvailable => PrimaryButtonText.Length > 0 && !IsWaitingNotice;
 }
 
 /// <summary>更新チェックの結果解釈、スキップ設定、ダイアログ表示中を含む再入抑止を担当する.</summary>
@@ -33,12 +34,14 @@ internal sealed record UpdateDialogPresentation(
 /// <param name="loggingService">診断ログ出力サービス.</param>
 /// <param name="urlOpener">リリースページを開く URL オープナー.</param>
 /// <param name="timeout">更新確認のタイムアウト時間（省略時は既定値）.</param>
+/// <param name="applier">アプリ内で更新を適用できる配布方式の場合の適用先。無ければリリースページを開く.</param>
 internal sealed class UpdateCheckCoordinator(
     Func<CancellationToken, Task<AutoUpdateResult>> checkAsync,
     SettingsService settingsService,
     LoggingService loggingService,
     IUrlOpener urlOpener,
-    TimeSpan? timeout = null)
+    TimeSpan? timeout = null,
+    IUpdateApplier? applier = null)
 {
     private bool _isChecking;
 
@@ -74,9 +77,38 @@ internal sealed class UpdateCheckCoordinator(
         }
     }
 
+    private static async Task ShowWaitingAsync(
+        IUpdateApplier waiting, Func<UpdateDialogPresentation, Task<UpdateDialogAction>> showDialogAsync)
+    {
+        UpdateDialogAction action = await showDialogAsync(new UpdateDialogPresentation(
+            "更新の適用を待っています",
+            "実行中のレビューがなくなったら、更新して再起動します。それまで新しいレビューは開始しません。",
+            "適用を取りやめる",
+            IsWaitingNotice: true));
+        if (action == UpdateDialogAction.Accept)
+        {
+            waiting.Cancel();
+        }
+    }
+
     private async Task<string?> CheckCoreAsync(
         bool isManual, Func<UpdateDialogPresentation, Task<UpdateDialogAction>> showDialogAsync)
     {
+        if (applier is { IsPending: true })
+        {
+            if (isManual && applier.IsWaiting)
+            {
+                await ShowWaitingAsync(applier, showDialogAsync);
+            }
+            else if (isManual)
+            {
+                await showDialogAsync(new UpdateDialogPresentation(
+                    "更新を適用しています", "ダウンロードと適用が終わると、自動で再起動します。"));
+            }
+
+            return null;
+        }
+
         AutoUpdateResult result;
         using (var cts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(10)))
         {
@@ -105,15 +137,26 @@ internal sealed class UpdateCheckCoordinator(
             return null;
         }
 
+        string question = applier is null
+            ? "ダウンロードページを開きますか？"
+            : "更新して再起動しますか？実行中のレビューがある場合は、終了を待って適用します。";
         UpdateDialogAction action = await showDialogAsync(new UpdateDialogPresentation(
             "新しいバージョンがあります",
-            $"最新バージョン {result.LatestVersion} がリリースされています。ダウンロードページを開きますか？",
-            "ダウンロード",
+            $"最新バージョン {result.LatestVersion} がリリースされています。{question}",
+            applier is null ? "ダウンロード" : "更新して再起動",
             "このバージョンをスキップ",
             "後で"));
-        if (action == UpdateDialogAction.Download)
+        if (action == UpdateDialogAction.Accept)
         {
-            if (!urlOpener.TryOpen(result.ReleaseUrl))
+            if (applier is not null)
+            {
+                await applier.RequestAsync();
+                if (applier.IsWaiting)
+                {
+                    await ShowWaitingAsync(applier, showDialogAsync);
+                }
+            }
+            else if (!urlOpener.TryOpen(result.ReleaseUrl))
             {
                 throw new InvalidOperationException("ダウンロードページを開けませんでした。");
             }
