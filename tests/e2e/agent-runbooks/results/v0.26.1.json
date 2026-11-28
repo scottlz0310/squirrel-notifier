@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "version": "0.26.1",
+  "testedCommit": "fca5798831c3e53f22048c49a9f69cdef981fd1e",
+  "productVersion": "0.26.1+fca5798831c3e53f22048c49a9f69cdef981fd1e",
+  "executedAt": "2026-11-28T12:32:48Z",
+  "executor": {
+    "agent": "codex",
+    "model": "GPT-6",
+    "implementerSession": false
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Pro 10.0.26300",
+    "notes": "リリース準備 PR #568 の release/v0.26.1 をクリーンな別 worktree に展開し、実デスクトップで実行。対象リリースの実装・PR 作成とは別セッション。証跡のパスは %TEMP%\\squirrel-notifier-runbook 内の各 run ディレクトリからの相対パス。初回にビルドし、後続シナリオでは同一 HEAD と一致する ProductVersion のビルドを再利用。ボタンは実マウス入力で操作した。"
+  },
+  "scenarios": [
+    {
+      "id": "isolated-launch",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 58,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "StopButton isEnabled=true、StatusText=Subscribed.（20261128-213147-isolated-launch）"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "テスト用 PID 46132 のパスは run.appPath（Release/x64 ビルド）と一致。既定の常駐 PID 42516（%LOCALAPPDATA%\\Programs\\SquirrelNotifier）は別プロセスで稼働。隔離 data に settings.json（2044 B）と logs/winui3.log（306 B）が存在。"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "review-event-flow",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 20,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "TitleText=opened: fixture-owner/fixture-repository#307 に完全一致。Recent review events に #307 / #308 / #309 が表示され、#307 の reviewer をマウスで起動した後に「reviewer 実行完了（結果未確認）」へ更新（20261128-213206-review-event-flow）。"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/launcher.jsonl",
+          "summary": "arguments=[review, fixture-owner/fixture-repository#307, opened]、exitCode=0、workingDirectory=data\\launcher-workspace\\reviewer\\fixture-owner\\fixture-repository\\307。"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "Review process finished. ExitCode=0 と [Cycle] fixture-owner/fixture-repository #307 ラウンド 1 の reviewer 実行が終了しました（結果未確認）。の両行を確認。"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    },
+    {
+      "id": "register-while-stopped",
+      "result": "pass",
+      "attempts": 1,
+      "durationSeconds": 19,
+      "evidence": [
+        {
+          "kind": "uia",
+          "path": "evidence/uia.jsonl",
+          "summary": "StopButton を押すと StartButton が有効。#320 を入力し、EnqueueReviewButton と PrimaryButton（購読を開始して登録）を押すと StopButton が再び有効（20261128-213229-register-while-stopped）。"
+        },
+        {
+          "kind": "observation",
+          "path": "observations/subscriber.jsonl",
+          "summary": "mode=call は 1 件。--tool enqueue_review、--url=http://127.0.0.1:51385/（fake Gateway）、--args={owner:fixture-owner,repo:fixture-repository,prNumber:320,reason:opened}、exitCode=0、hasAuthorization=false。"
+        },
+        {
+          "kind": "log",
+          "path": "data/logs/winui3.log",
+          "summary": "State: Running → Enqueuing review: fixture-owner/fixture-repository#320 (reason=opened) → enqueue_review call finished. ExitCode=0 の順を確認。"
+        },
+        {
+          "kind": "isolation",
+          "path": "evidence/isolation.json",
+          "summary": "isolated=true、realSettingsUnchanged=true、findings=[]、leftoverProcessesStopped=[]"
+        }
+      ],
+      "flaky": []
+    }
+  ]
+}

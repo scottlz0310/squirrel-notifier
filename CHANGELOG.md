@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-11-28
+
 ### Fixed
 
 - エージェント本体が終了した後も子孫プロセスが標準出力・標準エラーを保持し続けると、レビュー実行が終了せず、手動中断か無応答の時間切れ（失敗の記録と自動再開）になる不具合を修正した。本体の終了後は出力を最大 5 秒だけ読み切り、閉じなければ読み取りを打ち切って終了コードで結果を判定する。打ち切ったことは実行ウィンドウ・`winui3.log`・reviewer の出力記録に残す（[#566](https://github.com/scottlz0310/squirrel-notifier/issues/566)）。
@@ -696,7 +698,8 @@ v0.6.0 から引き続き未修正です。次回以降で対応します。
 - 開発用ツールセットの Python プロジェクト名を `squirrel-notifier-devtools` に変更
 - トレイ通知のイベント発生時、レビュー URL 開くボタンを（今回のスコープ外のため）一旦削除
 
-[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.26.1...HEAD
+[0.26.1]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/scottlz0310/squirrel-notifier/compare/v0.23.2...v0.24.0
