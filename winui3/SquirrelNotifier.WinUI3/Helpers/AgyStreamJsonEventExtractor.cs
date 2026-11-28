@@ -18,6 +18,10 @@ internal static partial class AgyStreamJsonEventExtractor
 {
     private const int _toolSummaryMaxLength = 160;
 
+    // 成功した tool の完了行を出す下限（#536）。2026-11 の実レビュー 18 件（tool 完了 842 件）で、
+    // 所要時間の中央値は約 3 秒、10 秒以上は約 13% だった.
+    private const double _slowToolSeconds = 10;
+
     /// <summary>
     /// 1 行を agy stream-json event として解釈する.
     /// </summary>
@@ -97,8 +101,9 @@ internal static partial class AgyStreamJsonEventExtractor
     }
 
     /// <summary>
-    /// tool step の開始・完了を 1 行にする。agy は本文を持たない turn（tool 呼び出しだけの応答）の間、
+    /// tool step の開始・完了・失敗を 1 行にする。agy は本文を持たない turn（tool 呼び出しだけの応答）の間、
     /// 実行ウィンドウに何も出せなくなるため、tool 名と run_command のコマンド行だけを示す.
+    /// 成功した tool の完了行は、行数を抑えるため、時間がかかった場合だけ出す.
     /// 出力本文や run_command 以外の引数は、量と機微な内容を避けるため表示しない.
     /// </summary>
     private static string? FormatToolProgress(JsonElement stepUpdate)
@@ -121,23 +126,31 @@ internal static partial class AgyStreamJsonEventExtractor
             return string.IsNullOrEmpty(commandLine) ? $"[tool] {toolName}" : $"[tool] {toolName}: {commandLine}";
         }
 
-        if (state != "DONE")
+        if (state is not ("DONE" or "ERROR"))
         {
             return null;
         }
 
-        string duration = stepUpdate.TryGetProperty("duration_seconds", out JsonElement seconds)
+        double? elapsed = stepUpdate.TryGetProperty("duration_seconds", out JsonElement seconds)
             && seconds.ValueKind == JsonValueKind.Number
             && seconds.TryGetDouble(out double value)
-                ? $" {value.ToString("0.0", CultureInfo.InvariantCulture)}秒"
-                : string.Empty;
+                ? value
+                : null;
+        string duration = elapsed is double known ? $" {known.ToString("0.0", CultureInfo.InvariantCulture)}秒" : string.Empty;
+        if (state == "ERROR")
+        {
+            return $"[tool] {toolName} 失敗{duration}";
+        }
+
         string exit = toolInfo.ValueKind == JsonValueKind.Object
             && TryGetString(toolInfo, "output", out string? output)
             && ExitCodePattern().Match(output!) is { Success: true } match
             && match.Groups[1].Value != "0"
                 ? $" 終了コード {match.Groups[1].Value}"
                 : string.Empty;
-        return $"[tool] {toolName} 完了{duration}{exit}";
+
+        // 所要時間が分からない場合は、速いと判断できないため省かない.
+        return exit.Length == 0 && elapsed < _slowToolSeconds ? null : $"[tool] {toolName} 完了{duration}{exit}";
     }
 
     private static string SummarizeForOneLine(string text)
