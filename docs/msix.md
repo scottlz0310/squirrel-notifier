@@ -23,6 +23,8 @@ dotnet publish winui3\SquirrelNotifier.WinUI3\SquirrelNotifier.WinUI3.csproj -c 
 .\scripts\Build-MsixPackage.ps1 -PayloadDirectory publish\x64
 ```
 
+対象は x64 だけで、実行ファイルが x64 でなければ生成前に失敗します。生成と署名がすべて成功してから出力先を置き換えるため、失敗しても同じ版の既存パッケージは残ります。
+
 `makeappx` と `signtool` は、`Directory.Packages.props` が指定する `Microsoft.Windows.SDK.BuildTools` の NuGet パッケージから解決します。署名するには `-CertificateThumbprint`（`CurrentUser\My` の証明書）と、必要に応じて `-TimestampUrl` を指定します。
 
 ## 試験導入

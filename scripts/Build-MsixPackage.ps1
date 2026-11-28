@@ -56,6 +56,29 @@ function Resolve-SdkTool([string]$Name) {
     return $found[0].FullName
 }
 
+# PE ヘッダーから対象アーキテクチャ（IMAGE_FILE_HEADER.Machine）を読む。
+function Get-PeMachine([string]$Path) {
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $reader = [System.IO.BinaryReader]::new($stream)
+        if ($stream.Length -ge 0x40 -and $reader.ReadUInt16() -eq 0x5A4D) {
+            $stream.Position = 0x3C
+            $headerOffset = $reader.ReadInt32()
+            if ($headerOffset -ge 0 -and $headerOffset + 6 -le $stream.Length) {
+                $stream.Position = $headerOffset
+                if ($reader.ReadUInt32() -eq 0x00004550) {
+                    return $reader.ReadUInt16()
+                }
+            }
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    throw "PE 形式の実行ファイルではありません: $Path"
+}
+
 function Invoke-SdkTool([string]$Path, [string[]]$Arguments, [string]$Failure) {
     $global:LASTEXITCODE = 0
     $output = & $Path @Arguments 2>&1
@@ -75,8 +98,18 @@ if ($TimestampUrl -and -not $CertificateThumbprint) {
 
 [xml]$manifest = Get-Content -LiteralPath (Join-Path $msixRoot 'AppxManifest.xml') -Raw -Encoding utf8
 $executable = $manifest.Package.Applications.Application.Executable
-if (-not (Test-Path -LiteralPath (Join-Path $PayloadDirectory $executable) -PathType Leaf)) {
+$executablePath = Join-Path $PayloadDirectory $executable
+if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
     throw "発行物に $executable がありません: $PayloadDirectory"
+}
+
+# 配布は x64 だけ。makeappx は中身を検査しないため、別のアーキテクチャの発行物を生成前に拒否する。
+$architecture = $manifest.Package.Identity.ProcessorArchitecture
+if ($architecture -ne 'x64') {
+    throw "対応していないアーキテクチャです: $architecture"
+}
+if ((Get-PeMachine (Resolve-Path -LiteralPath $executablePath).ProviderPath) -ne 0x8664) {
+    throw "x64 の実行ファイルではありません: $executablePath"
 }
 
 if (-not $MakeAppxPath) { $MakeAppxPath = Resolve-SdkTool 'makeappx.exe' }
@@ -84,11 +117,16 @@ if ($CertificateThumbprint -and -not $SignToolPath) { $SignToolPath = Resolve-Sd
 
 $outputRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
-$packagePath = Join-Path $outputRoot "SquirrelNotifier-$Version-$($manifest.Package.Identity.ProcessorArchitecture).msix"
-$stagingDirectory = Join-Path $outputRoot "staging-$([guid]::NewGuid().ToString('N'))"
+$packageName = "SquirrelNotifier-$Version-$architecture.msix"
+$packagePath = Join-Path $outputRoot $packageName
+# 生成と署名は作業ディレクトリで行い、すべて成功してから最終パスを置き換える。
+# 失敗しても、同じ版の既存パッケージは残る。
+$workDirectory = Join-Path $outputRoot "work-$([guid]::NewGuid().ToString('N'))"
+$stagingDirectory = Join-Path $workDirectory 'content'
+$workPackage = Join-Path $workDirectory $packageName
 
 try {
-    New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
+    New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
     Copy-Item -Path (Join-Path $PayloadDirectory '*') -Destination $stagingDirectory -Recurse -Force
     $assetsDirectory = Join-Path $stagingDirectory 'Assets'
     New-Item -ItemType Directory -Path $assetsDirectory -Force | Out-Null
@@ -98,24 +136,19 @@ try {
     $manifest.Package.Identity.Version = "$Version.0"
     $manifest.Save((Join-Path $stagingDirectory 'AppxManifest.xml'))
 
-    Invoke-SdkTool $MakeAppxPath @('pack', '/d', $stagingDirectory, '/p', $packagePath, '/o') 'MSIX の生成に失敗しました'
+    Invoke-SdkTool $MakeAppxPath @('pack', '/d', $stagingDirectory, '/p', $workPackage, '/o') 'MSIX の生成に失敗しました'
 
     if ($CertificateThumbprint) {
         $signArguments = @('sign', '/fd', 'SHA256', '/sha1', $CertificateThumbprint)
         if ($TimestampUrl) { $signArguments += @('/tr', $TimestampUrl, '/td', 'SHA256') }
-        try {
-            Invoke-SdkTool $SignToolPath ($signArguments + $packagePath) 'MSIX の署名に失敗しました'
-        }
-        catch {
-            # 未署名のパッケージを、署名済みの成果物と取り違えないように残さない。
-            Remove-Item -LiteralPath $packagePath -Force
-            throw
-        }
+        Invoke-SdkTool $SignToolPath ($signArguments + $workPackage) 'MSIX の署名に失敗しました'
     }
+
+    [System.IO.File]::Move($workPackage, $packagePath, $true)
 }
 finally {
-    if (Test-Path -LiteralPath $stagingDirectory) {
-        Remove-Item -LiteralPath $stagingDirectory -Recurse -Force
+    if (Test-Path -LiteralPath $workDirectory) {
+        Remove-Item -LiteralPath $workDirectory -Recurse -Force
     }
 }
 

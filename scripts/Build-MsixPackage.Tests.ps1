@@ -1,6 +1,16 @@
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Build-MsixPackage.ps1'
     $script:ProjectPath = Join-Path $PSScriptRoot '../winui3/SquirrelNotifier.WinUI3/SquirrelNotifier.WinUI3.csproj'
+
+    # PE ヘッダーの machine だけを持つ最小の実行ファイルを作る。
+    function New-FakeExecutable([string]$Path, [int]$Machine) {
+        $bytes = [byte[]]::new(0x46)
+        [System.Text.Encoding]::ASCII.GetBytes('MZ').CopyTo($bytes, 0)
+        [System.BitConverter]::GetBytes([int]0x40).CopyTo($bytes, 0x3C)
+        [System.Text.Encoding]::ASCII.GetBytes("PE`0`0").CopyTo($bytes, 0x40)
+        [System.BitConverter]::GetBytes([uint16]$Machine).CopyTo($bytes, 0x44)
+        [System.IO.File]::WriteAllBytes($Path, $bytes)
+    }
 }
 
 AfterAll {
@@ -14,7 +24,8 @@ Describe 'MSIX パッケージの生成' {
         $script:Output = Join-Path $script:Root 'output'
         $script:Log = Join-Path $script:Root 'log'
         New-Item -ItemType Directory -Path $script:Payload, $script:Log | Out-Null
-        Set-Content -LiteralPath (Join-Path $script:Payload 'SquirrelNotifier.WinUI3.exe') -Value 'app'
+        $script:Executable = Join-Path $script:Payload 'SquirrelNotifier.WinUI3.exe'
+        New-FakeExecutable $script:Executable 0x8664
         Set-Content -LiteralPath (Join-Path $script:Payload 'dependency.dll') -Value 'dll'
 
         # 実ツールの代わりに、引数と staging の内容を記録する。
@@ -31,6 +42,7 @@ exit [int]$env:MSIX_TEST_PACK_EXIT
         $script:SignTool = Join-Path $script:Root 'signtool.ps1'
         Set-Content -LiteralPath $script:SignTool -Value @'
 $args | Set-Content -LiteralPath (Join-Path $env:MSIX_TEST_LOG 'signtool.args')
+Add-Content -LiteralPath $args[-1] -Value 'signed'
 exit [int]$env:MSIX_TEST_SIGN_EXIT
 '@
         $env:MSIX_TEST_LOG = $script:Log
@@ -80,19 +92,64 @@ exit [int]$env:MSIX_TEST_SIGN_EXIT
         @{ Name = 'タイムスタンプあり'; Url = 'http://timestamp.example'; Expected = @('sign', '/fd', 'SHA256', '/sha1', 'ABC123', '/tr', 'http://timestamp.example', '/td', 'SHA256') }
     ) {
         $package = & $script:ScriptPath @script:Common -Version '1.2.3' -CertificateThumbprint 'ABC123' -TimestampUrl $Url 6> $null
-        @(Get-Content -LiteralPath (Join-Path $script:Log 'signtool.args')) | Should -Be ($Expected + $package)
+        $arguments = @(Get-Content -LiteralPath (Join-Path $script:Log 'signtool.args'))
+        $arguments[0..($arguments.Count - 2)] | Should -Be $Expected
+        # 署名は一時パスに行い、署名済みのものを最終パスへ置く。
+        $arguments[-1] | Should -Not -Be $package
+        Split-Path -Leaf $arguments[-1] | Should -Be (Split-Path -Leaf $package)
+        Get-Content -LiteralPath $package | Should -Contain 'signed'
+        @(Get-ChildItem -LiteralPath $script:Output).Count | Should -Be 1
     }
 
-    It '生成に失敗したら止まり、staging を残さない' {
-        $env:MSIX_TEST_PACK_EXIT = '1'
-        { & $script:ScriptPath @script:Common -Version '1.2.3' } | Should -Throw '*MSIX の生成に失敗しました*'
-        @(Get-ChildItem -LiteralPath $script:Output -Directory).Count | Should -Be 0
+    It '成功したら、同じ版の既存パッケージを置き換える' {
+        New-Item -ItemType Directory -Path $script:Output | Out-Null
+        $existing = Join-Path $script:Output 'SquirrelNotifier-1.2.3-x64.msix'
+        Set-Content -LiteralPath $existing -Value 'previous'
+        & $script:ScriptPath @script:Common -Version '1.2.3' 6> $null | Out-Null
+        Get-Content -LiteralPath $existing | Should -Be 'package'
     }
 
-    It '署名に失敗したら、未署名のパッケージを残さない' {
-        $env:MSIX_TEST_SIGN_EXIT = '1'
-        { & $script:ScriptPath @script:Common -Version '1.2.3' -CertificateThumbprint 'ABC123' } | Should -Throw '*MSIX の署名に失敗しました*'
+    It '<Stage>に失敗したら止まり、新しい成果物を残さない' -ForEach @(
+        @{ Stage = '生成'; PackExit = '1'; SignExit = '0'; Message = '*MSIX の生成に失敗しました*' }
+        @{ Stage = '署名'; PackExit = '0'; SignExit = '1'; Message = '*MSIX の署名に失敗しました*' }
+    ) {
+        $env:MSIX_TEST_PACK_EXIT = $PackExit
+        $env:MSIX_TEST_SIGN_EXIT = $SignExit
+        { & $script:ScriptPath @script:Common -Version '1.2.3' -CertificateThumbprint 'ABC123' } | Should -Throw $Message
         @(Get-ChildItem -LiteralPath $script:Output).Count | Should -Be 0
+    }
+
+    It '<Stage>に失敗しても、同じ版の既存パッケージを変えない' -ForEach @(
+        @{ Stage = '生成'; PackExit = '1'; SignExit = '0' }
+        @{ Stage = '署名'; PackExit = '0'; SignExit = '1' }
+    ) {
+        New-Item -ItemType Directory -Path $script:Output | Out-Null
+        $existing = Join-Path $script:Output 'SquirrelNotifier-1.2.3-x64.msix'
+        Set-Content -LiteralPath $existing -Value 'previous'
+        $hash = (Get-FileHash -LiteralPath $existing).Hash
+        $env:MSIX_TEST_PACK_EXIT = $PackExit
+        $env:MSIX_TEST_SIGN_EXIT = $SignExit
+        { & $script:ScriptPath @script:Common -Version '1.2.3' -CertificateThumbprint 'ABC123' } | Should -Throw '*に失敗しました*'
+        (Get-FileHash -LiteralPath $existing).Hash | Should -Be $hash
+        @(Get-ChildItem -LiteralPath $script:Output).Count | Should -Be 1
+    }
+
+    It 'マニフェストと異なるアーキテクチャの実行ファイルは拒否する: <Name>' -ForEach @(
+        @{ Name = 'x86'; Machine = 0x014C }
+        @{ Name = 'Arm64'; Machine = 0xAA64 }
+    ) {
+        New-FakeExecutable $script:Executable $Machine
+        { & $script:ScriptPath @script:Common -Version '1.2.3' } | Should -Throw '*x64 の実行ファイルではありません*'
+        Test-Path -LiteralPath (Join-Path $script:Log 'makeappx.args') | Should -BeFalse
+    }
+
+    It 'PE 形式でない実行ファイルは拒否する: <Name>' -ForEach @(
+        @{ Name = 'テキスト'; Content = 'not an executable' }
+        @{ Name = '空'; Content = '' }
+    ) {
+        Set-Content -LiteralPath $script:Executable -Value $Content -NoNewline
+        { & $script:ScriptPath @script:Common -Version '1.2.3' } | Should -Throw '*PE 形式の実行ファイルではありません*'
+        Test-Path -LiteralPath (Join-Path $script:Log 'makeappx.args') | Should -BeFalse
     }
 
     It '不正な入力はパッケージの生成前に拒否する: <Name>' -ForEach @(
