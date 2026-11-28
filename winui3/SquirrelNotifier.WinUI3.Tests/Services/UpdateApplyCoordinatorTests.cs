@@ -156,11 +156,12 @@ public sealed class UpdateApplyCoordinatorTests : IDisposable
         _preparation.Setup(preparation => preparation.RecoverAsync()).ThrowsAsync(new IOException("復元に失敗"));
         UpdateApplyCoordinator coordinator = Create();
 
-        Func<Task> act = () => coordinator.RequestAsync();
+        await coordinator.RequestAsync();
 
-        await act.Should().ThrowAsync<IOException>();
         coordinator.IsPending.Should().BeFalse();
-        _failures.Should().ContainSingle();
+        _failures.Should().ContainSingle().Which.Should()
+            .Contain("アプリが再起動されませんでした").And.Contain("復元に失敗");
+        _reevaluations.Should().Be(1);
     }
 
     public void Dispose()

@@ -58,7 +58,7 @@ Add-AppxPackage .\SquirrelNotifier-<版>-x64.msix
 
 1. 更新の確認は、導入に使った `.appinstaller` を取得し、`MainPackage` の版を実行中のパッケージの版と比べます。確認の契機は、現行と同じ（ウィンドウを表示する起動と、トレイメニューの「アプリの更新を確認」）です。
 2. 「更新して再起動」を選ぶと、実行中のレビューがなくなり、起動から 65 秒が経過するまで待ちます。Windows は起動から 60 秒未満のプロセスを再起動しないためです。待つ間は新しいレビューを開始せず、「アプリの更新を確認」から取りやめられます。
-3. 購読を止め、保留中のレビューを `update-carryover.json` に保存してから、`RegisterApplicationRestart` と `PackageManager.AddPackageByUriAsync`（`ForceTargetAppShutdown`）で適用します。追加の capability は要りません。
+3. 購読を止めて適用が終わるまで開始を受け付けないようにし、保留中のレビューを `update-carryover.json` に保存してから、`RegisterApplicationRestart` と `PackageManager.AddPackageByUriAsync`（`ForceTargetAppShutdown`）で適用します。追加の capability は要りません。
 4. 再起動後、保存したレビューを受信したときと同じ経路で処理します。ウィンドウを表示していなかった場合は `--tray` で起動します。
 
 適用に失敗した場合と、再起動されずに戻った場合は、トレイに理由を通知し、購読を再開します。`.msix` を直接導入した場合は、MSI 版と同じく GitHub の最新リリースを確認してリリースページを開きます。

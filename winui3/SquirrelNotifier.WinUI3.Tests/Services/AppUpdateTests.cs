@@ -61,7 +61,7 @@ public sealed class AppUpdateTests : IDisposable
         check.IsCompleted.Should().BeFalse();
         update.IsApplyPending.Should().BeTrue();
         _dialogs.Should().ContainSingle().Which.PrimaryButtonText.Should().Be("更新して再起動");
-        _operations.Should().Equal("stop", "apply");
+        _operations.Should().Equal("suspend", "apply");
         accessor.Verify(a => a.ApplyAsync(It.IsAny<Uri>(), restartArguments), Times.Once);
         update.TakeCarriedReviews().Should().ContainSingle().Which.EventId.Should().Be("held");
     }
@@ -83,10 +83,42 @@ public sealed class AppUpdateTests : IDisposable
 
         await update.Check.CheckAsync(true, _ => Task.FromResult(UpdateDialogAction.Accept));
 
-        List<string> expected = expectsRestart ? ["stop", "start", "failure:登録に失敗", "reevaluate"] : ["stop", "failure:登録に失敗", "reevaluate"];
+        List<string> expected = expectsRestart
+            ? ["suspend", "resume", "start", "failure:登録に失敗", "reevaluate"]
+            : ["suspend", "resume", "failure:登録に失敗", "reevaluate"];
         _operations.Should().Equal(expected);
         update.IsApplyPending.Should().BeFalse();
         update.TakeCarriedReviews().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Check_ShouldRestoreSubscriptionEvenWhenCarryOverCannotBeDeleted()
+    {
+        _queue.AddOrReplace(new ReviewEvent { EventId = "held", Repository = "owner/repo", PrNumber = 1 });
+        FileStream? lockedFile = null;
+        Mock<IPackageUpdateAccessor> accessor = CreateAccessor();
+        accessor.Setup(a => a.ApplyAsync(It.IsAny<Uri>(), It.IsAny<string>())).Returns(() =>
+        {
+            // 削除を許さない共有モードで開いたままにして、復旧時の削除を失敗させる
+            lockedFile = new FileStream(Path.Combine(_directory, "update-carryover.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
+            return Task.FromException(new InvalidOperationException("登録に失敗"));
+        });
+        using AppUpdate update = Create(accessor.Object, "<AppInstaller><MainPackage Version=\"2.0.0.0\" /></AppInstaller>");
+
+        try
+        {
+            await update.Check.CheckAsync(true, _ => Task.FromResult(UpdateDialogAction.Accept));
+        }
+        finally
+        {
+            lockedFile?.Dispose();
+        }
+
+        _operations.Should().HaveCount(5);
+        _operations.Take(3).Should().Equal("suspend", "resume", "start");
+        _operations[3].Should().StartWith("failure:登録に失敗").And.Contain("適用前の状態へ戻す処理にも失敗しました");
+        _operations[4].Should().Be("reevaluate");
+        update.IsApplyPending.Should().BeFalse();
     }
 
     [Fact]
@@ -144,9 +176,10 @@ public sealed class AppUpdateTests : IDisposable
             () => _subscriptionState,
             () =>
             {
-                _operations.Add("stop");
+                _operations.Add("suspend");
                 return Task.CompletedTask;
             },
+            () => _operations.Add("resume"),
             () => _operations.Add("start"),
             () => _isWindowVisible,
             message => _operations.Add($"failure:{message}"),

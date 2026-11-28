@@ -135,12 +135,15 @@ internal sealed class UpdateApplyCoordinator(
         {
             await preparation.RecoverAsync();
         }
-        finally
+        catch (Exception ex)
         {
-            _state = ApplyState.Idle;
-            reportFailure(failure);
-            requestReevaluation();
+            await loggingService.WriteAsync($"[Update] 適用前の状態に戻せませんでした: {ex.Message}");
+            failure = $"{failure} 適用前の状態へ戻す処理にも失敗しました: {ex.Message}";
         }
+
+        _state = ApplyState.Idle;
+        reportFailure(failure);
+        requestReevaluation();
     }
 
     public void Dispose() => StopUptimeTimer();

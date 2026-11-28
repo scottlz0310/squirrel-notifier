@@ -17,21 +17,23 @@ internal sealed class UpdateRestartPreparation(AppUpdateHost host) : IUpdateRest
         _wasSubscribing = host.GetSubscriptionState() is SubscriptionState.Starting or SubscriptionState.Running or SubscriptionState.Error;
         bool wasWindowVisible = host.IsWindowVisible();
 
-        // 受信を先に止める。購読の子プロセスを残さず、保存の後に保留が増えないようにする
-        await host.StopSubscriptionAsync();
+        // 受信を先に止め、適用が終わるまで開始させない。購読の子プロセスを残さず、保存の後に保留が増えないようにする
+        await host.SuspendSubscriptionAsync();
         host.CarryOver.Save(host.PendingReviews.Snapshot());
         return wasWindowVisible ? string.Empty : "--tray";
     }
 
     public Task RecoverAsync()
     {
-        // 保留はメモリに残っているため、保存した分は破棄する
-        host.CarryOver.Delete();
+        // 受信の復旧を先に行う。保存した分の削除に失敗しても、購読を止めたままにしない
+        host.ResumeSubscription();
         if (_wasSubscribing)
         {
             host.StartSubscription();
         }
 
+        // 保留はメモリに残っているため、保存した分は破棄する
+        host.CarryOver.Delete();
         return Task.CompletedTask;
     }
 }
