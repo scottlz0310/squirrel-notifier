@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MSIX パッケージを生成する `scripts/Build-MsixPackage.ps1` とマニフェストを追加した。`%LocalAppData%\SquirrelNotifier` は仮想化から除外し、公開契約のファイルをパッケージ外から読めるようにする。配布物は引き続き MSI で、MSIX はリリースに含まれない（[#569](https://github.com/scottlz0310/squirrel-notifier/issues/569)）。
+
 ### Changed
 
 - 実行ウィンドウの agy の tool 進捗で、成功した tool の完了行を、10 秒以上かかった場合だけ表示するようにした。開始行と、終了コードが 0 以外の完了行は従来どおり表示する。reviewer の出力記録は変わらない（[#536](https://github.com/scottlz0310/squirrel-notifier/issues/536)）。
