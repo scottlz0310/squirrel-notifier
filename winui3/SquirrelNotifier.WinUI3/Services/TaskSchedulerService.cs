@@ -6,7 +6,7 @@ using System.Diagnostics;
 
 namespace SquirrelNotifier.WinUI3.Services;
 
-internal sealed class TaskSchedulerService : ITaskSchedulerService
+internal sealed class TaskSchedulerService : IRepairableAutoStartService
 {
     private const string _taskName = "Squirrel Notifier";
     private const int _notRegisteredExitCode = 1;
@@ -24,7 +24,12 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
         _processRunner = processRunner;
     }
 
-    public async Task<TaskRegistrationStatus> GetStatusAsync()
+    public string EnableConfirmationMessage
+        => $"以下の内容でタスクスケジューラへ登録します\n\n　タスク名: {_taskName}\n　実行ファイル: {GetExePath()}\n　引数: --tray\n　トリガー: ログオン時（現在のユーザー）";
+
+    public string DisableConfirmationMessage => "自動起動タスクを削除します。よろしいですか？";
+
+    public async Task<AutoStartStatus> GetStatusAsync()
     {
         string expectedExePath = EscapePs(GetExePath());
         string command =
@@ -43,19 +48,19 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
             await errorTask.ConfigureAwait(false);
             return proc.ExitCode switch
             {
-                0 => TaskRegistrationStatus.Registered,
-                _notRegisteredExitCode => TaskRegistrationStatus.NotRegistered,
-                _invalidExitCode => TaskRegistrationStatus.Invalid,
-                _ => TaskRegistrationStatus.CheckFailed,
+                0 => AutoStartStatus.Enabled,
+                _notRegisteredExitCode => AutoStartStatus.Disabled,
+                _invalidExitCode => AutoStartStatus.Invalid,
+                _ => AutoStartStatus.CheckFailed,
             };
         }
         catch
         {
-            return TaskRegistrationStatus.CheckFailed;
+            return AutoStartStatus.CheckFailed;
         }
     }
 
-    public async Task RegisterAsync()
+    public async Task EnableAsync()
     {
         string exePath = EscapePs(GetExePath());
         string command =
@@ -78,7 +83,7 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
         }
     }
 
-    public async Task UnregisterAsync()
+    public async Task DisableAsync()
     {
         string command = $"Unregister-ScheduledTask -TaskName '{EscapePs(_taskName)}' -Confirm:$false";
         ProcessStartInfo psi = BuildPsi(command);
@@ -96,13 +101,13 @@ internal sealed class TaskSchedulerService : ITaskSchedulerService
 
     public async Task RepairAsync()
     {
-        TaskRegistrationStatus status = await GetStatusAsync().ConfigureAwait(false);
-        if (status is TaskRegistrationStatus.Registered or TaskRegistrationStatus.Invalid)
+        AutoStartStatus status = await GetStatusAsync().ConfigureAwait(false);
+        if (status is AutoStartStatus.Enabled or AutoStartStatus.Invalid)
         {
-            await UnregisterAsync().ConfigureAwait(false);
+            await DisableAsync().ConfigureAwait(false);
         }
 
-        await RegisterAsync().ConfigureAwait(false);
+        await EnableAsync().ConfigureAwait(false);
     }
 
     internal static string GetExePath()

@@ -26,14 +26,14 @@ public class TaskSchedulerServiceTests
     }
 
     [Theory]
-    [InlineData(0, 1)]
-    [InlineData(1, 0)]
-    [InlineData(2, 2)]
-    [InlineData(3, 3)]
-    [InlineData(99, 3)]
+    [InlineData(0, nameof(AutoStartStatus.Enabled))]
+    [InlineData(1, nameof(AutoStartStatus.Disabled))]
+    [InlineData(2, nameof(AutoStartStatus.Invalid))]
+    [InlineData(3, nameof(AutoStartStatus.CheckFailed))]
+    [InlineData(99, nameof(AutoStartStatus.CheckFailed))]
     public async Task GetStatusAsync_ReturnsStatusBasedOnExitCode(
         int exitCode,
-        int expectedStatus)
+        string expectedStatus)
     {
         // Arrange
         Mock<IProcessInstance> mockProcess = CreateMockProcess(exitCode);
@@ -43,10 +43,10 @@ public class TaskSchedulerServiceTests
         var service = new TaskSchedulerService(mockRunner.Object);
 
         // Act
-        TaskRegistrationStatus status = await service.GetStatusAsync();
+        AutoStartStatus status = await service.GetStatusAsync();
 
         // Assert
-        status.Should().Be((TaskRegistrationStatus)expectedStatus);
+        status.Should().Be(Enum.Parse<AutoStartStatus>(expectedStatus));
     }
 
     [Fact]
@@ -59,10 +59,10 @@ public class TaskSchedulerServiceTests
         var service = new TaskSchedulerService(mockRunner.Object);
 
         // Act
-        TaskRegistrationStatus status = await service.GetStatusAsync();
+        AutoStartStatus status = await service.GetStatusAsync();
 
         // Assert
-        status.Should().Be(TaskRegistrationStatus.CheckFailed);
+        status.Should().Be(AutoStartStatus.CheckFailed);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class TaskSchedulerServiceTests
     }
 
     [Fact]
-    public async Task RegisterAsync_WhenExitCodeZero_Succeeds()
+    public async Task EnableAsync_WhenExitCodeZero_Succeeds()
     {
         // Arrange
         Mock<IProcessInstance> mockProcess = CreateMockProcess(0);
@@ -106,7 +106,7 @@ public class TaskSchedulerServiceTests
         var service = new TaskSchedulerService(mockRunner.Object);
 
         // Act
-        await service.RegisterAsync();
+        await service.EnableAsync();
 
         // Assert
         capturedPsi.Should().NotBeNull();
@@ -124,7 +124,7 @@ public class TaskSchedulerServiceTests
     }
 
     [Fact]
-    public async Task RegisterAsync_WhenExitCodeNonZero_ThrowsInvalidOperationException()
+    public async Task EnableAsync_WhenExitCodeNonZero_ThrowsInvalidOperationException()
     {
         // Arrange
         Mock<IProcessInstance> mockProcess = CreateMockProcess(1, "Access is denied.");
@@ -134,7 +134,7 @@ public class TaskSchedulerServiceTests
         var service = new TaskSchedulerService(mockRunner.Object);
 
         // Act
-        Func<Task> act = () => service.RegisterAsync();
+        Func<Task> act = () => service.EnableAsync();
 
         // Assert
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -142,7 +142,7 @@ public class TaskSchedulerServiceTests
     }
 
     [Fact]
-    public async Task UnregisterAsync_WhenExitCodeZero_Succeeds()
+    public async Task DisableAsync_WhenExitCodeZero_Succeeds()
     {
         // Arrange
         Mock<IProcessInstance> mockProcess = CreateMockProcess(0);
@@ -156,7 +156,7 @@ public class TaskSchedulerServiceTests
         var service = new TaskSchedulerService(mockRunner.Object);
 
         // Act
-        await service.UnregisterAsync();
+        await service.DisableAsync();
 
         // Assert
         capturedPsi!.FileName.Should().Be("powershell.exe");
@@ -166,7 +166,7 @@ public class TaskSchedulerServiceTests
     }
 
     [Fact]
-    public async Task UnregisterAsync_WhenExitCodeNonZero_ThrowsInvalidOperationException()
+    public async Task DisableAsync_WhenExitCodeNonZero_ThrowsInvalidOperationException()
     {
         // Arrange
         Mock<IProcessInstance> mockProcess = CreateMockProcess(1, "Access is denied.");
@@ -176,7 +176,7 @@ public class TaskSchedulerServiceTests
         var service = new TaskSchedulerService(mockRunner.Object);
 
         // Act
-        Func<Task> act = () => service.UnregisterAsync();
+        Func<Task> act = () => service.DisableAsync();
 
         // Assert
         await act.Should().ThrowAsync<InvalidOperationException>()

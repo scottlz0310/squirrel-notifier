@@ -6,9 +6,10 @@
 -->
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
          xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
-         IgnorableNamespaces="uap rescap virtualization">
+         IgnorableNamespaces="uap desktop rescap virtualization">
 
   <Identity Name="scottlz0310.SquirrelNotifier"
             Publisher="CN=scottlz0310"
@@ -45,6 +46,19 @@
                           BackgroundColor="transparent"
                           Square150x150Logo="Assets\Square150x150Logo.png"
                           Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!--
+          ログオン時の自動起動。利用者が設定画面で有効にするまで無効にする。
+          TaskId は StartupTaskAutoStartService と一致させる。引数は渡さず、起動種別でトレイ常駐を判定する。
+        -->
+        <desktop:Extension Category="windows.startupTask"
+                           Executable="SquirrelNotifier.WinUI3.exe"
+                           EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="SquirrelNotifierStartup"
+                               Enabled="false"
+                               DisplayName="Squirrel Notifier" />
+        </desktop:Extension>
+      </Extensions>
     </Application>
   </Applications>
 

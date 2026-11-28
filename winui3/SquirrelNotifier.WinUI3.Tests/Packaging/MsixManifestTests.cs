@@ -5,6 +5,7 @@
 using System.Xml.Linq;
 using FluentAssertions;
 using SquirrelNotifier.WinUI3.Helpers;
+using SquirrelNotifier.WinUI3.Services;
 using Xunit;
 
 namespace SquirrelNotifier.WinUI3.Tests.Packaging;
@@ -15,6 +16,7 @@ namespace SquirrelNotifier.WinUI3.Tests.Packaging;
 public class MsixManifestTests
 {
     private static readonly XNamespace _foundation = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+    private static readonly XNamespace _desktop = "http://schemas.microsoft.com/appx/manifest/desktop/windows10";
     private static readonly XNamespace _rescap = "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities";
     private static readonly XNamespace _virtualization = "http://schemas.microsoft.com/appx/manifest/virtualization/windows10";
 
@@ -41,6 +43,20 @@ public class MsixManifestTests
         identity.Attribute("Name")!.Value.Should().Be("scottlz0310.SquirrelNotifier");
         identity.Attribute("Publisher")!.Value.Should().Be("CN=scottlz0310");
         identity.Attribute("ProcessorArchitecture")!.Value.Should().Be("x64");
+    }
+
+    [Fact]
+    public void Manifest_ShouldDeclareStartupTaskThatApplicationControls()
+    {
+        XElement extension = _package.Descendants(_desktop + "Extension").Single();
+        XElement startupTask = extension.Element(_desktop + "StartupTask")!;
+
+        extension.Attribute("Category")!.Value.Should().Be("windows.startupTask");
+        extension.Attribute("Executable")!.Value.Should().Be($"{typeof(AppDataPaths).Assembly.GetName().Name}.exe");
+        startupTask.Attribute("TaskId")!.Value.Should().Be(StartupTaskAutoStartService.TaskId);
+
+        // 自動起動は利用者が設定画面で有効にする
+        startupTask.Attribute("Enabled")!.Value.Should().Be("false");
     }
 
     [Fact]

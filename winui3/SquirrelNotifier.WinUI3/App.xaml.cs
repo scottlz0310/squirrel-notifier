@@ -4,6 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.UI.Xaml;
+using Microsoft.Windows.AppLifecycle;
 using SquirrelNotifier.WinUI3.Helpers;
 using SquirrelNotifier.WinUI3.Services;
 
@@ -25,7 +26,7 @@ public partial class App : Application
     private readonly ReviewerWorkspaceCleanupService _workspaceCleanupService;
     private readonly ReviewCycleCoordinator _reviewCycleCoordinator;
     private readonly ReviewLauncherService _launcherService;
-    private readonly TaskSchedulerService _taskSchedulerService = new();
+    private readonly IAutoStartService _autoStartService = AutoStartServiceFactory.Create();
     private readonly ReviewRegistrationService _reviewRegistrationService;
     private readonly RateLimitReminderService _rateLimitReminderService;
     private readonly RateLimitFileService _rateLimitFileService;
@@ -85,11 +86,11 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        // Check for command-line arguments
-        string[] commandLineArgs = Environment.GetCommandLineArgs();
-        bool showWindow = !commandLineArgs.Contains("--tray") && !commandLineArgs.Contains("-t");
+        bool showWindow = LaunchWindowPolicy.ShouldShowWindow(
+            Environment.GetCommandLineArgs(),
+            AppInstance.GetCurrent().GetActivatedEventArgs().Kind);
 
-        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, new UrlOpener(), new FileOpener(), new ClipboardService(), new WindowIconService(), _taskSchedulerService, _reviewRegistrationService, _rateLimitReminderService, _rateLimitFileService, _reviewEventCleanupCoordinator, _reviewCycleCoordinator, _workspaceCleanupService, showWindow);
+        _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, new UrlOpener(), new FileOpener(), new ClipboardService(), new WindowIconService(), _autoStartService, _reviewRegistrationService, _rateLimitReminderService, _rateLimitFileService, _reviewEventCleanupCoordinator, _reviewCycleCoordinator, _workspaceCleanupService, showWindow);
         _window.Closed += OnWindowClosed;
 
         _window.Activate();
@@ -118,8 +119,13 @@ public partial class App : Application
         _rateLimitReminderService.Dispose();
     }
 
-    private void OnReactivated(object? sender, Microsoft.Windows.AppLifecycle.AppActivationArguments e)
+    private void OnReactivated(object? sender, AppActivationArguments e)
     {
+        if (!LaunchWindowPolicy.ShouldBringToFront(e.Kind))
+        {
+            return;
+        }
+
         // 二重起動を検知した別プロセスからリダイレクトされた場合、既存インスタンスのウィンドウを前面化する
         _ = _loggingService.WriteAsync("[INFO] 二重起動を検知。既存インスタンスのウィンドウを前面化します。");
         if (_window != null)

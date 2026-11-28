@@ -46,7 +46,7 @@
 | 40 | `_fileOpener` | 維持候補 | ファイル・フォルダー起動のサービス依存 |
 | 41 | `_clipboardService` | 維持候補 | クリップボード設定のサービス依存 |
 | 42 | `_windowIconService` | 維持候補 | ウィンドウアイコンの設定と、close 後のアイコン解放を委譲するサービス依存 |
-| 43 | `_taskSchedulerService` | 境界確認 | `AutoStartCoordinator` の構築に使用。構成ルートを`App`へ寄せるか後続で判断 |
+| 43 | `_autoStartService` | 境界確認 | `AutoStartCoordinator` の構築に使用。構成ルートを`App`へ寄せるか後続で判断 |
 | 44 | `_reviewRegistrationCoordinator` | 維持候補 | PR入力の検証と登録結果の表示分類を管理するCoordinator。登録サービスは構成時に注入する |
 | 45 | `_reviewEventCleanupCoordinator` | 維持候補 | イベントの終了確認・自動削除のCoordinator依存 |
 | 46 | `_rateLimitReminderService` | 境界確認 | リマインダーの操作依存。選択・状態反映の境界を確認 |

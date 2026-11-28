@@ -37,7 +37,7 @@ internal sealed record AutoStartOperationResult(
     public bool ShouldRefresh => Status is AutoStartOperationStatus.Completed or AutoStartOperationStatus.Failed;
 }
 
-/// <summary>タスクスケジューラーの状態を UI へ反映するための値.</summary>
+/// <summary>自動起動の状態を UI へ反映するための値.</summary>
 internal sealed record AutoStartStatusPresentation(
     bool? ToggleIsOn,
     string StatusText,
@@ -45,7 +45,7 @@ internal sealed record AutoStartStatusPresentation(
     bool IsOnboardingOpen);
 
 /// <summary>
-/// タスクスケジューラー操作の進行状態と、取得結果から UI 状態への変換を担当する（#268）。
+/// 自動起動の操作の進行状態と、取得結果から UI 状態への変換を担当する（#268）。
 /// ContentDialog や ToggleSwitch そのものは持たず、表示・反映は呼び出し側へ残す.
 /// </summary>
 /// <remarks>UI スレッドからの利用を前提とするためスレッドセーフではない.</remarks>
@@ -55,15 +55,15 @@ internal sealed class AutoStartCoordinator
     private const string _invalidStatusText = "要修復";
     private const string _statusCheckFailedText = "確認に失敗しました";
 
-    private readonly ITaskSchedulerService _taskSchedulerService;
+    private readonly IAutoStartService _autoStartService;
     private bool _isOperationPending;
     private bool _isStatusRefreshPending;
     private bool _isApplyingUiState;
 
-    public AutoStartCoordinator(ITaskSchedulerService taskSchedulerService)
+    public AutoStartCoordinator(IAutoStartService autoStartService)
     {
-        ArgumentNullException.ThrowIfNull(taskSchedulerService);
-        _taskSchedulerService = taskSchedulerService;
+        ArgumentNullException.ThrowIfNull(autoStartService);
+        _autoStartService = autoStartService;
     }
 
     /// <summary>Gets a value indicating whether toggleSwitch のイベントを無視すべきかを示す.</summary>
@@ -101,11 +101,11 @@ internal sealed class AutoStartCoordinator
 
             if (isEnabled)
             {
-                await _taskSchedulerService.RegisterAsync();
+                await _autoStartService.EnableAsync();
             }
             else
             {
-                await _taskSchedulerService.UnregisterAsync();
+                await _autoStartService.DisableAsync();
             }
 
             return new AutoStartOperationResult(AutoStartOperationStatus.Completed, null, null, null);
@@ -124,7 +124,7 @@ internal sealed class AutoStartCoordinator
         }
     }
 
-    /// <summary>自動起動タスクを再登録して修復する.</summary>
+    /// <summary>自動起動を登録し直して修復する.</summary>
     /// <returns>操作結果.</returns>
     public async Task<AutoStartOperationResult> RepairAsync()
     {
@@ -136,7 +136,12 @@ internal sealed class AutoStartCoordinator
         _isOperationPending = true;
         try
         {
-            await _taskSchedulerService.RepairAsync();
+            if (_autoStartService is not IRepairableAutoStartService repairable)
+            {
+                throw new InvalidOperationException("この配布方式の自動起動は、修復の対象ではありません。");
+            }
+
+            await repairable.RepairAsync();
             return new AutoStartOperationResult(AutoStartOperationStatus.Completed, null, null, null);
         }
         catch (Exception ex)
@@ -144,7 +149,7 @@ internal sealed class AutoStartCoordinator
             return new AutoStartOperationResult(
                 AutoStartOperationStatus.Failed,
                 null,
-                "タスク修復に失敗しました",
+                "自動起動の修復に失敗しました",
                 ex.Message);
         }
         finally
@@ -154,7 +159,7 @@ internal sealed class AutoStartCoordinator
     }
 
     /// <summary>
-    /// タスク状態を取得して UI 反映を行う。反映中は ToggleSwitch のイベントを抑止する.
+    /// 自動起動の状態を取得して UI 反映を行う。反映中は ToggleSwitch のイベントを抑止する.
     /// </summary>
     /// <param name="apply">表示状態を UI へ反映する処理.</param>
     /// <returns>状態の取得と UI 反映が完了する Task.</returns>
@@ -170,17 +175,22 @@ internal sealed class AutoStartCoordinator
         _isStatusRefreshPending = true;
         try
         {
-            TaskRegistrationStatus status;
+            AutoStartStatus status;
             try
             {
-                status = await _taskSchedulerService.GetStatusAsync();
+                status = await _autoStartService.GetStatusAsync();
             }
             catch (Exception)
             {
-                status = TaskRegistrationStatus.CheckFailed;
+                status = AutoStartStatus.CheckFailed;
             }
 
             AutoStartStatusPresentation presentation = DescribeStatus(status);
+            if (_autoStartService is not IRepairableAutoStartService)
+            {
+                presentation = presentation with { IsRepairEnabled = false };
+            }
+
             ApplyUiState(() => apply(presentation));
         }
         finally
@@ -189,17 +199,22 @@ internal sealed class AutoStartCoordinator
         }
     }
 
-    /// <summary>タスク状態を表示状態へ変換する.</summary>
-    /// <param name="status">タスクスケジューラーから取得した状態.</param>
+    /// <summary>自動起動の状態を表示状態へ変換する.</summary>
+    /// <param name="status">取得した状態.</param>
     /// <returns>UI へ反映する値.</returns>
-    public static AutoStartStatusPresentation DescribeStatus(TaskRegistrationStatus status)
+    public static AutoStartStatusPresentation DescribeStatus(AutoStartStatus status)
         => status switch
         {
-            TaskRegistrationStatus.Registered => new(true, "登録済み", true, false),
-            TaskRegistrationStatus.Invalid => new(false, _invalidStatusText, true, false),
-            TaskRegistrationStatus.CheckFailed => new(null, _statusCheckFailedText, false, false),
-            TaskRegistrationStatus.NotRegistered => new(false, "未登録", false, true),
-            _ => throw new ArgumentOutOfRangeException(nameof(status), status, "未知のタスク登録状態です。"),
+            AutoStartStatus.Enabled => new(true, "有効", true, false),
+            AutoStartStatus.EnabledByPolicy => new(true, "有効（管理者のポリシー）", false, false),
+            AutoStartStatus.Invalid => new(false, _invalidStatusText, true, false),
+            AutoStartStatus.CheckFailed => new(null, _statusCheckFailedText, false, false),
+            AutoStartStatus.Disabled => new(false, "無効", false, true),
+
+            // 利用者やポリシーが無効にした状態では、有効化を促す案内を出さない
+            AutoStartStatus.DisabledByUser => new(false, "無効（Windows の設定）", false, false),
+            AutoStartStatus.DisabledByPolicy => new(false, "無効（管理者のポリシー）", false, false),
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, "未知の自動起動の状態です。"),
         };
 
     /// <summary>UI 反映中のイベントを抑止しながら処理を実行する.</summary>
@@ -219,18 +234,8 @@ internal sealed class AutoStartCoordinator
         }
     }
 
-    private static AutoStartConfirmation BuildConfirmation(bool isEnabled)
-    {
-        if (isEnabled)
-        {
-            string exePath = TaskSchedulerService.GetExePath();
-            return new AutoStartConfirmation(
-                "自動起動を設定します",
-                $"以下の内容でタスクスケジューラへ登録します\n\n　タスク名: Squirrel Notifier\n　実行ファイル: {exePath}\n　引数: --tray\n　トリガー: ログオン時（現在のユーザー）");
-        }
-
-        return new AutoStartConfirmation(
-            "自動起動を解除します",
-            "自動起動タスクを削除します。よろしいですか？");
-    }
+    private AutoStartConfirmation BuildConfirmation(bool isEnabled)
+        => isEnabled
+            ? new AutoStartConfirmation("自動起動を設定します", _autoStartService.EnableConfirmationMessage)
+            : new AutoStartConfirmation("自動起動を解除します", _autoStartService.DisableConfirmationMessage);
 }

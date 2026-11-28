@@ -12,10 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - MSIX パッケージを生成する `scripts/Build-MsixPackage.ps1` とマニフェストを追加した。`%LocalAppData%\SquirrelNotifier` は仮想化から除外し、公開契約のファイルをパッケージ外から読めるようにする。配布物は引き続き MSI で、MSIX はリリースに含まれない（[#569](https://github.com/scottlz0310/squirrel-notifier/issues/569)）。
+- MSIX パッケージ版の自動起動を、スタートアップタスクで切り替えられるようにした。有効にすると、ログオン時にトレイへ常駐する（[#569](https://github.com/scottlz0310/squirrel-notifier/issues/569)）。
 
 ### Changed
 
 - 実行ウィンドウの agy の tool 進捗で、成功した tool の完了行を、10 秒以上かかった場合だけ表示するようにした。開始行と、終了コードが 0 以外の完了行は従来どおり表示する。reviewer の出力記録は変わらない（[#536](https://github.com/scottlz0310/squirrel-notifier/issues/536)）。
+- 設定画面の「タスク状態」を「自動起動の状態」に改め、状態の表示を「登録済み」「未登録」から「有効」「無効」にした。
 
 ### Fixed
 
