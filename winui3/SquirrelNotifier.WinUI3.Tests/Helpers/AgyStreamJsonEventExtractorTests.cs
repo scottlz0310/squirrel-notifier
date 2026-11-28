@@ -42,9 +42,13 @@ public sealed class AgyStreamJsonEventExtractorTests
     [InlineData("ACTIVE", "run_command", "Start-Sleep -Seconds 4", null, null, "[tool] run_command: Start-Sleep -Seconds 4")]
     [InlineData("ACTIVE", "run_command", "gh api\n  \"repos/o/r/pulls/1\"\t--jq .number", null, null, "[tool] run_command: gh api \"repos/o/r/pulls/1\" --jq .number")]
     [InlineData("ACTIVE", "view_file", null, null, null, "[tool] view_file")]
-    [InlineData("DONE", "run_command", null, "Command exited with code 0.\n\nNo output from the command.", 4.3541175, "[tool] run_command 完了 4.4秒")]
+    [InlineData("DONE", "run_command", null, "Command exited with code 0.\n\nNo output from the command.", 10.0, "[tool] run_command 完了 10.0秒")]
+    [InlineData("DONE", "read_file", null, null, 113.35, "[tool] read_file 完了 113.4秒")]
     [InlineData("DONE", "run_command", null, "Command exited with code 1.\n\nCommand output:\n{secret}", 0.6, "[tool] run_command 完了 0.6秒 終了コード 1")]
+    [InlineData("DONE", "run_command", null, "Command exited with code -1.", null, "[tool] run_command 完了 終了コード -1")]
     [InlineData("DONE", "mcp_call", null, null, null, "[tool] mcp_call 完了")]
+    [InlineData("ERROR", "read_file", null, null, 0.1, "[tool] read_file 失敗 0.1秒")]
+    [InlineData("ERROR", "read_file", null, null, null, "[tool] read_file 失敗")]
     public void TryExtract_ShouldShowToolProgress_WithoutOutputBodyOrNonCommandParameters(
         string state,
         string toolName,
@@ -59,6 +63,20 @@ public sealed class AgyStreamJsonEventExtractorTests
 
         extracted.Should().BeTrue();
         result!.LogLines.Should().Equal(expected);
+        result.SessionId.Should().Be(Guid.Parse(_sessionId));
+    }
+
+    [Theory]
+    [InlineData("read_file", null, 0.1)]
+    [InlineData("run_command", "Command exited with code 0.\n\nNo output from the command.", 3.2)]
+    [InlineData("call_mcp_tool", null, 9.999)]
+    public void TryExtract_ShouldOmitCompletionOfQuickSuccessfulTools(string toolName, string? output, double durationSeconds)
+    {
+        string line = BuildToolStepLine("DONE", toolName, null, output, durationSeconds);
+
+        AgyStreamJsonEventExtractor.TryExtract(line, out AgyStreamJsonExtraction? result).Should().BeTrue();
+
+        result!.LogLines.Should().BeEmpty();
         result.SessionId.Should().Be(Guid.Parse(_sessionId));
     }
 
