@@ -16,6 +16,9 @@ namespace SquirrelNotifier.WinUI3.Services;
 
 internal sealed class ReviewLauncherService : IReviewLauncherService
 {
+    // 本体の終了後に出力の EOF を待つ上限。通常の終了では即座に EOF になる.
+    private static readonly TimeSpan _outputDrainTimeout = TimeSpan.FromSeconds(5);
+
     private readonly SettingsService _settingsService;
     private readonly LoggingService _loggingService;
     private readonly IProcessRunner _processRunner;
@@ -352,8 +355,10 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         LauncherWatchdog? watchdog = null;
         LauncherWatchdogTimeout timeout = LauncherWatchdogTimeout.None;
-        Task<string>? stdoutTask = null;
-        Task<string>? stderrTask = null;
+        Task? stdoutTask = null;
+        Task? stderrTask = null;
+        var stdoutLines = new List<string>();
+        var stderrLines = new List<string>();
         ReviewerOutputRecorder? recorder = null;
         var parsedSessionId = new ParsedSessionIdCapture();
         bool processStarted = false;
@@ -466,19 +471,25 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 #pragma warning disable CA2025
             stdoutTask = PumpStdoutAsync(
                 _activeProcess.StandardOutput,
+                stdoutLines,
                 session,
                 plan.OutputFormat,
                 parsedSessionId,
                 watchdog is null ? null : line => watchdog.Observe(line, plan.OutputFormat),
                 recorder,
                 combinedToken);
-            stderrTask = PumpStderrAsync(_activeProcess.StandardError, session, recorder, combinedToken);
+            stderrTask = PumpStderrAsync(_activeProcess.StandardError, stderrLines, session, recorder, combinedToken);
 #pragma warning restore CA2025
 
             await _activeProcess.WaitForExitAsync(combinedToken).ConfigureAwait(false);
 
-            string stdout = await stdoutTask.ConfigureAwait(false);
-            string stderr = await stderrTask.ConfigureAwait(false);
+            // 実行の完了は本体の終了で決まる。残りの読み取りは無応答でも時間切れでもないため、監視を止める。
+            watchdog?.Dispose();
+            cts.CancelAfter(Timeout.InfiniteTimeSpan);
+            await DrainOutputAsync(stdoutTask, stderrTask, session, recorder, cts).ConfigureAwait(false);
+
+            string stdout = string.Join('\n', stdoutLines);
+            string stderr = string.Join('\n', stderrLines);
 
             int exitCode = _activeProcess.ExitCode;
             recorder?.WriteNote($"プロセスが終了しました。ExitCode={exitCode}");
@@ -839,8 +850,39 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         return $"{baseTemplate} {additionalTemplate}";
     }
 
-    private static async Task<string> PumpStdoutAsync(
+    // 本体が終了しても、子孫プロセスが出力パイプの書き込み側を継承して残ると EOF が届かない（#566）。
+    // 本体が書いた出力はこの時点でパイプにあるため、上限まで読んで打ち切り、打ち切ったことを残す.
+    private async Task DrainOutputAsync(
+        Task stdoutTask,
+        Task stderrTask,
+        AgentExecutionSession session,
+        ReviewerOutputRecorder? recorder,
+        CancellationTokenSource readCancellation)
+    {
+        try
+        {
+            await Task.WhenAll(stdoutTask, stderrTask)
+                .WaitAsync(_outputDrainTimeout, _timeProvider, readCancellation.Token)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            string openStreams = string.Join(
+                ", ",
+                new[] { stdoutTask.IsCompleted ? null : "stdout", stderrTask.IsCompleted ? null : "stderr" }.OfType<string>());
+            await readCancellation.CancelAsync().ConfigureAwait(false);
+            await WaitForPumpsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+
+            string message = $"プロセスは終了しましたが、出力が {_outputDrainTimeout.TotalSeconds:0} 秒以内に閉じなかったため、読み取りを打ち切りました。子孫プロセスが出力を保持している可能性があります。未クローズ: {openStreams}";
+            recorder?.WriteNote(message);
+            await LogAsync(message).ConfigureAwait(false);
+            session.PublishStdout(message);
+        }
+    }
+
+    private static async Task PumpStdoutAsync(
         StreamReader reader,
+        List<string> lines,
         AgentExecutionSession session,
         LauncherOutputFormat outputFormat,
         ParsedSessionIdCapture parsedSessionId,
@@ -848,7 +890,6 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         ReviewerOutputRecorder? recorder,
         CancellationToken cancellationToken)
     {
-        var lines = new List<string>();
         var copilotExtractor = new CopilotJsonEventExtractor();
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
         {
@@ -906,8 +947,6 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
                 session.PublishStdout(line);
             }
         }
-
-        return string.Join('\n', lines);
     }
 
     private static void PublishStructuredOutput(
@@ -924,9 +963,8 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
         }
     }
 
-    private static async Task<string> PumpStderrAsync(StreamReader reader, AgentExecutionSession session, ReviewerOutputRecorder? recorder, CancellationToken cancellationToken)
+    private static async Task PumpStderrAsync(StreamReader reader, List<string> lines, AgentExecutionSession session, ReviewerOutputRecorder? recorder, CancellationToken cancellationToken)
     {
-        var lines = new List<string>();
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string rawLine)
         {
             // reader は Latin1 で開かれている。cmd.exe の失敗メッセージはここで復元される（#231）。
@@ -937,8 +975,6 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
             recorder?.WriteStderr(line);
             session.PublishStderr(line);
         }
-
-        return string.Join('\n', lines);
     }
 
     // reviewer の生の出力を記録するファイルを開く。記録は調査用の副経路なので、保存先の整理や
@@ -975,9 +1011,9 @@ internal sealed class ReviewLauncherService : IReviewLauncherService
 
     // キャンセル・タイムアウト・例外時に reader task を残存させないための後始末。
     // プロセス kill / トークンキャンセルに伴う読み取り側の例外は正常な終了経路として扱う.
-    private static async Task WaitForPumpsAsync(Task<string>? stdoutTask, Task<string>? stderrTask)
+    private static async Task WaitForPumpsAsync(Task? stdoutTask, Task? stderrTask)
     {
-        foreach (Task<string>? pump in new[] { stdoutTask, stderrTask })
+        foreach (Task? pump in new[] { stdoutTask, stderrTask })
         {
             if (pump == null)
             {
