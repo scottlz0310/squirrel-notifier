@@ -14,6 +14,7 @@ namespace SquirrelNotifier.WinUI3;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1515", Justification = "WinUI entry point requires public accessibility")]
 public partial class App : Application
 {
+    private readonly ExtendedActivationKind _activationKind;
     private MainWindow? _window;
     private readonly NotificationService _notificationService = new();
     private readonly LoggingService _loggingService = new();
@@ -33,8 +34,9 @@ public partial class App : Application
     private readonly StatuslineSummaryService _statuslineSummaryService;
     private readonly ReviewStatusService _reviewStatusService;
 
-    public App()
+    public App(ExtendedActivationKind activationKind)
     {
+        _activationKind = activationKind;
         InitializeComponent();
 
         UnhandledException += OnApplicationUnhandledException;
@@ -86,9 +88,8 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        bool showWindow = LaunchWindowPolicy.ShouldShowWindow(
-            Environment.GetCommandLineArgs(),
-            AppInstance.GetCurrent().GetActivatedEventArgs().Kind);
+        bool showWindow = LaunchWindowPolicy.ShouldShowWindow(Environment.GetCommandLineArgs(), _activationKind);
+        _ = _loggingService.WriteAsync(LaunchWindowPolicy.DescribeLaunch(_activationKind, showWindow));
 
         _window = new MainWindow(_subscriptionService, _loggingService, _settingsService, _autoUpdateService, _notificationService, _launcherService, new UrlOpener(), new FileOpener(), new ClipboardService(), new WindowIconService(), _autoStartService, _reviewRegistrationService, _rateLimitReminderService, _rateLimitFileService, _reviewEventCleanupCoordinator, _reviewCycleCoordinator, _workspaceCleanupService, showWindow);
         _window.Closed += OnWindowClosed;

@@ -22,6 +22,14 @@ public class LaunchWindowPolicyTests
     }
 
     [Theory]
+    [InlineData((int)ExtendedActivationKind.Launch, true, "[INFO] 起動種別: Launch、ウィンドウ: 表示")]
+    [InlineData((int)ExtendedActivationKind.StartupTask, false, "[INFO] 起動種別: StartupTask、ウィンドウ: トレイに常駐")]
+    public void DescribeLaunch_ShouldRecordActivationKindAndDecision(int kind, bool showWindow, string expected)
+    {
+        LaunchWindowPolicy.DescribeLaunch((ExtendedActivationKind)kind, showWindow).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData((int)ExtendedActivationKind.Launch, true)]
     [InlineData((int)ExtendedActivationKind.StartupTask, false)]
     public void ShouldBringToFront_ShouldIgnoreRedirectedStartupTask(int kind, bool expected)
