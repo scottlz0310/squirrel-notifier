@@ -14,7 +14,7 @@ public class AutoStartServiceFactoryTests
     public void Create_ShouldUseTaskSchedulerWithoutPackageIdentity()
     {
         // テストプロセスはパッケージ化していない
-        AutoStartServiceFactory.HasPackageIdentity().Should().BeFalse();
+        PackageIdentity.Exists().Should().BeFalse();
         AutoStartServiceFactory.Create().Should().BeOfType<TaskSchedulerService>();
     }
 

@@ -65,6 +65,9 @@ internal static class ReviewAutoStartPolicy
     /// <summary>別のレビューが実行中で保留したときの、通知に出す短い理由（#340）.</summary>
     public const string BusyHoldLabel = "別のレビューが実行中";
 
+    /// <summary>更新の適用を待つ間の保留で、通知に表示する理由.</summary>
+    public const string UpdatePendingHoldLabel = "更新の適用待ち";
+
     /// <summary>Auto-Pause 中で保留したときの、通知に出す短い理由（#340）.</summary>
     public const string AutoPausedHoldLabel = "Auto-Pause 中";
 

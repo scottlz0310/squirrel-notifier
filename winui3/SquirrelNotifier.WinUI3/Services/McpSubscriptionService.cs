@@ -14,6 +14,8 @@ namespace SquirrelNotifier.WinUI3.Services;
 internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscriptionService
 {
     private const int _maxRecentEvents = 20;
+    private const string _suspendedForRestartMessage = "更新の適用中のため、購読を開始できません。";
+    private bool _isSuspendedForRestart;
     private const string _authenticationRequiredErrorTag = SubscriptionRetryPolicy.AuthenticationRequiredErrorTag;
 
     // 購読は preflight（subscriber の --help）を通れば Running になるため、通常は数秒で確定する。
@@ -146,7 +148,34 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
 
     public void Start()
     {
-        _ = TryBeginStart();
+        if (TryBeginStart() == StartAttempt.RejectedForRestart)
+        {
+            ReportStatus(_suspendedForRestartMessage);
+        }
+    }
+
+    /// <summary>
+    /// 更新の再起動の前に購読を止め、<see cref="ResumeAfterRestartFailure"/> まで開始を受け付けない（#569）。
+    /// 停止の後に開始されると、保留の保存より後に受信したレビューが再起動で失われる.
+    /// </summary>
+    /// <returns>停止の完了を表す Task.</returns>
+    public async Task SuspendForRestartAsync()
+    {
+        lock (_lifecycleLock)
+        {
+            _isSuspendedForRestart = true;
+        }
+
+        await StopAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>再起動せずに終わった場合に、開始を再び受け付ける。購読は開始しない.</summary>
+    public void ResumeAfterRestartFailure()
+    {
+        lock (_lifecycleLock)
+        {
+            _isSuspendedForRestart = false;
+        }
     }
 
     // 開始可否の判定と、State / _stopCts / _loopTask の差し替えを 1 つの排他区間で行う（#208）。
@@ -157,6 +186,11 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
     {
         lock (_lifecycleLock)
         {
+            if (_isSuspendedForRestart)
+            {
+                return StartAttempt.RejectedForRestart;
+            }
+
             if (_state == SubscriptionState.Running || _state == SubscriptionState.Starting)
             {
                 return StartAttempt.AlreadyActive;
@@ -214,6 +248,15 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
                 {
                     Outcome = SubscriptionStartOutcome.Failed,
                     ErrorMessage = "購読の停止処理中です。完了してからもう一度お試しください。",
+                };
+            }
+
+            if (attempt == StartAttempt.RejectedForRestart)
+            {
+                return new SubscriptionStartResult
+                {
+                    Outcome = SubscriptionStartOutcome.Failed,
+                    ErrorMessage = _suspendedForRestartMessage,
                 };
             }
 
@@ -433,6 +476,9 @@ internal sealed class McpSubscriptionService : IAsyncDisposable, IReviewSubscrip
 
         /// <summary>停止処理中のため開始しなかった.</summary>
         RejectedWhileStopping,
+
+        /// <summary>更新の再起動を待っているため開始しなかった.</summary>
+        RejectedForRestart,
     }
 
     public async Task StopAsync()

@@ -24,6 +24,9 @@ internal enum ReviewStartStatus
     /// <summary>別のレビューが実行中のため見送った.</summary>
     SkippedBusy,
 
+    /// <summary>更新の適用を待っているため、手動起動を見送った。自動起動では <see cref="SkippedBusy"/> として保留する（#569）.</summary>
+    SkippedUpdatePending,
+
     /// <summary>
     /// Auto-Pause（#147）中で override を確認できないため見送った。自動起動では解除後の
     /// 再評価まで保留する（#340）.
@@ -121,6 +124,7 @@ internal sealed class ReviewStartCoordinator
     private readonly ReviewCiSettleGate? _ciSettleGate;
     private readonly AgyModelSelectionService _agyModelSelectionService;
     private readonly LauncherExecutionSettingsService _executionSettingsService;
+    private readonly Func<bool> _isUpdatePending;
 
     // PR ごとの reviewer 起動の世代。await をまたぐ自動評価が、その間の別経路の起動を検出するために使う
     private readonly Dictionary<string, int> _reviewerStartGenerations = new(StringComparer.OrdinalIgnoreCase);
@@ -140,7 +144,8 @@ internal sealed class ReviewStartCoordinator
         ReviewCycleCoordinator? reviewCycleCoordinator = null,
         ReviewCiSettleGate? ciSettleGate = null,
         AgyModelSelectionService? agyModelSelectionService = null,
-        LauncherExecutionSettingsService? executionSettingsService = null)
+        LauncherExecutionSettingsService? executionSettingsService = null,
+        Func<bool>? isUpdatePending = null)
     {
         ArgumentNullException.ThrowIfNull(launcherService);
         ArgumentNullException.ThrowIfNull(settingsService);
@@ -161,6 +166,7 @@ internal sealed class ReviewStartCoordinator
         _ciSettleGate = ciSettleGate;
         _agyModelSelectionService = agyModelSelectionService ?? new AgyModelSelectionService();
         _executionSettingsService = executionSettingsService ?? new LauncherExecutionSettingsService();
+        _isUpdatePending = isUpdatePending ?? (() => false);
     }
 
     /// <summary>
@@ -173,7 +179,13 @@ internal sealed class ReviewStartCoordinator
     public event EventHandler? StartAbandoned;
 
     /// <summary>Gets a value indicating whether 起動処理が進行中、または実行中のレビューがあるか.</summary>
-    public bool IsBusy => _isStartPending || _launcherService.IsRunning;
+    public bool IsReviewActive => _isStartPending || _launcherService.IsRunning;
+
+    /// <summary>Gets a value indicating whether 新しいレビューを開始できないか（実行中、または更新の適用待ち）.</summary>
+    public bool IsBusy => IsReviewActive || _isUpdatePending();
+
+    private string CurrentHoldLabel
+        => _isUpdatePending() ? ReviewAutoStartPolicy.UpdatePendingHoldLabel : ReviewAutoStartPolicy.BusyHoldLabel;
 
     /// <summary>
     /// イベントの PR が、reviewer の自動起動の前に CI の確定を待っている最中か（暫定、#456）。
@@ -204,7 +216,7 @@ internal sealed class ReviewStartCoordinator
         if (outcome == ReviewAutoStartOutcome.SkippedBusy)
         {
             await HoldForBusyAsync(reviewEvent);
-            return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, ReviewAutoStartPolicy.BusyHoldLabel);
+            return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, CurrentHoldLabel);
         }
 
         if (ReviewAutoStartPolicy.DescribeSkipReason(outcome) is string skipReason)
@@ -297,6 +309,18 @@ internal sealed class ReviewStartCoordinator
                 "手動起動では Auto-Pause override の確認手段が必要です。");
         }
 
+        // 更新の適用を待つ間は開始しない。開始すると適用が延び、適用中なら終了させられる（#569）
+        if (_isUpdatePending())
+        {
+            if (trigger == ReviewStartTrigger.Automatic)
+            {
+                await HoldForBusyAsync(reviewEvent);
+                return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, CurrentHoldLabel);
+            }
+
+            return ReviewStartResult.Skipped(ReviewStartStatus.SkippedUpdatePending);
+        }
+
         // 再入はダイアログを出さず黙って無視する — ここでダイアログを出すこと自体が
         // 多重表示例外の原因になるため（#147 レビュー指摘）
         if (_isStartPending)
@@ -306,7 +330,7 @@ internal sealed class ReviewStartCoordinator
                 // 自動起動の判定後、ログ書き込みの await 中に手動起動が始まった場合に到達する。
                 // 実行中と同じく保留しないと、再評価中のイベントが起動されないまま失われる（#339）
                 await HoldForBusyAsync(reviewEvent);
-                return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, ReviewAutoStartPolicy.BusyHoldLabel);
+                return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, CurrentHoldLabel);
             }
 
             return ReviewStartResult.Skipped(ReviewStartStatus.SkippedReentrant);
@@ -318,7 +342,7 @@ internal sealed class ReviewStartCoordinator
             {
                 // 判定後にここへ到達するのは、判定と起動の間に別のレビューが始まった場合のみ
                 await HoldForBusyAsync(reviewEvent);
-                return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, ReviewAutoStartPolicy.BusyHoldLabel);
+                return ReviewStartResult.Held(ReviewStartStatus.SkippedBusy, CurrentHoldLabel);
             }
 
             return ReviewStartResult.Skipped(ReviewStartStatus.SkippedBusy);
@@ -472,7 +496,12 @@ internal sealed class ReviewStartCoordinator
     }
 
     private Task HoldForBusyAsync(ReviewEvent reviewEvent)
-        => HoldAsync(reviewEvent, ReviewHoldKind.Busy, $"{ReviewAutoStartPolicy.BusyReasonText}。実行終了後に自動起動します");
+    {
+        string reasonText = _isUpdatePending()
+            ? $"{ReviewAutoStartPolicy.UpdatePendingHoldLabel}のため。再起動の後に自動起動します"
+            : $"{ReviewAutoStartPolicy.BusyReasonText}。実行終了後に自動起動します";
+        return HoldAsync(reviewEvent, ReviewHoldKind.Busy, reasonText);
+    }
 
     // Auto-Pause は解除しても gate を再評価する契機が無いため、リセット時刻へ再評価を予約する（#340）
     private Task HoldForAutoPauseAsync(ReviewEvent reviewEvent, AutoPausedLimit pausedLimit)

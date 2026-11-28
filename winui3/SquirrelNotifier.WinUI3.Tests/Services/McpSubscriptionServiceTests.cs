@@ -134,6 +134,35 @@ public class McpSubscriptionServiceTests : IDisposable
         }
     }
 
+    // 更新の適用中に開始されると、保留の保存より後に受信したレビューが再起動で失われる（#569）
+    [Fact]
+    public async Task SuspendForRestartAsync_ShouldRejectEveryStartUntilResumed()
+    {
+        var mockRunner = new Mock<IProcessRunner>();
+        mockRunner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Throws(new InvalidOperationException("起動しない"));
+        var service = new McpSubscriptionService(_settingsService, _notificationService, _loggingService, mockRunner.Object, maxRetries: 0);
+        List<string> statuses = [];
+        service.StatusTextChanged += (_, text) => statuses.Add(text);
+
+        await service.SuspendForRestartAsync();
+        service.Start();
+        SubscriptionStartResult result = await service.StartAsync();
+
+        service.State.Should().Be(SubscriptionState.Stopped);
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("更新の適用中のため、購読を開始できません。");
+        statuses.Should().Contain("更新の適用中のため、購読を開始できません。");
+        mockRunner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Never);
+
+        service.ResumeAfterRestartFailure();
+        service.State.Should().Be(SubscriptionState.Stopped, "解除だけでは開始しない");
+        SubscriptionStartResult resumed = await service.StartAsync();
+
+        resumed.ErrorMessage.Should().NotBe("更新の適用中のため、購読を開始できません。");
+        mockRunner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.AtLeastOnce);
+        await service.StopAsync();
+    }
+
     [Fact]
     public async Task Start_ShouldSucceedAndResubscribeOnSuccessJson()
     {
