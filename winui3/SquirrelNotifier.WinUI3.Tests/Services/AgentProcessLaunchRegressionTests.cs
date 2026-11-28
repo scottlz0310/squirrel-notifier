@@ -185,6 +185,74 @@ public class AgentProcessLaunchRegressionTests : IDisposable
     }
 
     [Fact]
+    public async Task ReviewLauncher_ShouldComplete_WhenDescendantKeepsOutputPipesOpenAfterExit()
+    {
+        // エージェント本体の終了後も、子孫プロセス（MCP サーバーが起動した常駐プロセスなど）が
+        // 標準出力・標準エラーのハンドルを継承して残ると EOF が届かない（#566）。
+        // 孫プロセスはシグナルが届くまで残るため、完了は読み取りの打ち切りでしか得られない.
+        string signal = $"SquirrelOrphan{Guid.NewGuid():N}";
+        string script = CreateScript("lingering-agent.cmd", $"""
+            @echo off
+            chcp 65001 >nul
+            start "" /b /d "%SystemRoot%" waitfor.exe /t 60 {signal} >nul
+            echo agent-done
+            exit /b 0
+            """);
+
+        var settingsService = new SettingsService(_tempDir, pnpmBinDir: string.Empty);
+        settingsService.UpdateSettings(
+            "my-review-cmd", string.Empty,
+            "http://localhost:3000", ["queue://review/queue"], 30000,
+            script, string.Empty, string.Empty,
+            script, string.Empty, string.Empty,
+            120000, false,
+            "custom", "custom");
+        var loggingService = new LoggingService(_tempDir);
+        var service = new ReviewLauncherService(settingsService, loggingService, new ProcessRunner());
+
+        var reviewEvent = new ReviewEvent
+        {
+            EventId = "lingering-descendant-regression",
+            Repository = "scottlz0310/squirrel-notifier",
+            PrNumber = 52,
+            PrUrl = "https://github.com/scottlz0310/squirrel-notifier/pull/52",
+            Source = "queue://review/queue",
+            Reason = "opened",
+        };
+
+        try
+        {
+            AgentExecutionSession session = service.StartSession(reviewEvent, LauncherRole.Reviewer, CancellationToken.None);
+            LauncherResult result = await session.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+
+            result.Success.Should().BeTrue();
+            result.ExitCode.Should().Be(0);
+            result.Stdout.Should().Contain("agent-done");
+
+            var published = new List<string>();
+            await foreach (AgentExecutionEvent executionEvent in session.ReadEventsAsync())
+            {
+                published.Add(executionEvent.Text ?? string.Empty);
+            }
+
+            published.Should().Contain(
+                line => line.Contains("読み取りを打ち切りました", StringComparison.Ordinal),
+                "孫プロセスがパイプを保持していることがこの回帰テストの前提");
+        }
+        finally
+        {
+            service.Cancel();
+            using Process release = Process.Start(new ProcessStartInfo("waitfor.exe", ["/si", signal])
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+            })!;
+            await release.WaitForExitAsync();
+        }
+    }
+
+    [Fact]
     public async Task ReviewLauncher_ShouldRunDummyAgentInExplicitWorkspace_WhenStartedFromSystem32()
     {
         // タスクスケジューラ起動相当: 親プロセスの cwd が C:\Windows\System32 でも、

@@ -95,6 +95,18 @@ Copilot の標準プリセットも JSONL 出力で監視する。`CopilotJsonOu
 
 CLI は安全な `.cmd` / `.bat` factory で起動し、`call --args-stdin --json` の stdin へ JSON を渡して EOF を通知する。呼び出し上限は30秒。失敗・認証エラー・結果不明を自動再試行しない。PR・HEAD ごとの投稿試行マーカーを設定ディレクトリの `runner-escalations/` へ送信前に原子的に作成し、アプリを再起動しても同じ HEAD では再投稿しない。マーカー作成後に起動できなかった場合も試行済みとなる。手動で再投稿を判断する場合は、先に GitHub で重複の有無を確認する。会話通知や定型コメントの実経路の E2E は、配備済みの投稿 tool と独立 reviewer を使って別途検証する。
 
+## 実行の完了判定と出力の打ち切り（#566）
+
+実行の完了はエージェント本体のプロセス終了で決め、成否は終了コードで判定する。出力パイプの EOF は完了の条件にしない。本体の終了後は stdout / stderr を最大5秒読み切り、閉じなければ読み取りを打ち切る。打ち切ったことと未クローズのストリーム名は、実行ウィンドウ・`winui3.log`・reviewer の出力記録に残す。本体の終了後は無応答監視と `LauncherTimeoutMs` の対象外で、利用者の中止だけを受け付ける。改行で終わらない最後の行は、打ち切り時には取り込まれない。
+
+Windows ではハンドルを継承して起動した子孫プロセスが、本体の終了後もパイプの書き込み側を保持できる。2026-11 に確認した事例の条件は次のとおりで、`codex exec` 本体は `turn.completed` の約1.5秒後に `ExitCode=0` で終了していた（`0.171.0` と `0.172.0` の両方で再現）。
+
+1. MCP サーバー（`desktop-touch-mcp` v2.4.4）が、トレイアイコン用に `powershell.exe` を非 detached で起動する。
+2. `PATH` の先頭に、`powershell.exe` を `pwsh.exe` へ転送する独自のシムがある。
+3. MCP サーバーの終了でシムは終了するが、その子の `pwsh.exe` は残り、継承した stdout / stderr を保持し続ける。
+
+`desktop-touch` を無効にするか、シムを `PATH` から外すと、本体の終了と同時に EOF になる。Squirrel Notifier は残った子孫プロセスを終了しない。
+
 ## codex exec のハング対策
 
 codex 等の非対話 print / exec モードは、プロンプトを引数で受け取っても標準入力の EOF を待って停止することがある（[openai/codex#20919](https://github.com/openai/codex/issues/20919)）。`ReviewLauncherService` は起動直後に標準入力を即座に閉じ、EOF を通知することでこれを回避している。

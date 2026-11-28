@@ -1429,6 +1429,147 @@ public class ReviewLauncherServiceTests : IDisposable
         return arguments;
     }
 
+    // ---- #566: 本体の終了後も出力パイプが閉じない場合 ----
+    [Theory]
+    [InlineData(0, true, true)]
+    [InlineData(0, true, false)]
+    [InlineData(0, false, true)]
+    [InlineData(1, true, true)]
+    public async Task LaunchAsync_ShouldCompleteByExitCodeWhenOutputStaysOpenAfterExit(int exitCode, bool stdoutOpen, bool stderrOpen)
+    {
+        ConfigureSettings();
+        var clock = new LauncherWatchdogTests.ManualClock();
+        Mock<IProcessInstance> process = CreateLingeringOutputProcess(exitCode, stdoutOpen, stderrOpen);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object, timeProvider: clock);
+
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent("lingering-output"), LauncherRole.Reviewer, CancellationToken.None);
+        Action drainTimeout = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        session.Completion.IsCompleted.Should().BeFalse("猶予が切れるまでは出力を読み切ろうとする");
+        drainTimeout();
+        LauncherResult result = await session.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        result.Success.Should().Be(exitCode == 0);
+        result.ExitCode.Should().Be(exitCode);
+        result.Stdout.Should().Be("out-line");
+        result.Stderr.Should().Be("err-line");
+        process.Verify(p => p.Kill(It.IsAny<bool>()), Times.Never);
+
+        var published = new List<string>();
+        await foreach (AgentExecutionEvent executionEvent in session.ReadEventsAsync())
+        {
+            if (executionEvent.Kind == AgentExecutionEventKind.Stdout)
+            {
+                published.Add(executionEvent.Text!);
+            }
+        }
+
+        string openStreams = string.Join(", ", new[] { stdoutOpen ? "stdout" : null, stderrOpen ? "stderr" : null }.OfType<string>());
+        published.Should().ContainSingle(line => line.Contains("読み取りを打ち切りました", StringComparison.Ordinal))
+            .Which.Should().EndWith($"未クローズ: {openStreams}");
+        string recordPath = Directory.GetFiles(ReviewerOutputLayout.GetRoot(_tempDir), "*.log", SearchOption.AllDirectories).Should().ContainSingle().Subject;
+        (await File.ReadAllTextAsync(recordPath)).Should().Contain("読み取りを打ち切りました").And.Contain($"ExitCode={exitCode}");
+    }
+
+    [Theory]
+    [InlineData("claude", "Reviewer")]
+    [InlineData("codex", "Reviewer")]
+    [InlineData("claude", "Reviewed")]
+    [InlineData("codex", "Reviewed")]
+    public async Task LaunchAsync_ShouldNotFailOrResumeWhenWatchdogFiresWhileDrainingExitedProcess(string presetId, string roleName)
+    {
+        ConfigureClientAssignedSettings(presetId);
+        _settingsService.Settings.LauncherTimeoutMs = 1800000;
+        var clock = new LauncherWatchdogTests.ManualClock();
+        Mock<IProcessInstance> process = CreateLingeringOutputProcess(0, stdoutOpen: true, stderrOpen: true);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object, timeProvider: clock);
+
+        Task<LauncherResult> pending = service.LaunchAsync(CreateReviewEvent("drain-watchdog"), Enum.Parse<LauncherRole>(roleName), CancellationToken.None);
+        Action watchdogTick = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        Action drainTimeout = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        clock.Advance(TimeSpan.FromSeconds(600));
+        watchdogTick();
+        pending.IsCompleted.Should().BeFalse();
+        drainTimeout();
+        LauncherResult result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+
+        result.Success.Should().BeTrue();
+        runner.Verify(r => r.Start(It.IsAny<ProcessStartInfo>()), Times.Once);
+        process.Verify(p => p.Kill(It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LaunchAsync_ShouldNotTimeOutWhileDrainingExitedProcess()
+    {
+        ConfigureSettings(timeoutMs: 2000);
+        var clock = new LauncherWatchdogTests.ManualClock();
+        Mock<IProcessInstance> process = CreateLingeringOutputProcess(0, stdoutOpen: true, stderrOpen: true);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object, timeProvider: clock);
+
+        Task<LauncherResult> pending = service.LaunchAsync(CreateReviewEvent("drain-launcher-timeout"), LauncherRole.Reviewer, CancellationToken.None);
+        Action drainTimeout = await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(2500);
+        pending.IsCompleted.Should().BeFalse("本体の終了後は LauncherTimeoutMs の対象外");
+        drainTimeout();
+        LauncherResult result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+
+        result.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Cancel_ShouldStopDrainingExitedProcess()
+    {
+        ConfigureSettings();
+        var clock = new LauncherWatchdogTests.ManualClock();
+        Mock<IProcessInstance> process = CreateLingeringOutputProcess(0, stdoutOpen: true, stderrOpen: true);
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.Start(It.IsAny<ProcessStartInfo>())).Returns(process.Object);
+        ReviewLauncherService service = CreateLauncher(runner.Object, timeProvider: clock);
+
+        AgentExecutionSession session = service.StartSession(CreateReviewEvent("drain-cancel"), LauncherRole.Reviewer, CancellationToken.None);
+        await clock.Timers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        service.Cancel();
+        LauncherResult result = await session.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("cancelled by user");
+    }
+
+    // 子孫プロセスが書き込み側を保持するパイプを再現する。内容を返した後は EOF を返さず、
+    // 読み取りがキャンセルされるまで待たせる.
+    private Mock<IProcessInstance> CreateLingeringOutputProcess(int exitCode, bool stdoutOpen, bool stderrOpen)
+    {
+        Mock<IProcessInstance> process = CreateMockProcess(exitCode, string.Empty, string.Empty);
+        process.SetupGet(p => p.StandardOutput).Returns(CreateReader("out-line\n", stdoutOpen));
+        process.SetupGet(p => p.StandardError).Returns(CreateReader("err-line\n", stderrOpen));
+        return process;
+
+        static StreamReader CreateReader(string content, bool keepOpen)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(content);
+            return new StreamReader(keepOpen ? new LingeringPipeStream(bytes) : new MemoryStream(bytes), Encoding.Latin1);
+        }
+    }
+
+    private sealed class LingeringPipeStream(byte[] content) : MemoryStream(content)
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            int read = await base.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            }
+
+            return read;
+        }
+    }
+
     // ---- #143: 実行イベントのストリーミング ----
 
     // イベント時刻の DI を検証するための固定時刻プロバイダー
